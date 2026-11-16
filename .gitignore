@@ -199,8 +199,10 @@ cython_debug/
 # EXCLUSIONS FOR RAW CODE ONLY REPO
 # =============================================================================
 
-# Reports directory (all generated JSON, CSV reports & evaluation outputs)
-reports/**
+# Reports directory (all generated JSON, CSV reports except test_benchmark needed by serving API & Docker)
+reports/*
+!reports/test_benchmark/
+!reports/test_benchmark/**
 
 # Office documents & texts
 *.docx
@@ -211,9 +213,19 @@ EDA.txt
 data/processed/**
 *.npz
 
-# Internal scripts, tests, scratch & specs (not pushed for now)
-tests/**
-scripts/**
+# Internal scripts, tests, scratch & specs (keep minimal serving + storage tests & MLOps registry/check scripts for CI)
+tests/*
+!tests/conftest.py
+!tests/serving/
+!tests/serving/**
+!tests/storage/
+!tests/storage/**
+scripts/*
+!scripts/data/
+!scripts/data/ingest_nasa_vintage.py
+!scripts/mlops/
+!scripts/mlops/**
+**/__pycache__/
 scratch/**
 tasks/**
 .agents/**
@@ -221,3 +233,7 @@ lightning_logs/**
 .uv_cache/**
 mlruns/**
 *.db
+*.db-wal
+*.db-shm
+*.db-journal
+data/vintage/**
