@@ -1,6 +1,7 @@
 # Ho Chi Minh City Daily Rainfall Forecasting System
 
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/release/python-3120/)
+[![Backend CI](https://github.com/BGKhanh/Precipitation-EDA/actions/workflows/ci.yml/badge.svg)](https://github.com/BGKhanh/Precipitation-EDA/actions/workflows/ci.yml)
 [![Models](https://img.shields.io/badge/models-XGBoost%20%7C%20LightGBM%20%7C%20Hurdle%20%7C%20Neural-green.svg)]()
 [![Forecast Horizon](https://img.shields.io/badge/forecast%20horizon-1--7%20days-orange.svg)]()
 [![Tests Passing](https://img.shields.io/badge/tests-passing-brightgreen.svg)](tests/)
@@ -15,7 +16,7 @@ An end-to-end machine learning application for multi-day daily rainfall forecast
 - 🎯 **High Prediction Accuracy**:
   - **82.5% accuracy** on rainy vs. dry day classification (WMO $\ge 1.0\text{ mm}$ standard).
   - **95.2% Probability of Detection (POD / Recall)** on actual rainy days.
-  - **3.73 mm** Mean Absolute Error (MAE) on 7-day continuous rainfall amounts with the champion model (`XGBoost Tweedie`).
+  - **3.72–3.73 mm** Mean Absolute Error (MAE) on 7-day continuous rainfall amounts (`LightGBM Tweedie` Test #1 at `3.7246 mm`; deployed `@serving` `XGBoost Tweedie` at `3.7333 mm`).
 - ⚡ **Fast & Lightweight Inference**: Less than **0.05 seconds** per 7-day forecast cycle, ideal for operational alerts and scheduled pipelines.
 - 🛡️ **Zero-Inflation & Extreme Weather Handling**: Specifically tuned for tropical monsoon climates where 50–60% of days have zero rainfall, while rainy days can feature sudden torrential convective downpours (>50–100 mm/day).
 - 🧩 **Modular & Extensible Architecture**: Reusable modules for automated data collection, leak-proof feature engineering, model training, and performance auditing.
@@ -28,32 +29,41 @@ The table below summarizes performance across different model architectures on t
 
 | Model Family | Representative Model | Feature Set | MAE (mm) | RMSE (mm) | Rain Detection Accuracy | Inference Latency |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
-| 🥇 **Tweedie Regressors (Best)** | `XGBoost Tweedie` | $F_3$ (Lags + Rolling + Season) | **3.73** | **8.10** | **82.5%** | **~0.04s** |
-| 🥈 **Tweedie Regressors** | `LightGBM Tweedie` | $F_3$ (Lags + Rolling + Season) | 3.75 | 8.09 | 82.3% | ~0.05s |
+| 🥇 **Tweedie Regressors (Test #1)** | `LightGBM Tweedie` (`SC-31`, Config A) | $F_3$ (Lags + Rolling + Season) | **3.72** | 8.12 | 82.3% | ~0.03s |
+| 🥈 **Tweedie Regressors (Deployed `@serving`)** | `XGBoost Tweedie` (`SC-35`) | $F_3$ (Lags + Rolling + Season) | **3.73** | **8.10** | **82.5%** | **~0.03s** |
 | 🥉 **Direct ML Regressors** | `Random Forest Direct` | $F_3$ (Lags + Rolling + Season) | 3.94 | 8.11 | 80.1% | ~0.03s |
-| **Two-Stage Hurdle (Mixture)** | `Logistic + Linear Regressor` | $F_3$ (Lags + Rolling + Season) | 3.96 | 8.01 | 81.2% | ~0.02s |
+| **Two-Stage Hurdle (Mixture)** | `Logistic + Linear Regressor` | $F_3$ (Lags + Rolling + Season) | 3.97 | 8.02 | 81.2% | ~0.02s |
 | **Deep Sequence Models** | `PatchTST (Transformer)` | Rainfall Target | 4.03 | 8.66 | 77.4% | ~1.76s |
 | **Statistical Time Series** | `AutoARIMA` | Rainfall Target | 4.33 | 8.20 | 73.1% | ~49.8s |
 | **Baseline Persistence** | `Naive (Yesterday's Rain)` | Rainfall Target | 5.14 | 10.76 | 68.2% | <0.01s |
 
-### Forecast Error by Lead Day (Champion Model: XGBoost Tweedie)
+### Forecast Error by Lead Day (Deployed `@serving`: `SC-35` XGBoost Tweedie on Test)
 
 Rainfall predictability naturally decreases with longer lead times:
 
 | Lead Day | Day 1 ($t+1$) | Day 2 ($t+2$) | Day 3 ($t+3$) | Day 4 ($t+4$) | Day 5 ($t+5$) | Day 6 ($t+6$) | Day 7 ($t+7$) |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **MAE (mm)** | **3.22** | **3.52** | **3.67** | **3.81** | **3.91** | **3.99** | **4.02** |
-| **RMSE (mm)** | 7.39 | 7.91 | 8.11 | 8.26 | 8.36 | 8.37 | 8.27 |
+| **MAE (mm)** | **3.50** | **3.77** | **3.76** | **3.78** | **3.76** | **3.80** | **3.78** |
+| **RMSE (mm)** | 7.67 | 8.12 | 8.18 | 8.18 | 8.16 | 8.18 | 8.18 |
 
 ---
 
 ## 🛠️ Data & Feature Engineering
 
-### Geographic Coordinates & Spatial Grid Resolution
-- **Canonical Coordinates**: The system defaults to Ho Chi Minh City urban center (**10.78°N, 106.70°E** - District 1).
-- **Spatial Grid Properties (NASA POWER / MERRA-2)**: NASA POWER daily meteorological reanalysis is resolved on a global grid of approximately **$0.5^\circ \text{ latitude} \times 0.625^\circ \text{ longitude}$** (~55 km × ~69 km per cell). Consequently, points across the Greater HCMC metropolitan area (including the geographic shapefile centroid in Củ Chi at 10.99306°N, 106.63775°E and the District 1 center) map into the **exact same grid cell**.
-- **Empirical Grid Invariance**: An automated 21-day verification conducted over the peak rainy season (2024-09-01 to 2024-09-21) confirmed that observations between District 1 and Củ Chi match bit-for-bit with **0.000000 mm rainfall difference** across all 21 consecutive rainy days.
-- **National Coverage**: Coordinates for all 63 Vietnam provinces/municipalities plus 2 offshore archipelagos (Hoàng Sa and Trường Sa) are codified in [`src/config/constants.py`](file:///d:/DS108_project/src/config/constants.py).
+### Geographic Coordinates, Split Boundaries & Location Lock
+- **Canonical Location Lock (`HCMC`)**: The serving API (`/predict`) is **strictly locked to Ho Chi Minh City** (`location_id = "HCMC"`, urban center **10.7769°N, 106.7009°E** - District 1). Incoming requests specifying any other location or province (including `"Hoàng Sa"`, `"Trường Sa"`, `"Hà Nội"`, or empty strings) are rejected with **HTTP 422**. While `src/config/constants.py` retains reference coordinates for 63 Vietnam provinces and 2 archipelagos, multi-province inference is disabled.
+- **Spatial Grid Properties (NASA POWER / MERRA-2 & CERES)**: NASA POWER daily meteorological reanalysis is resolved on **$0.5^\circ \text{ latitude} \times 0.625^\circ \text{ longitude}$** (`MERRA-2` / `GEOS-IT`) and radiation fluxes on **$1.0^\circ \times 1.0^\circ$** (`CERES SYN1deg` / `FLASHFlux`). District 1 and Củ Chi (`10.99306°N, 106.63775°E`) fall inside the same grid cell (**0.000000 mm difference** across a 21-day rainy-season check).
+- **Canonical Time Splits (Year 2000 Excluded)**:
+  - **Dev Train**: `2001-01-01` to `2018-04-30` (**6,329 days**, **6,293** valid origins; year 2000 excluded due to 1,830 structural missing cells on 5 radiation/UV variables).
+  - **Validation**: `2018-05-01` to `2020-04-30` (**731 days**, **724** valid origins).
+  - **Out-of-sample Test**: `2020-05-01` to `2026-04-30` (**2,191 days**, **2,184** valid origins).
+- **Frozen Tweedie Model Specifications (`tweedie_variance_power = 1.5`)**:
+  - `@serving` **`SC-35`**: `XGBRegressor` (`objective="reg:tweedie"`, `tweedie_variance_power=1.5`, `max_depth=5`, `n_estimators=100`, `learning_rate=0.03`).
+  - `@shadow_val_champ` **`SC-30`**: `LGBMRegressor` (`objective="tweedie"`, `tweedie_variance_power=1.5`, Config A `max_depth=-1`, `num_leaves=31`, `n_estimators=100`, `learning_rate=0.03`).
+  - `@shadow_test_contender` **`SC-31`**: `LGBMRegressor` (`objective="tweedie"`, `tweedie_variance_power=1.5`, Config A `max_depth=-1`, `num_leaves=31`, `n_estimators=100`, `learning_rate=0.03`).
+- **Evaluation Scope & Live NRT Disclaimer**:
+  - *"Kết quả đánh giá được tính trên chuỗi dữ liệu NASA POWER đã hoàn chỉnh (MERRA-2 + CERES SYN1deg); dự báo thời gian thực (live NRT) chưa được hỗ trợ trong phiên bản này."*
+  - (Evaluation metrics are computed strictly on finalized historical NASA POWER MERRA-2 + CERES SYN1deg observations; autonomous live NRT forecasting is not supported in this release.)
 
 ### Dynamic Operational Lag & Forecast Horizons
 - **Data Latency**: NASA POWER daily meteorological updates typically feature a **3 to 4-day publication latency** from real-time.
@@ -69,6 +79,8 @@ Rainfall predictability naturally decreases with longer lead times:
 - **Calendar & Monsoon Signals ($F_3$, 70 features)**: Solar harmonic components ($\sin/\cos$ day of year), wet season indicators (May–November), and monsoon transition phases.
 
 All feature transformations strictly use past observations ($t \le 0$) to ensure zero lookahead in operational forecasts.
+
+- **Operational Limitations & Container Scope**: See [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md) for the ~77-day CERES solar radiation publication lag, strict fail-fast input validation rules (no silent mean imputation on missing CERES/meteorological/target fields), and Docker serving container runtime scope (`StandaloneRainfallPredictor` only; `pyfunc.py` and `protocols.py` are dev/CI only).
 
 ---
 
@@ -127,79 +139,95 @@ for day, rainfall in enumerate(seven_day_forecast[0], start=1):
 
 ## 🏗️ Project Structure
 
-```
+```text
 DS108_project/
 ├── data/
-│   ├── raw/                           # Raw NASA POWER daily meteorological exports
-│   └── processed/results/             # Evaluation outputs and forecast predictions
+│   ├── raw/                           # Raw NASA POWER daily meteorological exports (.csv)
+│   └── processed/                     # Quality-audited & canonical split datasets (.parquet)
+├── artifacts/
+│   ├── models/                        # Serialized weights (*.joblib, *.json) & metadata.json
+│   │   ├── feature_builder_f2.joblib
+│   │   ├── feature_builder_f3.joblib
+│   │   ├── sc35_xgboost_tweedie_f3.joblib # Serving champion
+│   │   ├── sc30_lightgbm_tweedie_f2.joblib # Shadow validation champion
+│   │   ├── sc31_lightgbm_tweedie_f3.joblib # Shadow test contender
+│   │   └── metadata.json              # Frozen hyperparameters & cryptographic SHA-256 hashes
+│   └── feature_names.json             # Audited canonical feature lists (F0..F3, 70 features)
 ├── src/
-│   ├── config/
-│   │   └── constants.py               # Coordinates, split dates, feature lists
-│   ├── data/
-│   │   ├── crawler.py                 # NASA POWER API client for fetching daily data
-│   │   ├── loader.py                  # Data loading and time series splitting
-│   │   └── dataquality.py             # Data integrity, continuity, and quality checks
-│   ├── featurengineering/
-│   │   ├── pipeline.py                # F0 to F3 feature transformation pipelines
-│   │   └── utils.py                   # Causal lag and rolling window operators
-│   ├── models/
-│   │   ├── tree_models.py             # XGBoost, LightGBM, Random Forest forecasters
-│   │   ├── hurdle.py                  # Two-Stage Hurdle models (Classification + Amount)
-│   │   ├── linear_models.py           # Ridge, Lasso, ElasticNet forecasters
-│   │   └── nixtla/                    # Wrappers for StatsForecast and NeuralForecast
-│   ├── evaluation/
-│   │   ├── metrics.py                 # Core evaluation metrics (MAE, RMSE, MSE, MASE)
-│   │   ├── ranking.py                 # Multi-model ranking and comparison utilities
-│   │   └── diagnostics.py             # Rain event classification & confusion metrics
-│   └── analysis/                      # Model diagnostics and comparison tools
-│       ├── loaders.py                 # Multi-partition forecast results loader
-│       ├── rankings.py                # Leaderboard builders
-│       ├── horizon.py                 # Multi-step error degradation analysis
-│       ├── extremes.py                # Heavy rainfall (>50mm, >100mm) analysis
-│       └── classification.py          # Rain/no-rain detection metrics
-├── notebooks/
-│   ├── modeling/                      # Step-by-step model training and evaluation
-│   │   ├── 03.0_phase1_statistical_baselines.ipynb
-│   │   ├── 03.1_phase2_ml_direct_forecasting.ipynb
-│   │   ├── 03.2_phase3_ml_tweedie_forecasting.ipynb
-│   │   ├── 03.3_phase4_neural_forecasting.ipynb
-│   │   ├── 03.4_phase5_hurdle_forecasting.ipynb
-│   │   └── 03.5_stage3_test_evaluation.ipynb
-│   └── result_analysis/               # Comparative performance dashboards
-│       ├── 01_benchmark_leaderboard.ipynb
-│       ├── 02_horizon_analysis.ipynb
-│       ├── 03_extreme_events.ipynb
-│       └── 05_computational_efficiency.ipynb
-├── reports/
-│   └── test_benchmark/                # Full model leaderboards & summary reports
-│       ├── unified_72_scenarios_test_leaderboard.csv
-│       ├── unified_72_test_horizon_breakdown.csv
-│       └── executive_test_summary.md
-└── tests/                             # Automated test suite
-    ├── analysis/                      # Tests for analysis and metrics modules
-    ├── test_point_forecast_metrics.py # Point forecast metric tests
-    └── test_hurdle_baseline.py        # Hurdle model pipeline tests
-```
+│   ├── api/                           # FastAPI Serving Application (main.py)
+│   ├── inference/                     # Standalone Serving Predictor & Pyfunc Wrapper
+│   │   ├── predictor.py               # StandaloneRainfallPredictor (dynamic lag & horizons)
+│   │   └── pyfunc.py                  # MLflow custom pyfunc wrapper (DagsHub Cloud ready)
+│   ├── models/                        # Model definitions & champion factories
+│   │   ├── tweedie.py                 # XGBoost & LightGBM Tweedie regressors
+│   │   ├── direct.py                  # Multi-output direct regressors (RF, XGB, LGBM)
+│   │   ├── hurdle.py                  # Two-Stage Hurdle forecasters
+│   │   └── nixtla/                    # Adapters for StatsForecast & NeuralForecast
+│   ├── feature_engineering/           # Feature engineering pipelines (FeatureBuilder F0..F3)
+│   ├── data/                          # Data crawler, validation audits, canonical loader
+│   ├── evaluation/                    # Metrics (MAE, RMSE, MASE) & benchmark protocols
+│   ├── analysis/                      # Statistical diagnostics, ranking, Pareto frontiers
+│   ├── config/                        # Constants, Vietnam coordinates & DagsHub MLOps config (mlops.py)
+│   └── utils/                         # Reproducibility seeds and helpers
+├── scripts/
+│   ├── benchmarks/                    # 72 canonical scenario runners (Phase 1-5 & Test Stage 3)
+│   │   ├── run_phase1_statistical.py
+│   │   ├── run_phase2_ml_direct.py
+│   │   ├── run_phase3_ml_tweedie.py
+│   │   ├── run_phase4_neural.py
+│   │   ├── run_phase5_ml_hurdle.py
+│   │   └── run_stage3_test_benchmark.py
+│   ├── experiments/                   # Statistical tests & ablation experiments
+│   │   ├── compare_rainy_season_grid.py # 21-day rainy season grid equivalence test
+│   │   ├── compare_sc30_configs.py     # Config A vs Config B audit
+│   │   └── run_radiation_ablation.py   # Radiation latency impact study
+│   ├── mlops/                         # Cloud MLflow sync, packaging & governance tools
+│   │   ├── backfill_mlflow_tracking.py # Backfill 76 runs & register models to DagsHub Cloud
+│   │   ├── verify_mlflow_registry.py   # End-to-end verification from DagsHub Model Registry
+│   │   ├── promote_champion_model.py   # Cloud governance CLI (--status / --promote-scenario)
+│   │   └── package_models.py           # Joblib export & SHA-256 generation
+│   └── tools/                         # Automated notebook sync & reporting tools
+├── notebooks/                         # 30+ reproducible research and diagnostic notebooks
+│   ├── data_quality/                  # 00.1..00.4 data audit & continuity notebooks
+│   ├── eda/                           # 01.1..01.7 exploratory data analysis notebooks
+│   ├── feature_engineering/           # 02 feature engineering pipeline
+│   ├── modeling/                      # 03.0..03.7 benchmark modeling notebooks
+│   └── result_analysis/               # 00..09 comparative analysis & Pareto dashboards
+├── reports/                           # Official leaderboard CSVs, metrics, and markdown briefs
+├── tests/                             # Layered automated test suite (pytest)
+│   ├── unit/                          # Isolated unit tests for features & metrics
+│   ├── contracts/                     # Formal contract & leakage prevention tests
+│   ├── integration/                   # Parity tests asserting bit-for-bit benchmark match
+│   ├── serving/                       # FastAPI endpoints & standalone inference tests
+│   └── analysis/                      # Diagnostic and ranking tests
+├── Dockerfile                         # Production serving container definition
+├── docker-compose.yml                 # Orchestration definition for serving engine
+├── requirements-serving.txt           # Minimal runtime dependencies for pure inference
+├── requirements-dev.txt               # Development, MLOps, and testing dependencies
+└── README.md
 
 ---
 
 ## 🏃 Reproducing Model Training & Reports
 
-To run the complete training and evaluation pipeline from scratch:
+To run the complete benchmark training and evaluation pipeline:
 
 ```bash
 # 1. Run model family pipelines
-python scripts/run_phase1_statistical.py   # Statistical baselines
-python scripts/run_phase2_ml_direct.py      # Direct ML regressors
-python scripts/run_phase3_ml_tweedie.py    # Tweedie gradient boosters
-python scripts/run_phase4_neural.py        # Deep learning models (GPU)
-python scripts/run_phase5_hurdle.py        # Two-Stage Hurdle forecasters
+python scripts/benchmarks/run_phase1_statistical.py   # Statistical baselines
+python scripts/benchmarks/run_phase2_ml_direct.py     # Direct ML regressors
+python scripts/benchmarks/run_phase3_ml_tweedie.py    # Tweedie gradient boosters
+python scripts/benchmarks/run_phase4_neural.py        # Deep learning models
+python scripts/benchmarks/run_phase5_ml_hurdle.py     # Two-Stage Hurdle forecasters
 
-# 2. Run multi-horizon test evaluation
-python scripts/run_stage3_test_evaluation.py
+# 2. Run multi-horizon test evaluation across all 72 scenarios
+python scripts/benchmarks/run_stage3_test_benchmark.py
 
-# 3. Generate consolidated leaderboard and summary tables
-python scripts/build_test_benchmark_leaderboard.py
+# 3. MLOps: Sync 76 benchmark runs & register models to DagsHub Hosted MLflow Server
+# (Ensure .env is configured from .env.example with your DagsHub access token)
+python scripts/mlops/backfill_mlflow_tracking.py
+python scripts/mlops/verify_mlflow_registry.py
+python scripts/mlops/promote_champion_model.py --status
 ```
 
 All summary tables and performance metrics will be exported to `reports/test_benchmark/`.
