@@ -35,7 +35,6 @@ from .splits import (
     derive_common_origins_and_finalize_lineage,
     build_all_feature_levels,
 )
-from .stationarity_test import StationarityTester
 from .validation import (
     assert_no_target_leakage,
     validate_target_excluded,
@@ -94,3 +93,10 @@ __all__ = [
     'validate_split_provenance',
     'diagnose_target_correlation',
 ]
+
+
+def __getattr__(name: str):
+    if name == 'StationarityTester':
+        from .stationarity_test import StationarityTester
+        return StationarityTester
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

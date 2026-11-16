@@ -8,19 +8,19 @@ Serves operational multi-horizon rainfall forecasts using:
 
 Features:
 - Dynamic horizon tagging (past_unverified, today, future_forecast) based on data_as_of vs run_date.
-- National multi-province support with canonical coordinates and island territories.
+- Strict location lock to Ho Chi Minh City (`location_id = "HCMC"`, 10.7769N, 106.7009E).
+- Strict HTTP status separation (422 for non-HCMC locations, 400 for invalid user history payload, 503 for server DB data failures).
 """
 
 import os
 import sys
-import json
 from pathlib import Path
-from datetime import datetime, date, timedelta
+from datetime import timedelta
 from typing import List, Dict, Any, Optional
 
 import pandas as pd
 import numpy as np
-from fastapi import FastAPI, HTTPException, Query, status
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field, ConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -28,17 +28,69 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.inference.predictor import StandaloneRainfallPredictor
-from src.config.constants import Config
+from src.inference.validation import ServingValidationError
+from src.data.provider import WeatherHistoryProvider
+from src.data.vintage_store import (
+    HCMC_ALIASES,
+    HCMC_DISPLAY_NAME,
+    HCMC_LATITUDE,
+    HCMC_LOCATION_ID,
+    HCMC_LONGITUDE,
+)
 
 from contextlib import asynccontextmanager
 
+CANONICAL_LOCATION_ID = HCMC_LOCATION_ID
+CANONICAL_PROVINCE_NAME = HCMC_DISPLAY_NAME
+CANONICAL_LATITUDE = HCMC_LATITUDE
+CANONICAL_LONGITUDE = HCMC_LONGITUDE
+ALLOWED_HCMC_ALIASES = frozenset(HCMC_ALIASES)
+
+
+def _normalize_location_token(value: str) -> str:
+    return " ".join(value.strip().upper().split())
+
+
+def resolve_canonical_hcmc_location(
+    location_id: Optional[str],
+    province: Optional[str],
+) -> str:
+    """Validate and normalize incoming location/province to canonical 'HCMC', else raise HTTP 422."""
+    if location_id is not None:
+        if _normalize_location_token(location_id) not in ALLOWED_HCMC_ALIASES:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"[UNSUPPORTED_LOCATION] location_id={location_id!r} is not supported. "
+                    f"This endpoint is locked to Ho Chi Minh City ({CANONICAL_LOCATION_ID})."
+                ),
+            )
+    if province is not None:
+        if _normalize_location_token(province) not in ALLOWED_HCMC_ALIASES:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"[UNSUPPORTED_LOCATION] province={province!r} is not supported. "
+                    f"This endpoint is locked to Ho Chi Minh City ({CANONICAL_LOCATION_ID})."
+                ),
+            )
+    return CANONICAL_LOCATION_ID
+
+
 predictor: Optional[StandaloneRainfallPredictor] = None
+history_provider: Optional[WeatherHistoryProvider] = None
+
 
 def load_serving_models():
-    global predictor
+    global predictor, history_provider
     artifact_path = PROJECT_ROOT / "artifacts" / "models"
-    predictor = StandaloneRainfallPredictor(artifact_dir=artifact_path)
-    print("Serving models and feature builders loaded successfully into API memory.")
+    model_source = os.environ.get("SERVING_MODEL_SOURCE", "local")
+    predictor = StandaloneRainfallPredictor(artifact_dir=artifact_path, mode=model_source)
+    history_provider = WeatherHistoryProvider()
+    print(
+        f"Serving models ({predictor.mode}) and history provider ({history_provider.backend}) "
+        "loaded successfully into API memory."
+    )
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -48,7 +100,7 @@ async def lifespan(app: FastAPI):
 # Initialize FastAPI App
 app = FastAPI(
     title="HCMC Daily Rainfall Forecasting Serving Engine",
-    description="Operational API for 1-7 days daily rainfall forecasting in HCMC & Vietnam with dynamic horizon calculation and shadow model governance.",
+    description="Operational API for 1-7 days daily rainfall forecasting locked to HCMC with dynamic horizon calculation and shadow model governance.",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -75,9 +127,13 @@ class PredictionRequest(BaseModel):
         None,
         description="Operational run date (YYYY-MM-DD). Defaults to current system date."
     )
+    location_id: Optional[str] = Field(
+        None,
+        description="Canonical location identifier (locked strictly to HCMC / Ho Chi Minh City aliases)."
+    )
     province: Optional[str] = Field(
-        "TP. Hồ Chí Minh",
-        description="Province or territory name from constants.py (e.g. TP. Hồ Chí Minh, Hoàng Sa, Trường Sa)"
+        CANONICAL_PROVINCE_NAME,
+        description="Backward-compatible location alias (locked strictly to TP. Hồ Chí Minh / HCMC aliases)."
     )
 
 @app.get("/health", tags=["Monitoring"])
@@ -88,6 +144,8 @@ def get_health():
         "service": "HCMC Rainfall Forecasting Engine",
         "version": "1.0.0",
         "predictor_loaded": predictor is not None,
+        "model_source": predictor.mode if predictor is not None else os.environ.get("SERVING_MODEL_SOURCE", "local"),
+        "weather_backend": history_provider.backend if history_provider is not None else os.environ.get("WEATHER_DB_BACKEND", "local"),
         "serving_model": {
             "scenario_id": "SC-35",
             "model_name": "xgboost_tweedie_F3",
@@ -120,52 +178,98 @@ def get_model_metadata():
         raise HTTPException(status_code=503, detail="Predictor not initialized")
     return predictor.metadata
 
-@app.post("/predict", tags=["Forecasting"])
+@app.post(
+    "/predict",
+    tags=["Forecasting"],
+    responses={
+        400: {
+            "description": (
+                "Bad Request — Client-supplied `request.history` payload violates business or physical rules "
+                "(<35 continuous days, calendar date gap, NaN/-999.0 sentinel, physical bound violation, or >7d lag)."
+            )
+        },
+        422: {
+            "description": (
+                "Unprocessable Entity — Invalid JSON/Pydantic schema types OR unsupported `location_id`/`province` "
+                "outside Ho Chi Minh City (endpoint is strictly locked to canonical HCMC aliases)."
+            )
+        },
+        503: {
+            "description": (
+                "Service Unavailable — Predictor not initialized, OR server-side DB/history provider failed "
+                "or returned incomplete/NaN meteorological records when `request.history` is omitted."
+            )
+        },
+    },
+)
 def predict_rainfall(request: PredictionRequest):
     """
-    Generate 7-day multi-horizon rainfall forecasts.
-    Evaluates Serving Model (SC-35) and records Shadow Models (SC-30, SC-31).
-    Dynamically partitions horizons into hindcast_and_current and forecast_future based on lag.
+    Generate 7-day multi-horizon rainfall forecasts for Ho Chi Minh City (`HCMC`).
+
+    Error status contract:
+    - `422 Unprocessable Entity`: Invalid Pydantic/JSON schema types or `location_id`/`province` outside HCMC.
+    - `400 Bad Request`: Client-supplied `request.history` fails continuity/missingness/physical-bound checks
+      (or caller-specified `run_date` exceeds 7-day lag limit).
+    - `503 Service Unavailable`: Server-side DB/history provider failure or corrupted/incomplete server DB records
+      when `request.history` is omitted (`None`).
     """
     if predictor is None:
         raise HTTPException(status_code=503, detail="Predictor not initialized")
 
-    if request.history is not None and len(request.history) > 0:
+    # Strict HCMC location validation -> HTTP 422 for any other province/location
+    canonical_loc_id = resolve_canonical_hcmc_location(request.location_id, request.province)
+    prov = CANONICAL_PROVINCE_NAME
+    lat, lon = CANONICAL_LATITUDE, CANONICAL_LONGITUDE
+
+    history_backend = "request_payload"
+    effective_run_date = request.run_date
+    if request.history is not None:
         df_history = pd.DataFrame(request.history)
     else:
-        # Load canonical data as fallback history
-        from src.evaluation.protocols import get_global_read_guard
-        from src.data.loader import DataLoader
-        g = get_global_read_guard()
-        was_active = g.is_active
-        g.deactivate()
         try:
-            loader = DataLoader()
-            df_canonical = loader.load_data()
-            df_history = df_canonical.iloc[-35:].copy()
-        finally:
-            if was_active:
-                g.activate()
-
-    # Province validation & metadata
-    prov = request.province or "TP. Hồ Chí Minh"
-    lat, lon = Config.province_coordinates.get(
-        prov, Config.province_coordinates["TP. Hồ Chí Minh"]
-    )
+            active_provider = history_provider or WeatherHistoryProvider()
+            history_res = active_provider.fetch_recent_history(
+                province=prov,
+                days=35,
+                run_date=request.run_date,
+            )
+            df_history = history_res.history_df
+            history_backend = history_res.backend
+            if effective_run_date is None and history_res.is_static_sample:
+                effective_run_date = (history_res.data_as_of + timedelta(days=3)).strftime("%Y-%m-%d")
+        except Exception as e:
+            raise HTTPException(
+                status_code=503,
+                detail=f"[SERVER_HISTORY_UNAVAILABLE] Server history provider failed: {e}",
+            ) from e
 
     try:
         prediction_result = predictor.predict(
             raw_history_df=df_history,
-            run_date=request.run_date,
+            run_date=effective_run_date,
         )
+    except ServingValidationError as e:
+        if history_backend != "request_payload":
+            # Missing/NaN/gapped server DB data -> HTTP 503 Service Unavailable.
+            # Keep HTTP 400 when caller explicitly supplied an out-of-range future run_date.
+            if e.code == "STALE_RADIATION_OR_LAG" and request.run_date is not None:
+                raise HTTPException(status_code=400, detail=str(e)) from e
+            raise HTTPException(
+                status_code=503,
+                detail=f"[SERVER_DB_DATA_ERROR] Server observation store failed validation: {e}",
+            ) from e
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        status_code = 503 if history_backend != "request_payload" else 400
+        raise HTTPException(status_code=status_code, detail=str(e)) from e
 
+    prediction_result["history_backend"] = history_backend
     prediction_result["location"] = {
+        "location_id": canonical_loc_id,
         "province": prov,
         "latitude": lat,
         "longitude": lon,
-        "grid_resolution_note": "MERRA-2 0.5 deg x 0.625 deg spatial grid"
+        "grid_resolution_note": "MERRA-2 / GEOS-IT 0.5 deg x 0.625 deg; CERES SYN1deg / FLASHFlux 1.0 deg x 1.0 deg",
     }
 
     return prediction_result

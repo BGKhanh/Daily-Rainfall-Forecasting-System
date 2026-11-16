@@ -1,23 +1,31 @@
 # Dockerfile for DS108 Rainfall Forecasting Serving Engine
 FROM python:3.12-slim
 
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
 WORKDIR /app
 
-# Install system dependencies
+# Install minimal runtime system dependencies (OpenMP for LightGBM/XGBoost and curl for healthcheck)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
     libgomp1 \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install serving dependencies
+# Install pinned pure-serving Python dependencies
 COPY requirements-serving.txt .
 RUN pip install --no-cache-dir -r requirements-serving.txt
 
-# Copy source code and model artifacts
-COPY src/ /app/src/
-COPY artifacts/models/ /app/artifacts/models/
-COPY reports/test_benchmark/ /app/reports/test_benchmark/
+# Create non-root runtime user
+RUN groupadd --gid 10001 appuser && \
+    useradd --uid 10001 --gid 10001 --create-home --shell /usr/sbin/nologin appuser
+
+# Copy minimal runtime source code, model artifacts, and test benchmark leaderboard
+COPY --chown=appuser:appuser src/ /app/src/
+COPY --chown=appuser:appuser artifacts/models/ /app/artifacts/models/
+COPY --chown=appuser:appuser reports/test_benchmark/ /app/reports/test_benchmark/
+
+USER appuser
 
 # Expose port
 EXPOSE 8000

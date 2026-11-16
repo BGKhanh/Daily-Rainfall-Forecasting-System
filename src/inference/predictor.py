@@ -16,20 +16,43 @@ from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Dict, Any, Union, Optional
 
+from src.inference.validation import validate_serving_input
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+SUPPORTED_MODEL_SOURCES = ("local", "registry")
+
 
 class StandaloneRainfallPredictor:
-    def __init__(self, artifact_dir: Optional[Union[str, Path]] = None):
+    def __init__(
+        self,
+        artifact_dir: Optional[Union[str, Path]] = None,
+        mode: Optional[str] = None,
+    ):
         if artifact_dir is None:
             artifact_dir = PROJECT_ROOT / "artifacts" / "models"
         self.artifact_dir = Path(artifact_dir)
+        self.mode = (mode or os.environ.get("SERVING_MODEL_SOURCE", "local")).strip().lower()
+        if self.mode not in SUPPORTED_MODEL_SOURCES:
+            raise ValueError(
+                f"Unsupported serving mode '{self.mode}'. Expected one of {SUPPORTED_MODEL_SOURCES}."
+            )
 
-        # Load metadata
+        # Load metadata (optional if booting purely from registry without local export dir)
         meta_path = self.artifact_dir / "metadata.json"
-        with open(meta_path, "r", encoding="utf-8") as f:
-            self.metadata = json.load(f)
+        if meta_path.exists():
+            with open(meta_path, "r", encoding="utf-8") as f:
+                self.metadata = json.load(f)
+        else:
+            self.metadata = {"model_source": self.mode}
 
-        # Load models & feature builders
+        self._registry_pyfuncs: Dict[str, Any] = {}
+        if self.mode == "local":
+            self._load_local_artifacts()
+        else:
+            self._load_from_registry()
+
+    def _load_local_artifacts(self) -> None:
+        """Load serialized models and FeatureBuilders from local artifacts directory."""
         self.model_serving = joblib.load(self.artifact_dir / "sc35_xgboost_tweedie_f3.joblib")
         self.fb_f3 = joblib.load(self.artifact_dir / "feature_builder_f3.joblib")
 
@@ -38,53 +61,108 @@ class StandaloneRainfallPredictor:
 
         self.model_shadow_contender = joblib.load(self.artifact_dir / "sc31_lightgbm_tweedie_f3.joblib")
 
+    def _load_from_registry(self) -> None:
+        """Load models and FeatureBuilders directly from DagsHub MLflow Model Registry."""
+        import mlflow.pyfunc
+        from src.config.mlops import (
+            DEFAULT_REGISTERED_MODEL_NAME,
+            init_dagshub_mlflow,
+            retry_with_backoff,
+        )
+
+        init_dagshub_mlflow()
+
+        alias_map = {
+            "serving": "serving",
+            "shadow_val_champ": "shadow_val_champ",
+            "shadow_test_contender": "shadow_test_contender",
+        }
+        loaded_pyfuncs: Dict[str, Any] = {}
+        for key, alias in alias_map.items():
+            uri = f"models:/{DEFAULT_REGISTERED_MODEL_NAME}@{alias}"
+            loaded = retry_with_backoff(
+                lambda u=uri: mlflow.pyfunc.load_model(u),
+                operation_name=f"load_model({uri})",
+            )
+            loaded_pyfuncs[key] = loaded
+
+        self._registry_pyfuncs = loaded_pyfuncs
+        unwrapped_serving = (
+            loaded_pyfuncs["serving"].unwrap_python_model()
+            if hasattr(loaded_pyfuncs["serving"], "unwrap_python_model")
+            else None
+        )
+        unwrapped_val = (
+            loaded_pyfuncs["shadow_val_champ"].unwrap_python_model()
+            if hasattr(loaded_pyfuncs["shadow_val_champ"], "unwrap_python_model")
+            else None
+        )
+        unwrapped_contender = (
+            loaded_pyfuncs["shadow_test_contender"].unwrap_python_model()
+            if hasattr(loaded_pyfuncs["shadow_test_contender"], "unwrap_python_model")
+            else None
+        )
+
+        if (
+            unwrapped_serving is not None
+            and unwrapped_val is not None
+            and unwrapped_contender is not None
+            and getattr(unwrapped_serving, "model", None) is not None
+            and getattr(unwrapped_serving, "feature_builder", None) is not None
+        ):
+            self.model_serving = unwrapped_serving.model
+            self.fb_f3 = unwrapped_serving.feature_builder
+            self.model_shadow_val = unwrapped_val.model
+            self.fb_f2 = unwrapped_val.feature_builder
+            self.model_shadow_contender = unwrapped_contender.model
+        else:
+            self.model_serving = loaded_pyfuncs["serving"]
+            self.model_shadow_val = loaded_pyfuncs["shadow_val_champ"]
+            self.model_shadow_contender = loaded_pyfuncs["shadow_test_contender"]
+            self.fb_f3 = joblib.load(self.artifact_dir / "feature_builder_f3.joblib")
+            self.fb_f2 = joblib.load(self.artifact_dir / "feature_builder_f2.joblib")
+
     def predict(
         self,
         raw_history_df: pd.DataFrame,
         run_date: Optional[Union[str, date, datetime]] = None,
         date_col: str = "Ngày",
         target_col: str = "Lượng mưa",
+        enforce_lag_limit: bool = True,
     ) -> Dict[str, Any]:
         """
         Execute prediction from raw historical observations.
-        
+
         Args:
             raw_history_df: DataFrame containing at least 30 continuous daily records.
             run_date: Date when prediction is issued (defaults to current system date).
             date_col: Name of the timestamp column.
             target_col: Name of rainfall target column.
-            
+            enforce_lag_limit: If True, reject histories older than 7 days before run_date.
+
         Returns:
             Structured JSON-ready dictionary conforming to Phase C API contract.
         """
-        if len(raw_history_df) < 30:
-            raise ValueError(
-                f"History DataFrame must contain at least 30 continuous days (got {len(raw_history_df)} rows). "
-                f"Warmup lookback requires 29 days + 1 origin day."
-            )
-
-        df = raw_history_df.copy()
-        if not pd.api.types.is_datetime64_any_dtype(df[date_col]):
-            df[date_col] = pd.to_datetime(df[date_col])
-        df = df.sort_values(by=date_col).reset_index(drop=True)
-
-        # Identify data_as_of (origin date t)
-        origin_row = df.iloc[-1]
-        data_as_of = origin_row[date_col].date() if hasattr(origin_row[date_col], "date") else origin_row[date_col]
-
-        # Determine run_date
         if run_date is None:
-            run_d = datetime.now().date()
-        elif isinstance(run_date, str):
-            run_d = datetime.strptime(run_date, "%Y-%m-%d").date()
-        elif isinstance(run_date, datetime):
-            run_d = run_date.date()
+            run_date_str: Optional[str] = None
+        elif isinstance(run_date, (datetime, date)):
+            run_date_str = run_date.strftime("%Y-%m-%d")
         else:
-            run_d = run_date
+            run_date_str = str(run_date)
 
-        # Compute dynamic lag
-        lag_days = (run_d - data_as_of).days
-        effective_future_days = max(0, 7 - max(0, lag_days))
+        ctx = validate_serving_input(
+            raw_history_df=raw_history_df,
+            run_date=run_date_str,
+            date_col=date_col,
+            target_col=target_col,
+            feature_builder=self.fb_f3,
+            enforce_lag_limit=enforce_lag_limit,
+        )
+        df = ctx.df
+        data_as_of = ctx.data_as_of.date()
+        run_d = ctx.effective_run_date.date()
+        lag_days = ctx.lag_days
+        effective_future_days = ctx.effective_future_days
 
         # 1. Feature Extraction via build_single_step
         feat_df3 = self.fb_f3.build_single_step(df)
@@ -142,6 +220,7 @@ class StandaloneRainfallPredictor:
 
         return {
             "run_timestamp": datetime.now().isoformat() + "Z",
+            "model_source": self.mode,
             "run_date": run_d.strftime("%Y-%m-%d"),
             "data_as_of": data_as_of.strftime("%Y-%m-%d"),
             "lag_days": lag_days,
