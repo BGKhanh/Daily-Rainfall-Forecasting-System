@@ -1,0 +1,99 @@
+{
+  "benchmark_partition": "Final Test (2,184 origins, H=7, 15,288 points)",
+  "protocol_version": "v1.0.21",
+  "timestamp_utc": "2026-11-15T17:58:37.681025+00:00",
+  "git_commit": "669354537649ee73a0197be71625af1abd0d2f79",
+  "environment": {
+    "os": "Windows-11-10.0.26200-SP0",
+    "python_version": "3.12.14",
+    "processor": "Intel64 Family 6 Model 154 Stepping 3, GenuineIntel"
+  },
+  "artifacts_sha256": {
+    "statistical_test_results.csv": {
+      "sha256": "abbfc3adb559f7991f86be404ab2165306437cd0d60f18ca7e71237231969e60",
+      "size_bytes": 1763,
+      "modified_utc": "2026-11-09T08:38:14.153186+00:00"
+    },
+    "statistical_test_horizon_breakdown.csv": {
+      "sha256": "c27ad327513c7cd2dee18424933fed6d9e86da9ee9294d426921b25fc3f77c8d",
+      "size_bytes": 6750,
+      "modified_utc": "2026-11-09T08:38:14.156191+00:00"
+    },
+    "statistical_test_forecasts.npz": {
+      "sha256": "6dc14ff53a082eb7841e59d07adb51604f7b3201523e0b1bc9dfeed69c28af8a",
+      "size_bytes": 485813,
+      "modified_utc": "2026-11-09T08:38:14.177253+00:00"
+    },
+    "ml_direct_test_results.csv": {
+      "sha256": "3c0cc79b665195b0d607428814a7987dca1fa5de307d0a696800bca78d58187e",
+      "size_bytes": 2599,
+      "modified_utc": "2026-11-09T08:39:08.583192+00:00"
+    },
+    "ml_direct_test_horizon_breakdown.csv": {
+      "sha256": "d73ea8f1846f7222bed81ea5916d26426ddda91ea67e69ef4c66df74be885245",
+      "size_bytes": 9956,
+      "modified_utc": "2026-11-09T08:39:08.585469+00:00"
+    },
+    "ml_direct_test_forecasts.npz": {
+      "sha256": "e02fa3149cf473bec4c9a34dca67a789ffc0d86a8e43adb349e108d67a002b4f",
+      "size_bytes": 1568005,
+      "modified_utc": "2026-11-09T08:39:08.667165+00:00"
+    },
+    "ml_tweedie_test_results.csv": {
+      "sha256": "fa27d6fc9f416e9ef924c6de06bedd7e6b61a60c2dce16715ecc5caab8b707f7",
+      "size_bytes": 1477,
+      "modified_utc": "2026-11-15T17:56:21.752391+00:00"
+    },
+    "ml_tweedie_test_horizon_breakdown.csv": {
+      "sha256": "b42f868aeb70a89091c0677ef61dc2bf5d7901498913a5fb742423240902494d",
+      "size_bytes": 5175,
+      "modified_utc": "2026-11-15T17:56:21.756956+00:00"
+    },
+    "ml_tweedie_test_forecasts.npz": {
+      "sha256": "ca588c6b1d22af6979a3c1a737710b0ef323fe88bd450ce4ecd867022d7f5416",
+      "size_bytes": 711362,
+      "modified_utc": "2026-11-15T17:56:21.819915+00:00"
+    },
+    "ml_hurdle_test_results.csv": {
+      "sha256": "26cf93cf16a251bb9bc382c3cff138aabd1650ffaabc89f5b265b6ae9005311f",
+      "size_bytes": 5572,
+      "modified_utc": "2026-11-09T08:46:34.802499+00:00"
+    },
+    "ml_hurdle_test_horizon_breakdown.csv": {
+      "sha256": "71ff0caa1a68a08b3cfaf741b2104778e2cbfea9af781e203023fd3f873d0c2d",
+      "size_bytes": 21018,
+      "modified_utc": "2026-11-09T08:46:34.806750+00:00"
+    },
+    "ml_hurdle_test_forecasts.npz": {
+      "sha256": "a15f82f1a1c0e162aafc3ca87625884604e2b4c3e2f35d5dde59a083467565f7",
+      "size_bytes": 2501972,
+      "modified_utc": "2026-11-09T08:46:35.023126+00:00"
+    },
+    "ml_hurdle_test_probabilities.npz": {
+      "sha256": "d1d1b9dfd575989841bb69bf87b791d85244734642645546030947c945739525",
+      "size_bytes": 3281218,
+      "modified_utc": "2026-11-09T08:46:35.431239+00:00"
+    },
+    "ml_hurdle_threshold_selection.json": {
+      "sha256": "0fa4f5f66ef3e679af26de683871e71415b6eb1bc1e0b61b787f74510c858ab0",
+      "size_bytes": 16816,
+      "modified_utc": "2026-11-08T18:54:38.431599+00:00"
+    },
+    "neural_test_results.csv": {
+      "sha256": "dd3af1732d97c5051f95070b26a844ea463396f47ae8656f4e86e3c124af6cfd",
+      "size_bytes": 996,
+      "modified_utc": "2026-11-09T09:28:42.469423+00:00"
+    },
+    "neural_test_horizon_breakdown.csv": {
+      "sha256": "dfa1534dcb48163289d44f9d600715b5c8f7e23f551a9607ed1a0382c3411255",
+      "size_bytes": 3307,
+      "modified_utc": "2026-11-09T09:28:42.470415+00:00"
+    },
+    "neural_test_forecasts.npz": {
+      "sha256": "4f88bb25fc85c81f3896141a9a0fb082c197f4a982c73c0f2d03f38da6f17e14",
+      "size_bytes": 323893,
+      "modified_utc": "2026-11-09T09:28:42.519508+00:00"
+    }
+  },
+  "provenance_statement": "Final Test benchmark evaluation executed under Single-Fit Policy (Decision M2) with causal expanding lookback and frozen weights fit once on Dev Train. Hurdle Strategy B strictly uses locked validation thresholds tau_M*."
+}

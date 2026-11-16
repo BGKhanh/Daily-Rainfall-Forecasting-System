@@ -1,7 +1,7 @@
 {
   "project": "Rainfall Forecasting HCMC (DS108)",
   "version": "1.0.0",
-  "date_packaged": "2026-11-11",
+  "date_packaged": "2026-11-13",
   "governance_frozen_constants": {
     "canonical_dev_train_cutoff": "2018-04-30",
     "canonical_dev_train_origins": 6293,
@@ -15,7 +15,7 @@
       "scenario_id": "SC-35",
       "model_name": "xgboost_tweedie_F3",
       "registry_alias": "serving",
-      "governance_role": "test_ranking_winner",
+      "governance_role": "test_ranking_winner_as_originally_benchmarked",
       "feature_level": "F3",
       "feature_count": 70,
       "hyperparameters": {
@@ -30,17 +30,21 @@
       },
       "artifacts": {
         "model_file": "sc35_xgboost_tweedie_f3.joblib",
-        "feature_builder_file": "feature_builder_f3.joblib"
+        "feature_builder_file": "feature_builder_f3.joblib",
+        "model": "sc35_xgboost_tweedie_f3.joblib",
+        "feature_builder": "feature_builder_f3.joblib"
       },
       "benchmark_metrics": {
         "val_MAE": 3.168312,
-        "val_RMSE": 6.643491,
-        "val_MASE": 0.85594,
+        "val_RMSE": 6.643506,
+        "val_MASE": 0.855944,
         "val_rank": 4,
         "test_MAE": 3.733345,
         "test_RMSE": 8.098204,
         "test_MASE": 1.008592,
-        "test_rank": 1
+        "test_rank": 2,
+        "parity_val_max_diff": 0.0,
+        "parity_test_max_diff": 0.0
       }
     },
     "shadow_val_champ": {
@@ -50,7 +54,7 @@
       "governance_role": "validation_selected_champion",
       "feature_level": "F2",
       "feature_count": 65,
-      "packaged_configuration": "Config A (Validation Winner)",
+      "packaged_configuration": "ConfigA",
       "hyperparameters_config_a_validation_winner": {
         "objective": "tweedie",
         "tweedie_variance_power": 1.5,
@@ -73,21 +77,28 @@
         "subsample": 0.8,
         "colsample_bytree": 0.8,
         "random_state": 42,
-        "notes": "Used in run_stage3_test_benchmark.py; replicates ml_tweedie_test_forecasts.npz bit-for-bit (test_MAE = 3.771696 mm)"
+        "notes": "Legacy Config B archive (max_depth=5); preserved in ml_tweedie_test_forecasts_configB.npz (test_MAE = 3.771696 mm)"
       },
       "artifacts": {
         "model_file": "sc30_lightgbm_tweedie_f2.joblib",
-        "feature_builder_file": "feature_builder_f2.joblib"
+        "feature_builder_file": "feature_builder_f2.joblib",
+        "model": "sc30_lightgbm_tweedie_f2.joblib",
+        "feature_builder": "feature_builder_f2.joblib"
       },
       "benchmark_metrics": {
         "val_MAE": 3.148493,
-        "val_RMSE": 6.687315,
-        "val_MASE": 0.850586,
+        "val_RMSE": 6.687314,
+        "val_MASE": 0.850589,
         "val_rank": 1,
         "test_MAE": 3.750072,
-        "test_RMSE": 8.068200,
-        "test_MASE": 1.013110,
-        "test_rank": 3
+        "test_RMSE": 8.114345,
+        "test_MASE": 1.013111,
+        "test_rank": 3,
+        "test_MAE_config_a": 3.750072,
+        "test_RMSE_config_a": 8.114345,
+        "test_MASE_config_a": 1.013111,
+        "parity_val_max_diff": 0.0,
+        "parity_test_max_diff": 0.0
       }
     },
     "shadow_test_contender": {
@@ -97,7 +108,7 @@
       "governance_role": "post_audit_test_contender",
       "feature_level": "F3",
       "feature_count": 70,
-      "packaged_configuration": "Config A (Validation Parity)",
+      "packaged_configuration": "ConfigA",
       "hyperparameters_config_a": {
         "objective": "tweedie",
         "tweedie_variance_power": 1.5,
@@ -108,21 +119,28 @@
         "subsample": 0.8,
         "colsample_bytree": 0.8,
         "random_state": 42,
-        "notes": "Replicates official ml_tweedie_validation_forecasts.npz bit-for-bit (val_MAE = 3.193921 mm, test_MAE = 3.724641 mm)"
+        "notes": "Replicates official ml_tweedie_validation_forecasts.npz and ml_tweedie_test_forecasts.npz bit-for-bit (val_MAE = 3.193921 mm, test_MAE = 3.724641 mm)"
       },
       "artifacts": {
         "model_file": "sc31_lightgbm_tweedie_f3.joblib",
-        "feature_builder_file": "feature_builder_f3.joblib"
+        "feature_builder_file": "feature_builder_f3.joblib",
+        "model": "sc31_lightgbm_tweedie_f3.joblib",
+        "feature_builder": "feature_builder_f3.joblib"
       },
       "benchmark_metrics": {
         "val_MAE": 3.193921,
-        "val_RMSE": 6.745200,
+        "val_RMSE": 6.713059,
         "val_MASE": 0.862862,
-        "val_rank": 5,
+        "val_rank": 6,
         "test_MAE": 3.724641,
-        "test_RMSE": 8.079100,
-        "test_MASE": 1.006240,
-        "test_rank": 1
+        "test_RMSE": 8.119362,
+        "test_MASE": 1.00624,
+        "test_rank": 1,
+        "test_MAE_config_a": 3.724641,
+        "test_RMSE_config_a": 8.119362,
+        "test_MASE_config_a": 1.00624,
+        "parity_val_max_diff": 0.0,
+        "parity_test_max_diff": 0.0
       }
     }
   },
@@ -131,15 +149,15 @@
     "feature_builder_f3.joblib": "6fb16663c99d8ce6dd127e4d0dd15afdee9e10d6fbdd1646767bd51127bdd07d",
     "sc30_lightgbm_tweedie_f2.joblib": "e53bee647e10bb4877683419f59d948ff9445d3e26430174e27fa5c0dab1cb8a",
     "sc31_lightgbm_tweedie_f3.joblib": "7ffafca74c8dc99f798625b5748f646182c13c65fd70469226dd8c247325aae7",
-    "sc35_xgb_h1.json": "1b1bab184cb87cc8d953ad51f9e12896baeaed134ccab68c7c9efcf2eb106b06",
-    "sc35_xgb_h2.json": "3fa6cd8cd672df4754ddaefe97f52692f949db995fa37b9712a2b650caff6524",
-    "sc35_xgb_h3.json": "5499ccf35309fea11874ec7d045c04fbd24f4a3dda40508e1faa0a9e40b7f2c9",
-    "sc35_xgb_h4.json": "2a504d86068fd9c677f4dfd4703927d3d1307f78ffa2a02d97076c7fef7b84ff",
-    "sc35_xgb_h5.json": "421d5535c5619fafdcf74ef5735d21a66b346a49c20fcab087f49092d28e066f",
-    "sc35_xgb_h6.json": "0e6be833c40d4b77ab9dc8956830cbb33a68966352bacdb820739832eaffa4aa",
-    "sc35_xgb_h7.json": "053f52e26856bd1f0f23a0e76b6fb6c82f4f31fb20b33d94eec593b1a1fc952f",
+    "sc35_xgb_h1.json": "8101cde17e06faacc831b4251cd7351ee9812d228c2228aafd8c9d365d23f9e8",
+    "sc35_xgb_h2.json": "50e6513cf77d84af95fb7cd5caa8ae63a294135927a52eeedefdd7c0f88bf169",
+    "sc35_xgb_h3.json": "dc7874c4c953cf65d2540b17ddee44e82a5321515ed68aff2ccb9c95e526d6b1",
+    "sc35_xgb_h4.json": "1c3d7025607541d894f6d02e9aab4d0c90ef2510c738e7a6cf1eef4dc2a5cbef",
+    "sc35_xgb_h5.json": "22330ef2657a2f3086831311b75bdce5d8cf14bb75c20d1f601b29fc826bb2b3",
+    "sc35_xgb_h6.json": "f68c621b6b7692d40036d771dd8d100c00c805b116c9bd0a93dff454aeb63953",
+    "sc35_xgb_h7.json": "8b2fc2763546103a48a9c695e90afe1a85b7220c4272afe806c54a10f32d6d65",
     "sc35_xgboost_tweedie_f3.joblib": "eee30d04c666dd099608cfba6c26ea3eec690bc7bfd9a6c6715983b74515653f",
-    "standalone_inference.py": "9f5b098e6d5a1465b2857b3b9921a556ab74e92df9727c05be120cef713878c5"
+    "standalone_inference.py": "0848ba6ec2302fde58b9ba8e479b404af17be927208af5ce0a3133c4132c86ec"
   },
   "timezone": "Asia/Ho_Chi_Minh (UTC+7)"
 }

@@ -59,6 +59,29 @@ from .protocols import (
     DATE_COL,
 )
 
+_LAZY_MLFLOW_TRACKER_EXPORTS = {
+    "InMemoryStepLossCallback",
+    "get_neural_trainer_kwargs",
+    "SklearnMultiOutputAdapter",
+    "HurdleModelAdapter",
+    "NixtlaWrapperAdapter",
+    "NeuralForecastAdapter",
+    "detect_model_adapter",
+    "extract_model_hyperparams",
+    "extract_feature_importance_payload",
+    "extract_hurdle_threshold_grid",
+    "resolve_run_name",
+    "MLflowTrainingTracker",
+}
+
+
+def __getattr__(name: str):
+    if name in _LAZY_MLFLOW_TRACKER_EXPORTS:
+        from . import mlflow_tracker
+
+        return getattr(mlflow_tracker, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 __all__ = [
     # Canonical Point Metrics & Diagnostics
     "mean_absolute_error",
@@ -101,4 +124,17 @@ __all__ = [
     "RAIN_COMPARISON_OPERATOR",
     "TARGET_COL",
     "DATE_COL",
+    # Deep MLflow Tracker & Ecosystem Adapters
+    "InMemoryStepLossCallback",
+    "get_neural_trainer_kwargs",
+    "SklearnMultiOutputAdapter",
+    "HurdleModelAdapter",
+    "NixtlaWrapperAdapter",
+    "NeuralForecastAdapter",
+    "detect_model_adapter",
+    "extract_model_hyperparams",
+    "extract_feature_importance_payload",
+    "extract_hurdle_threshold_grid",
+    "resolve_run_name",
+    "MLflowTrainingTracker",
 ]
