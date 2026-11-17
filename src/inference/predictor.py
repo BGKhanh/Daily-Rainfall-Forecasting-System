@@ -158,7 +158,9 @@ class StandaloneRainfallPredictor:
             feature_builder=self.fb_f3,
             enforce_lag_limit=enforce_lag_limit,
         )
-        df = ctx.df
+        from src.data.vintage_store import align_and_validate_canonical_raw_df
+
+        df = align_and_validate_canonical_raw_df(ctx.df)
         data_as_of = ctx.data_as_of.date()
         run_d = ctx.effective_run_date.date()
         lag_days = ctx.lag_days

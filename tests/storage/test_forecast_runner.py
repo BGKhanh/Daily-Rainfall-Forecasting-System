@@ -153,5 +153,9 @@ def test_db_vs_npz_2184_origin_test_parity_and_live_post_test():
         scores = evaluate_post_test_retrospective_scores(conn, eval_split_regime="POST_TEST")
         assert scores["unique_origins"] == 122
         assert scores["total_scored_rows"] == 4270
+        assert scores["block_bootstrap"]["block_length"] == 7
+        assert scores["block_bootstrap"]["n_bootstrap"] == 2000
+        assert "SC-35 - BASELINE_CLIMATOLOGY_DOY" in scores["block_bootstrap"]["pairwise_delta_mae"]
+        assert len(scores["methodological_notes"]) == 3
     finally:
         conn.close()

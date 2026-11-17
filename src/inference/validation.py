@@ -217,14 +217,26 @@ def validate_serving_input(
             {"row_count": len(raw_history_df), "min_rows": min_rows},
         )
 
-    if date_col not in raw_history_df.columns:
+    df = raw_history_df.copy()
+    if required_columns is None:
+        from src.data.vintage_store import align_and_validate_canonical_raw_df
+
+        try:
+            df = align_and_validate_canonical_raw_df(df)
+        except ValueError as exc:
+            raise ServingValidationError(
+                "INVALID_OR_MISSING_METEO_INPUT",
+                str(exc),
+                {"reason": "canonical_column_alignment_failed"},
+            ) from exc
+
+    if date_col not in df.columns:
         raise ServingValidationError(
             "INVALID_OR_MISSING_METEO_INPUT",
             f"Missing required date column '{date_col}'.",
             {"missing_columns": [date_col]},
         )
 
-    df = raw_history_df.copy()
     parsed_dates = pd.to_datetime(df[date_col], errors="coerce")
     if parsed_dates.isna().any():
         bad_count = int(parsed_dates.isna().sum())

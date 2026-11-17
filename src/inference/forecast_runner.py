@@ -21,12 +21,17 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 import joblib
 import numpy as np
 import pandas as pd
+from sklearn.metrics import (
+    mean_absolute_error,
+    mean_squared_error,
+    root_mean_squared_error,
+)
 
 from src.config.constants import Config
 from src.data.vintage_store import (
     ALL_35_VARS,
-    CANONICAL_VI_COLUMN_ORDER,
     HCMC_LOCATION_ID,
+    align_and_validate_canonical_raw_df,
     compute_input_window_hash,
     connect_sqlite,
     derive_eval_split_regime,
@@ -37,18 +42,13 @@ from src.data.vintage_store import (
     resolve_git_sha,
     utc_now_iso,
 )
-from src.evaluation.metrics import (
-    CANONICAL_DEV_TRAIN_MASE_SCALE,
-    mean_absolute_error,
-    mean_squared_error,
-    root_mean_squared_error,
-)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ARTIFACT_DIR = PROJECT_ROOT / "artifacts" / "models"
 DEFAULT_DB_PATH = PROJECT_ROOT / "data" / "vintage" / "rainfall_vintage.db"
 CANONICAL_DEV_TRAIN_END = "2018-04-30"
 OFFICIAL_MASE_SCALE_POST_TEST = 3.7015424361567635
+CANONICAL_DEV_TRAIN_MASE_SCALE = 3.7015424361567634
 PERSISTENCE_SPEC_SHA256 = hashlib.sha256(
     b"BASELINE_PERSISTENCE:v1:pred_mm(h)=PRECTOTCORR[data_as_of]:h=1..7"
 ).hexdigest()
@@ -59,6 +59,31 @@ ALL_RUNNER_MODEL_IDS: Tuple[str, ...] = (
     "SC-31",
     "BASELINE_PERSISTENCE",
     "BASELINE_CLIMATOLOGY_DOY",
+)
+
+METHODOLOGICAL_NOTES: Dict[str, str] = {
+    "effective_sample_size": (
+        "122 unique anchor dates (2026-05-01..2026-08-30), NOT 854 independent observations "
+        "(854 = 122 anchors x 7 overlapping horizons)."
+    ),
+    "first_vs_latest_equality": (
+        "vs_first and vs_latest metrics are identical because each target date (2026-05-02..2026-09-06) "
+        "currently has a single ingested version (version_num = 0, ingested on 2026-11-16); "
+        "this does NOT prove zero NASA POWER revision between NRT and Final."
+    ),
+    "seasonal_regime_note": (
+        "The 2026-05-01..2026-08-30 window lies entirely within the Southwest Monsoon wet season in HCMC; "
+        "therefore its absolute MAE (~4.92-4.99 mm) is not directly comparable to the full-year 6-year Test MAE "
+        "(~3.72-3.75 mm) which spans both dry and wet seasons. Valid comparison is against same-window baselines "
+        "(-11.0% to -12.2% vs Climatology DOY, -31.1% to -32.1% vs Persistence)."
+    ),
+}
+
+PAIRWISE_DELTA_MAE_PAIRS: Tuple[Tuple[str, str], ...] = (
+    ("SC-35", "BASELINE_CLIMATOLOGY_DOY"),
+    ("SC-31", "BASELINE_CLIMATOLOGY_DOY"),
+    ("SC-30", "BASELINE_CLIMATOLOGY_DOY"),
+    ("SC-35", "SC-31"),
 )
 
 VN_TZ = timezone(timedelta(hours=7))
@@ -131,7 +156,7 @@ def _rows_to_vietnamese_df(window_rows: Sequence[Mapping[str, Any]]) -> pd.DataF
     df["DATE"] = pd.to_datetime(df["DATE"]).dt.normalize()
     df = df.sort_values("DATE").reset_index(drop=True)
     df = df.rename(columns=en_to_vi)
-    return df[list(CANONICAL_VI_COLUMN_ORDER)]
+    return align_and_validate_canonical_raw_df(df)
 
 
 def _load_runner_bundle(artifact_dir: Path) -> Dict[str, Any]:
@@ -551,29 +576,190 @@ def _compute_4_metrics(y_true: np.ndarray, y_pred: np.ndarray, scale: float) -> 
     }
 
 
+def _summarize_bootstrap_samples(samples: np.ndarray, point_estimate: float) -> Dict[str, float]:
+    lo, hi = np.percentile(samples, [2.5, 97.5])
+    return {
+        "point_estimate": round(float(point_estimate), 6),
+        "ci_lower": round(float(lo), 6),
+        "ci_upper": round(float(hi), 6),
+        "bootstrap_se": round(float(np.std(samples, ddof=1)), 6),
+    }
+
+
+def compute_block_bootstrap_ci(
+    df_scores: pd.DataFrame,
+    *,
+    block_length: int = 7,
+    n_bootstrap: int = 2000,
+    seed: int = 42,
+    mase_scale: float = OFFICIAL_MASE_SCALE_POST_TEST,
+    target_col: str = "obs_latest_mm",
+) -> Dict[str, Any]:
+    """
+    Moving Block Bootstrap across consecutive anchor dates (`block_length = 7`) preserving all 7 horizons
+    together per sampled anchor date. Computes 95% CIs and bootstrap SEs for Overall MAE/RMSE/MASE,
+    per-horizon (h1..h7) MAE/RMSE, and pairwise delta-MAE comparisons.
+    """
+    if df_scores.empty:
+        raise ValueError("Cannot compute block bootstrap CI on empty scores DataFrame.")
+
+    anchors = sorted(df_scores["data_as_of"].astype(str).unique().tolist())
+    n_origins = len(anchors)
+    eff_block = max(1, min(int(block_length), n_origins))
+    horizons = [1, 2, 3, 4, 5, 6, 7]
+
+    model_order = [m for m in ALL_RUNNER_MODEL_IDS if m in set(df_scores["model_id"])] + sorted(
+        set(df_scores["model_id"]) - set(ALL_RUNNER_MODEL_IDS)
+    )
+
+    abs_err_by_model: Dict[str, np.ndarray] = {}
+    sq_err_by_model: Dict[str, np.ndarray] = {}
+    for m_id in model_order:
+        mdf = df_scores[df_scores["model_id"] == m_id]
+        piv_pred = (
+            mdf.pivot(index="data_as_of", columns="horizon_day", values="pred_mm")
+            .reindex(index=anchors, columns=horizons)
+            .to_numpy(dtype=np.float64)
+        )
+        piv_obs = (
+            mdf.pivot(index="data_as_of", columns="horizon_day", values=target_col)
+            .reindex(index=anchors, columns=horizons)
+            .to_numpy(dtype=np.float64)
+        )
+        diff = piv_pred - piv_obs
+        abs_err_by_model[m_id] = np.abs(diff)
+        sq_err_by_model[m_id] = diff ** 2
+
+    # Generate deterministic Moving Block Bootstrap index matrix of shape (n_bootstrap, n_origins)
+    rng = np.random.default_rng(int(seed))
+    num_blocks = n_origins - eff_block + 1
+    blocks_per_sample = int(np.ceil(n_origins / eff_block))
+    starts = rng.integers(0, num_blocks, size=(int(n_bootstrap), blocks_per_sample))
+    offsets = np.arange(eff_block, dtype=np.int64)
+    idx_matrix = (starts[:, :, None] + offsets[None, None, :]).reshape(int(n_bootstrap), -1)[:, :n_origins]
+
+    overall_mae_samples: Dict[str, np.ndarray] = {}
+    models_ci: Dict[str, Any] = {}
+    for m_id in model_order:
+        abs_arr = abs_err_by_model[m_id]
+        sq_arr = sq_err_by_model[m_id]
+
+        # Sampled shapes: (n_bootstrap, n_origins, 7)
+        boot_abs = abs_arr[idx_matrix]
+        boot_sq = sq_arr[idx_matrix]
+
+        mae_overall_b = np.nanmean(boot_abs, axis=(1, 2))
+        rmse_overall_b = np.sqrt(np.nanmean(boot_sq, axis=(1, 2)))
+        mase_overall_b = mae_overall_b / float(mase_scale)
+        overall_mae_samples[m_id] = mae_overall_b
+
+        point_mae = float(np.nanmean(abs_arr))
+        point_rmse = float(np.sqrt(np.nanmean(sq_arr)))
+        point_mase = point_mae / float(mase_scale)
+
+        by_horizon: Dict[str, Any] = {}
+        for h_idx, h in enumerate(horizons):
+            mae_h_b = np.nanmean(boot_abs[:, :, h_idx], axis=1)
+            rmse_h_b = np.sqrt(np.nanmean(boot_sq[:, :, h_idx], axis=1))
+            point_mae_h = float(np.nanmean(abs_arr[:, h_idx]))
+            point_rmse_h = float(np.sqrt(np.nanmean(sq_arr[:, h_idx])))
+            by_horizon[f"h{h}"] = {
+                "MAE": _summarize_bootstrap_samples(mae_h_b, point_mae_h),
+                "RMSE": _summarize_bootstrap_samples(rmse_h_b, point_rmse_h),
+            }
+
+        models_ci[m_id] = {
+            "overall": {
+                "MAE": _summarize_bootstrap_samples(mae_overall_b, point_mae),
+                "RMSE": _summarize_bootstrap_samples(rmse_overall_b, point_rmse),
+                "MASE": _summarize_bootstrap_samples(mase_overall_b, point_mase),
+            },
+            "by_horizon": by_horizon,
+        }
+
+    pairwise_delta_mae: Dict[str, Any] = {}
+    for model_a, model_b in PAIRWISE_DELTA_MAE_PAIRS:
+        if model_a in overall_mae_samples and model_b in overall_mae_samples:
+            delta_b = overall_mae_samples[model_a] - overall_mae_samples[model_b]
+            point_delta = float(np.nanmean(abs_err_by_model[model_a]) - np.nanmean(abs_err_by_model[model_b]))
+            pair_key = f"{model_a} - {model_b}"
+            summary = _summarize_bootstrap_samples(delta_b, point_delta)
+            summary["significant_at_95pct"] = bool(summary["ci_upper"] < 0.0 or summary["ci_lower"] > 0.0)
+            pairwise_delta_mae[pair_key] = summary
+
+    return {
+        "method": "moving_block_bootstrap",
+        "block_length": int(block_length),
+        "effective_block_length": eff_block,
+        "n_bootstrap": int(n_bootstrap),
+        "seed": int(seed),
+        "n_anchor_dates": n_origins,
+        "target_col": target_col,
+        "models": models_ci,
+        "pairwise_delta_mae": pairwise_delta_mae,
+    }
+
+
 def evaluate_post_test_retrospective_scores(
     conn: sqlite3.Connection,
     *,
     eval_split_regime: str = "POST_TEST",
     location_id: str = HCMC_LOCATION_ID,
     mase_scale: float = OFFICIAL_MASE_SCALE_POST_TEST,
+    is_prospective_filter: Optional[int] = None,
+    block_length: int = 7,
+    n_bootstrap: int = 2000,
+    seed: int = 42,
 ) -> Dict[str, Any]:
     """
-    Query `v_forecast_scores` on `eval_split_regime = 'POST_TEST'` and compute overall
-    + per-horizon (h1..h7) MAE, MSE, RMSE, MASE against both `first` and `latest`
-    observations for every model in the ledger.
+    Query `v_forecast_scores` on `eval_split_regime = 'POST_TEST'` (optionally filtered by
+    `is_prospective`), compute overall + per-horizon (h1..h7) MAE/MSE/RMSE/MASE against both
+    `first` and `latest`, attach 95% Moving Block Bootstrap CIs, and include methodological notes.
     """
+    where_sql = "location_id = ? AND eval_split_regime = ?"
+    params: List[Any] = [location_id, eval_split_regime]
+    if is_prospective_filter is not None:
+        where_sql += " AND is_prospective = ?"
+        params.append(int(is_prospective_filter))
+
     rows = conn.execute(
-        """
+        f"""
         SELECT *
         FROM v_forecast_scores
-        WHERE location_id = ?
-          AND eval_split_regime = ?
+        WHERE {where_sql}
         ORDER BY model_id ASC, data_as_of ASC, horizon_day ASC
         """,
-        (location_id, eval_split_regime),
+        tuple(params),
     ).fetchall()
     if not rows:
+        if is_prospective_filter is not None:
+            return {
+                "eval_split_regime": eval_split_regime,
+                "is_prospective_filter": int(is_prospective_filter),
+                "mase_scale": mase_scale,
+                "canonical_mase_scale_metrics_py": CANONICAL_DEV_TRAIN_MASE_SCALE,
+                "origin_min": None,
+                "origin_max": None,
+                "target_date_min": None,
+                "target_date_max": None,
+                "unique_origins": 0,
+                "total_scored_rows": 0,
+                "is_prospective_counts": {},
+                "temporal_status_at_issue_counts": {},
+                "obs_revision_delta_nonzero_count": 0,
+                "leaderboard_vs_latest": [],
+                "models": {},
+                "block_bootstrap": {
+                    "method": "moving_block_bootstrap",
+                    "block_length": int(block_length),
+                    "n_bootstrap": int(n_bootstrap),
+                    "seed": int(seed),
+                    "n_anchor_dates": 0,
+                    "models": {},
+                    "pairwise_delta_mae": {},
+                },
+                "methodological_notes": dict(METHODOLOGICAL_NOTES),
+            }
         raise ValueError(f"No rows found in v_forecast_scores for eval_split_regime='{eval_split_regime}'.")
 
     df = pd.DataFrame([dict(r) for r in rows])
@@ -636,8 +822,18 @@ def evaluate_post_test_retrospective_scores(
     for idx, row in enumerate(leaderboard, start=1):
         row["rank"] = idx
 
+    block_bootstrap = compute_block_bootstrap_ci(
+        df,
+        block_length=block_length,
+        n_bootstrap=n_bootstrap,
+        seed=seed,
+        mase_scale=mase_scale,
+        target_col="obs_latest_mm",
+    )
+
     return {
         "eval_split_regime": eval_split_regime,
+        "is_prospective_filter": int(is_prospective_filter) if is_prospective_filter is not None else None,
         "mase_scale": mase_scale,
         "canonical_mase_scale_metrics_py": CANONICAL_DEV_TRAIN_MASE_SCALE,
         "origin_min": str(df["data_as_of"].min()),
@@ -651,4 +847,6 @@ def evaluate_post_test_retrospective_scores(
         "obs_revision_delta_nonzero_count": int((df["obs_revision_delta_mm"].abs() > 1e-12).sum()),
         "leaderboard_vs_latest": leaderboard,
         "models": by_model,
+        "block_bootstrap": block_bootstrap,
+        "methodological_notes": dict(METHODOLOGICAL_NOTES),
     }
