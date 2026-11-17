@@ -2,6 +2,26 @@
 
 All notable canonical reconciliation, MLOps tracking, runtime optimization, and operational limitation updates are recorded in this file.
 
+## [1.2.1-round7-guardrails-openapi-demo-db] - 2026-11-17
+
+### Added & Changed — Entry Guards, UTC Normalization, Block Bootstrap CIs, Two-DB & OpenAPI Lock
+- **Canonical Column Aligners & `FeatureBuilder` Entry Guard**:
+  - Added shared `align_and_validate_canonical_raw_df()` (`CANONICAL_VI_COLUMN_ORDER`, 36 columns matching `DataLoader`/`Config.COLUMN_MAPPING`) in `src/data/vintage_store.py` (exported in `src/data/__init__.py`) and routed DB reads (`read_latest_observations`, `SQLiteVintageHistoryAdapter`), forecast runner (`_rows_to_vietnamese_df`), and `/predict` serving validation/prediction (`validate_serving_input`, `StandaloneRainfallPredictor.predict`) through it.
+  - Added `_validate_canonical_input_columns()` to `src/featurengineering/builder.py` at entry of `fit()`, `transform()` (including `context_df`), and `build_single_step()`, raising `ValueError("[FEATURE_BUILDER_INPUT_SCHEMA_ERROR] ...")` on missing, renamed/misspelled, or swapped columns.
+  - Added fixed CI Tier 1 tests in `tests/serving/test_feature_builder_column_guard.py`.
+- **UTC ISO-8601 Timestamp Normalization & `julianday()` Scoring**:
+  - Added `normalize_utc_iso()` (`YYYY-MM-DDTHH:MM:SS.ffffffZ`) across all DB timestamp writes and `query_observations_as_of()`, and switched `v_forecast_scores.is_prospective` and `query_observations_as_of()` predicates to SQLite `julianday(...)` comparisons.
+  - Added opposing-format regression test `test_timestamp_normalization_and_opposing_formats_is_prospective` in `tests/storage/test_vintage_ddl_and_triggers.py`.
+- **Post-Test Moving Block Bootstrap CI (`block_length = 7`) & Methodological Notes**:
+  - Added `compute_block_bootstrap_ci(..., block_length=7, n_bootstrap=2000, seed=42)` and `METHODOLOGICAL_NOTES` (`effective_sample_size`, `first_vs_latest_equality`, `seasonal_regime_note`) to `src/inference/forecast_runner.py` and persisted full results to `reports/storage_audit/post_test_retrospective_scores.json`.
+  - Confirmed statistically significant MAE reductions over same-window `BASELINE_CLIMATOLOGY_DOY` for `SC-31` (`-0.686 mm`, 95% CI `[-1.079, -0.315]`), `SC-30` (`-0.628 mm`, `[-1.030, -0.238]`), and `SC-35` (`-0.616 mm`, `[-1.013, -0.254]`), while `SC-35 - SC-31` (`+0.070 mm`, `[-0.019, +0.164]`) is non-significant.
+- **Two-DB Convention & Bundled Demo DB (`artifacts/models/demo_rainfall_vintage.db`)**:
+  - Exported `demo_rainfall_vintage.db` via `VACUUM INTO` (`journal_mode = DELETE`, `9,449` observations `2001-01-01..2026-11-14`, `4,270` `POST_TEST` forecasts, SHA-256 `5f7027bb86ea29ef1d15fa169e54b9f72ff33cb07417660c74e292ea5845470a`), recorded SHA-256 in `artifacts/models/metadata.json`, whitelisted in `.gitignore` & `.dockerignore`, and added `resolve_sqlite_db_path_and_role()` + `$VINTAGE_DB_PATH` in `src/data/provider.py`.
+  - Added `docs/RUNBOOK_STORAGE.md` and updated `README.md` + `docs/LIMITATIONS.md` (point regression scope, `2018-04-30` Dev Train freeze, Two-DB convention, and `2026-11-06` FLASHFlux interior gap).
+- **Locked API Contract (`/health`, `/models`, `/predict`, `/scores`) & OpenAPI Snapshot**:
+  - Extended `GET /health` (`db_role`, `default_complete_anchor_date`, `journal_mode`, `baselines`), added `GET /models` (alias `/models/info` exposing 3 ML + 2 Baselines + `demo_rainfall_vintage.db` SHA-256), and added `GET /scores` (`eval_split_regime`, `is_prospective`, overall & `h1..h7` Block Bootstrap CIs, 3 methodological notes, HTTP 422 on invalid params).
+  - Exported `docs/openapi_snapshot.json` and added `test_openapi_snapshot_matches_live_app`, `test_scores_endpoint`, `test_models_endpoint` (`78 passed` locally; Docker image `kgb0630/ds_108:1.2.0-serving` verified at `213.73 MB` `VmRSS`).
+
 ## [1.2.0-ddl-v3.2 / Step 4 Forecast Runner & Step 5 DB Serving] - 2026-11-16
 
 ### Changed — DDL V3.2 Freeze (`src/data/vintage_store.py`)

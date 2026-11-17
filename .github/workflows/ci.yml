@@ -8,6 +8,8 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Tier 1 CI: Fast stateless verification (~60s) on Ubuntu — Ruff lint, serving API/OpenAPI/column-guard,
+  # timestamp opposing-format checks, and SQLite DDL V3.2 triggers/seed tests. Runs without live DB or NASA calls.
   tier1-ci:
     name: Tier 1 CI — Ruff Lint, Serving Unit/Golden Parity & SQLite DDL V3 Trigger Tests
     runs-on: ubuntu-latest
@@ -30,15 +32,18 @@ jobs:
 
       - name: Run Ruff lint on serving backend & storage DDL V3
         run: |
-          ruff check src/api src/inference src/data/provider.py src/data/vintage_store.py scripts/mlops/export_from_registry.py scripts/mlops/run_operational_checks.py tests/serving tests/storage
+          ruff check src/api src/inference src/data/provider.py src/data/vintage_store.py src/featurengineering/builder.py scripts/mlops/export_from_registry.py scripts/mlops/run_operational_checks.py scripts/mlops/run_forecast_ledger.py tests/serving tests/storage
 
-      - name: Run Tier 1 suite (API HCMC Lock, CERES Gates, Golden Parity, DDL V3 Triggers/Seed)
+      - name: Run Tier 1 suite (API OpenAPI/Scores Contract, Column Guard, Timestamp Formats, DDL V3.2)
         env:
           SERVING_MODEL_SOURCE: local
           WEATHER_DB_BACKEND: local
         run: |
           python -m pytest tests/serving/ tests/storage/ -v
 
+  # Tier 2 CI: Builds the production Linux container (bundling demo_rainfall_vintage.db), verifies cold-start
+  # Uvicorn boot, /health, /models, /predict (demo DB + lag=3 parity), /scores (122 anchors + Block Bootstrap CI),
+  # and strict VmRSS <= 350 MB memory budget.
   docker-smoke:
     name: Tier 2 CI — Docker Container Build, Linux Parity & RSS Smoke Check
     runs-on: ubuntu-latest
@@ -49,12 +54,12 @@ jobs:
 
       - name: Build serving Docker image
         run: |
-          docker build -t kgb0630/ds_108:1.1.0-serving .
+          docker build -t kgb0630/ds_108:1.2.0-serving .
 
-      - name: Run container & verify /health, /predict, and RSS <= 350 MB
+      - name: Run container & verify /health, /models, /predict, /scores, and RSS <= 350 MB
         run: |
           set -e
-          docker run -d --name ds108-smoke -p 8000:8000 kgb0630/ds_108:1.1.0-serving
+          docker run -d --name ds108-smoke -p 8000:8000 kgb0630/ds_108:1.2.0-serving
           trap "docker rm -f ds108-smoke || true" EXIT
 
           for i in $(seq 1 30); do
@@ -65,21 +70,52 @@ jobs:
           done
 
           cat /tmp/health.json
-          grep -Eq '"status":\s*"healthy"' /tmp/health.json
+          curl -sf http://localhost:8000/models > /tmp/models.json
+          curl -sf "http://localhost:8000/scores?eval_split_regime=POST_TEST" > /tmp/scores.json
 
           curl -sf -X POST http://localhost:8000/predict \
             -H "Content-Type: application/json" \
-            -d '{"province": "TP. Hồ Chí Minh"}' > /tmp/predict.json
+            -d '{"province": "TP. Hồ Chí Minh"}' > /tmp/predict_demo.json
+
+          curl -sf -X POST http://localhost:8000/predict \
+            -H "Content-Type: application/json" \
+            -d '{"province": "TP. Hồ Chí Minh", "anchor_date": "2026-08-30", "run_date": "2026-09-02"}' > /tmp/predict_lag3.json
 
           python3 - <<'EOF'
           import json
-          with open("/tmp/predict.json", "r", encoding="utf-8") as f:
-              data = json.load(f)
-          assert data["lag_days"] == 3, data
-          assert data["effective_future_days"] == 4, data
-          preds = data["serving_model"]["predictions_7d_mm"]
+          with open("/tmp/health.json", "r", encoding="utf-8") as f:
+              health = json.load(f)
+          assert health["status"] == "healthy", health
+          assert health["db_role"] == "bundled_demo_db", health
+          assert health["default_complete_anchor_date"] == "2026-08-30", health
+          assert health["journal_mode"] == "delete", health
+
+          with open("/tmp/models.json", "r", encoding="utf-8") as f:
+              models = json.load(f)
+          assert "demo_rainfall_vintage.db" in models["sha256_checksums"], models["sha256_checksums"]
+          assert "baseline_persistence" in models["models"] and "baseline_climatology_doy" in models["models"]
+
+          with open("/tmp/scores.json", "r", encoding="utf-8") as f:
+              scores = json.load(f)
+          assert scores["n_origins"] == 122, scores
+          assert scores["n_forecasts_per_model"] == 854, scores
+          assert scores["block_bootstrap"]["block_length"] == 7, scores["block_bootstrap"]
+          assert len(scores["methodological_notes"]) == 3
+
+          with open("/tmp/predict_demo.json", "r", encoding="utf-8") as f:
+              pdemo = json.load(f)
+          assert pdemo["history_backend"] == "sqlite", pdemo
+          assert pdemo["data_as_of"] == "2026-08-30", pdemo
+          assert pdemo["effective_future_days"] == 0, pdemo
+          assert "future_forecast_notice" in pdemo
+
+          with open("/tmp/predict_lag3.json", "r", encoding="utf-8") as f:
+              plag3 = json.load(f)
+          assert plag3["lag_days"] == 3, plag3
+          assert plag3["effective_future_days"] == 4, plag3
+          preds = plag3["serving_model"]["predictions_7d_mm"]
           assert len(preds) == 7 and all(p >= 0.0 for p in preds), preds
-          print("Docker /predict smoke verified:", preds)
+          print("Docker smoke verified (/health, /models, /scores, /predict):", preds)
           EOF
 
           RSS_KB=$(docker exec ds108-smoke python3 -c "import os; print(sum(int(line.split()[1]) for line in open('/proc/1/status') if line.startswith('VmRSS:')))")

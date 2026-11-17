@@ -14,6 +14,7 @@
 **/*.pyo
 *.npz
 *.db
+!artifacts/models/demo_rainfall_vintage.db
 mlruns
 lightning_logs
 notebooks

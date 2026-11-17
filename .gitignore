@@ -233,6 +233,7 @@ lightning_logs/**
 .uv_cache/**
 mlruns/**
 *.db
+!artifacts/models/demo_rainfall_vintage.db
 *.db-wal
 *.db-shm
 *.db-journal

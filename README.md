@@ -54,16 +54,20 @@ Rainfall predictability naturally decreases with longer lead times:
 - **Canonical Location Lock (`HCMC`)**: The serving API (`/predict`) is **strictly locked to Ho Chi Minh City** (`location_id = "HCMC"`, urban center **10.7769°N, 106.7009°E** - District 1). Incoming requests specifying any other location or province (including `"Hoàng Sa"`, `"Trường Sa"`, `"Hà Nội"`, or empty strings) are rejected with **HTTP 422**. While `src/config/constants.py` retains reference coordinates for 63 Vietnam provinces and 2 archipelagos, multi-province inference is disabled.
 - **Spatial Grid Properties (NASA POWER / MERRA-2 & CERES)**: NASA POWER daily meteorological reanalysis is resolved on **$0.5^\circ \text{ latitude} \times 0.625^\circ \text{ longitude}$** (`MERRA-2` / `GEOS-IT`) and radiation fluxes on **$1.0^\circ \times 1.0^\circ$** (`CERES SYN1deg` / `FLASHFlux`). District 1 and Củ Chi (`10.99306°N, 106.63775°E`) fall inside the same grid cell (**0.000000 mm difference** across a 21-day rainy-season check).
 - **Canonical Time Splits (Year 2000 Excluded)**:
-  - **Dev Train**: `2001-01-01` to `2018-04-30` (**6,329 days**, **6,293** valid origins; year 2000 excluded due to 1,830 structural missing cells on 5 radiation/UV variables).
+  - **Dev Train**: `2001-01-01` to `2018-04-30` (**6,329 days**, **6,293** valid origins; year 2000 excluded due to 1,830 structural missing cells on 5 radiation/UV variables). FeatureBuilder statistics and baseline DOY climatology are frozen strictly as of **`2018-04-30`**.
   - **Validation**: `2018-05-01` to `2020-04-30` (**731 days**, **724** valid origins).
   - **Out-of-sample Test**: `2020-05-01` to `2026-04-30` (**2,191 days**, **2,184** valid origins).
-- **Frozen Tweedie Model Specifications (`tweedie_variance_power = 1.5`)**:
+  - **Post-Test Retrospective Window**: `>= 2026-05-01` (evaluated across **122** `COMPLETE_ALL_35` anchors `2026-05-01..2026-08-30` with `block_length = 7` Moving Block Bootstrap CIs).
+- **Point Regression Models (`tweedie_variance_power = 1.5`)**:
   - `@serving` **`SC-35`**: `XGBRegressor` (`objective="reg:tweedie"`, `tweedie_variance_power=1.5`, `max_depth=5`, `n_estimators=100`, `learning_rate=0.03`).
   - `@shadow_val_champ` **`SC-30`**: `LGBMRegressor` (`objective="tweedie"`, `tweedie_variance_power=1.5`, Config A `max_depth=-1`, `num_leaves=31`, `n_estimators=100`, `learning_rate=0.03`).
   - `@shadow_test_contender` **`SC-31`**: `LGBMRegressor` (`objective="tweedie"`, `tweedie_variance_power=1.5`, Config A `max_depth=-1`, `num_leaves=31`, `n_estimators=100`, `learning_rate=0.03`).
+- **Two-DB Convention & API Contract (`/health`, `/models`, `/predict`, `/scores`)**:
+  - **Bundled Demo DB** (`artifacts/models/demo_rainfall_vintage.db`): Tracked and baked into the Docker image (`journal_mode=DELETE` via `VACUUM INTO`, `9,449` observations, `4,270` retrospective `POST_TEST` forecasts) for reproducible CI, UI demo, and `/scores` inspection.
+  - **Production / Live DB** (`data/vintage/rainfall_vintage.db` or `$VINTAGE_DB_PATH`): Kept outside the container for live operational ingestion and forward (`is_prospective = 1`) verification from go-live onward. See [`docs/RUNBOOK_STORAGE.md`](docs/RUNBOOK_STORAGE.md) and [`docs/openapi_snapshot.json`](docs/openapi_snapshot.json).
 - **Evaluation Scope & Live NRT Disclaimer**:
   - *"Kết quả đánh giá được tính trên chuỗi dữ liệu NASA POWER đã hoàn chỉnh (MERRA-2 + CERES SYN1deg); dự báo thời gian thực (live NRT) chưa được hỗ trợ trong phiên bản này."*
-  - (Evaluation metrics are computed strictly on finalized historical NASA POWER MERRA-2 + CERES SYN1deg observations; autonomous live NRT forecasting is not supported in this release.)
+  - (Evaluation metrics are computed strictly on finalized historical NASA POWER MERRA-2 + CERES SYN1deg observations; live autonomous NRT forecasting is not supported in this release due to ~78-day CERES latency and observed interior radiation dropouts such as `2026-11-06` in FLASHFlux.)
 
 ### Dynamic Operational Lag & Forecast Horizons
 - **Data Latency**: NASA POWER daily meteorological updates typically feature a **3 to 4-day publication latency** from real-time.
