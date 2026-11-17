@@ -237,3 +237,4 @@ mlruns/**
 *.db-shm
 *.db-journal
 data/vintage/**
+archive/
