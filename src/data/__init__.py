@@ -8,6 +8,11 @@ from .provider import (
     WeatherHistoryProvider,
     WeatherHistoryResult,
 )
+from .vintage_store import (
+    CANONICAL_VI_COLUMN_ORDER,
+    align_and_validate_canonical_raw_df,
+    normalize_utc_iso,
+)
 
 __all__ = [
     "DataLoader",
@@ -16,6 +21,9 @@ __all__ = [
     "DataQualityAssessment",
     "assess_data_quality",
     "check_continuity",
+    "CANONICAL_VI_COLUMN_ORDER",
+    "align_and_validate_canonical_raw_df",
+    "normalize_utc_iso",
     "IncompleteRadiationAtAnchorError",
     "SQLiteVintageHistoryAdapter",
     "WeatherHistoryProvider",

@@ -347,11 +347,105 @@ class FeatureBuilder:
     # fit — Dev Train only
     # ------------------------------------------------------------------
 
+    def _validate_canonical_input_columns(
+        self,
+        df: pd.DataFrame,
+        caller: str = "transform",
+    ) -> None:
+        """
+        Fail-fast schema and positional column-order guard at FeatureBuilder entrypoints.
+
+        Ensures missing, renamed/misspelled, or reordered columns never silently corrupt
+        downstream tree/tabular arrays passed as positional NumPy matrices.
+        """
+        if df is None or not isinstance(df, pd.DataFrame):
+            raise ValueError(f"[FEATURE_BUILDER_INPUT_SCHEMA_ERROR] {caller}: expected a pandas DataFrame.")
+
+        from ..data.vintage_store import CANONICAL_VI_COLUMN_ORDER
+
+        actual_cols = list(df.columns)
+        actual_set = set(actual_cols)
+        canonical_36 = CANONICAL_VI_COLUMN_ORDER
+
+        # Require date column and target column (for fit or when target column is expected)
+        if self.date_col not in actual_set:
+            raise ValueError(
+                f"[FEATURE_BUILDER_INPUT_SCHEMA_ERROR] {caller}: missing required date column {self.date_col!r}."
+            )
+        if caller == "fit" and self.target_col not in actual_set:
+            raise ValueError(
+                f"[FEATURE_BUILDER_INPUT_SCHEMA_ERROR] {caller}: missing required target column {self.target_col!r}."
+            )
+
+        if caller == "fit":
+            if len(actual_cols) == len(canonical_36) or actual_set == set(canonical_36):
+                missing_c = [c for c in canonical_36 if c not in actual_set]
+                extra_c = [c for c in actual_cols if c not in set(canonical_36)]
+                if missing_c or extra_c:
+                    raise ValueError(
+                        f"[FEATURE_BUILDER_INPUT_SCHEMA_ERROR] {caller}: canonical schema mismatch; "
+                        f"missing={missing_c}, unexpected={extra_c}."
+                    )
+                if actual_cols != list(canonical_36):
+                    raise ValueError(
+                        f"[FEATURE_BUILDER_INPUT_SCHEMA_ERROR] {caller}: canonical 36 columns present "
+                        f"but positional order does not match Config.COLUMN_MAPPING. Expected {list(canonical_36[:5])}..., "
+                        f"got {actual_cols[:5]}..."
+                    )
+            return
+
+        # Fitted transform / build_single_step validation
+        imputation_stats = getattr(self, "_imputation_stats", None) or {}
+        fill_values = imputation_stats.get("fill_values")
+        if isinstance(fill_values, dict) and fill_values:
+            required_source_cols = list(fill_values.keys())
+        else:
+            required_source_cols = []
+
+        if self.target_col not in actual_set:
+            raise ValueError(
+                f"[FEATURE_BUILDER_INPUT_SCHEMA_ERROR] {caller}: missing target column {self.target_col!r}."
+            )
+
+        missing_src = [c for c in required_source_cols if c not in actual_set]
+        if missing_src:
+            raise ValueError(
+                f"[FEATURE_BUILDER_INPUT_SCHEMA_ERROR] {caller}: missing fitted source column(s) {missing_src}."
+            )
+
+        expected_order: Optional[List[str]] = None
+        fit_order = getattr(self, "_fit_column_order", None)
+        if isinstance(fit_order, list) and fit_order:
+            expected_order = fit_order
+        elif required_source_cols == list(canonical_36[1:]):
+            expected_order = list(canonical_36)
+
+        if expected_order is not None:
+            missing_e = [c for c in expected_order if c not in actual_set]
+            extra_e = [c for c in actual_cols if c not in set(expected_order)]
+            if missing_e or extra_e:
+                raise ValueError(
+                    f"[FEATURE_BUILDER_INPUT_SCHEMA_ERROR] {caller}: input columns mismatch; "
+                    f"missing={missing_e}, unexpected={extra_e}."
+                )
+            if actual_cols != expected_order:
+                mismatch_idx = next(
+                    (i for i, (a, b) in enumerate(zip(actual_cols, expected_order)) if a != b),
+                    0,
+                )
+                raise ValueError(
+                    f"[FEATURE_BUILDER_INPUT_SCHEMA_ERROR] {caller}: column order mismatch at index {mismatch_idx} "
+                    f"(got {actual_cols[mismatch_idx]!r}, expected {expected_order[mismatch_idx]!r}). "
+                    "Pass DataFrame through align_and_validate_canonical_raw_df() first."
+                )
+
     def fit(self, train_df: pd.DataFrame) -> "FeatureBuilder":
         """Learn data-dependent state from the **training split only**.
 
         This method must NEVER be called on validation, test, or forecast-time data.
         """
+        self._validate_canonical_input_columns(train_df, caller="fit")
+        self._fit_column_order = list(train_df.columns)
         # Step 1: Target completeness fail-fast check (T5, T20)
         if self.target_col in train_df.columns and train_df[self.target_col].isna().any():
             raise ValueError(
@@ -412,6 +506,9 @@ class FeatureBuilder:
         5. Mode-specific warm-up handling & fail-fast NaN guard (zero blanket dropna()).
         """
         self._check_fitted()
+        self._validate_canonical_input_columns(df, caller="transform")
+        if context_df is not None:
+            self._validate_canonical_input_columns(context_df, caller="transform(context_df)")
 
         # Step 1: Validation of Continuity, Schema, and Target Completeness
         if self.target_col in df.columns and df[self.target_col].isna().any():
@@ -710,6 +807,7 @@ class FeatureBuilder:
         and requires legitimate future covariates).
         """
         self._check_fitted()
+        self._validate_canonical_input_columns(history, caller="build_single_step")
 
         needed = self.warmup_rows() + 1
         if len(history) < needed:

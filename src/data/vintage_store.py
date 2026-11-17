@@ -105,6 +105,38 @@ CANONICAL_VI_COLUMN_ORDER: Tuple[str, ...] = tuple(
 
 # Reverse mapping: Vietnamese column names -> English NASA parameter names
 VI_TO_EN_COLUMNS: Dict[str, str] = {vi: en for en, vi in Config.COLUMN_MAPPING.items() if en in ALL_35_VARS or en == "DATE"}
+EN_TO_VI_CANONICAL: Dict[str, str] = {en: Config.COLUMN_MAPPING[en] for en in CANONICAL_EN_COLUMN_ORDER}
+
+
+def align_and_validate_canonical_raw_df(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Canonicalize a raw meteorological DataFrame to exact Vietnamese names & column order
+    (`CANONICAL_VI_COLUMN_ORDER`, 36 columns matching `DataLoader` / `Config.COLUMN_MAPPING`).
+
+    Accepts either Vietnamese or NASA POWER English column names; raises
+    `ValueError("[CANONICAL_COLUMN_ERROR] ...")` on missing or unexpected columns.
+    """
+    if df is None or not isinstance(df, pd.DataFrame):
+        raise ValueError("[CANONICAL_COLUMN_ERROR] Expected a pandas DataFrame.")
+
+    out = df.copy()
+    rename_map = {en: vi for en, vi in EN_TO_VI_CANONICAL.items() if en in out.columns and vi not in out.columns}
+    if rename_map:
+        out = out.rename(columns=rename_map)
+
+    expected = list(CANONICAL_VI_COLUMN_ORDER)
+    expected_set = set(expected)
+    actual_cols = list(out.columns)
+    actual_set = set(actual_cols)
+
+    missing = [col for col in expected if col not in actual_set]
+    extra = [col for col in actual_cols if col not in expected_set]
+    if missing or extra:
+        raise ValueError(
+            f"[CANONICAL_COLUMN_ERROR] Missing required columns: {missing}; unexpected columns: {extra}"
+        )
+
+    return out.loc[:, expected].copy()
 
 DDL_V3_STATEMENTS: Tuple[str, ...] = (
     # 1. locations
@@ -439,7 +471,7 @@ DDL_V3_STATEMENTS: Tuple[str, ...] = (
         fst.PRECTOTCORR                           AS obs_first_mm,
         CASE
             WHEN fst.ingested_at_utc IS NULL THEN NULL
-            WHEN fst.ingested_at_utc > f.issued_at_utc THEN 1
+            WHEN julianday(fst.ingested_at_utc) > julianday(f.issued_at_utc) THEN 1
             ELSE 0
         END                                       AS is_prospective,
         ABS(f.pred_mm - fst.PRECTOTCORR)          AS abs_error_vs_first_mm,
@@ -473,8 +505,23 @@ DDL_V3_STATEMENTS: Tuple[str, ...] = (
 )
 
 
+def normalize_utc_iso(ts: Optional[str] = None) -> str:
+    """
+    Parse any ISO-8601 timestamp string (space or 'T', 'Z', '+00:00', '+07:00', with/without microseconds)
+    or `None` (current UTC time) and return canonical `YYYY-MM-DDTHH:MM:SS.ffffffZ`.
+    """
+    if ts is None:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+    raw = str(ts).strip()
+    if not raw:
+        raise ValueError("Timestamp string cannot be empty.")
+    dt = pd.to_datetime(raw, utc=True, errors="raise")
+    return dt.tz_convert(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
 def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return normalize_utc_iso(None)
 
 
 def resolve_git_sha() -> str:
@@ -684,7 +731,7 @@ def seed_historical_csv_vintage_v0(
 
     run_id = f"seed_v0_{uuid.uuid4().hex[:16]}"
     started_at = utc_now_iso()
-    ingest_ts = ingested_at_utc or started_at
+    ingest_ts = normalize_utc_iso(ingested_at_utc) if ingested_at_utc is not None else started_at
     ingest_dt = pd.to_datetime(ingest_ts[:10])
     sha = git_sha or resolve_git_sha()
     win_start = str(norm_df["DATE"].iloc[0])
@@ -826,14 +873,16 @@ def read_latest_observations(
     if as_vietnamese:
         en_to_vi = {k: v for k, v in Config.COLUMN_MAPPING.items() if k == "DATE" or k in ALL_35_VARS}
         df = df.rename(columns=en_to_vi)
-        default_order = list(CANONICAL_VI_COLUMN_ORDER)
+        if target_column_order is None:
+            df = align_and_validate_canonical_raw_df(df)
+        else:
+            df = df[list(target_column_order)]
     else:
         default_order = list(CANONICAL_EN_COLUMN_ORDER)
-
-    if target_column_order is not None:
-        df = df[list(target_column_order)]
-    else:
-        df = df[default_order]
+        if target_column_order is not None:
+            df = df[list(target_column_order)]
+        else:
+            df = df[default_order]
     return df.reset_index(drop=True)
 
 
@@ -963,7 +1012,7 @@ def insert_forecasts_idempotent(
         seen_batch_keys.add(nat_key)
         seen_batch_ids.add(forecast_id)
         eval_regime = derive_eval_split_regime(data_as_of)
-        issued_at_str = str(row["issued_at_utc"])
+        issued_at_str = normalize_utc_iso(str(row["issued_at_utc"]))
         issued_run_str = pd.to_datetime(row["issued_run_date"]).strftime("%Y-%m-%d")
         target_date_str = pd.to_datetime(row["target_date"]).strftime("%Y-%m-%d")
         temp_status = row.get("temporal_status_at_issue")
@@ -974,7 +1023,7 @@ def insert_forecasts_idempotent(
                 FROM observations_vintage
                 WHERE location_id = ?
                   AND obs_date = ?
-                  AND ingested_at_utc <= ?
+                  AND julianday(ingested_at_utc) <= julianday(?)
                   AND PRECTOTCORR IS NOT NULL
                 LIMIT 1
                 """,
@@ -1204,7 +1253,7 @@ def ingest_nasa_power_window(
         raise ValueError(f"Unknown location_id='{location_id}' in locations table.")
 
     started_at = utc_now_iso()
-    ingest_ts = ingested_at_utc or started_at
+    ingest_ts = normalize_utc_iso(ingested_at_utc) if ingested_at_utc is not None else started_at
     ingest_dt = pd.to_datetime(ingest_ts[:10])
     sha = git_sha or resolve_git_sha()
     run_id = f"nasa_{run_type}_{uuid.uuid4().hex[:14]}"
@@ -1482,6 +1531,7 @@ def query_observations_as_of(
     issued_at_utc: str,
 ) -> List[Dict[str, Any]]:
     """Reconstruct exact 30-day vintage snapshot known at `issued_at_utc`."""
+    issued_norm = normalize_utc_iso(issued_at_utc)
     rows = conn.execute(
         """
         SELECT o.*
@@ -1491,13 +1541,13 @@ def query_observations_as_of(
             FROM observations_vintage
             WHERE location_id = ?
               AND obs_date BETWEEN ? AND ?
-              AND ingested_at_utc <= ?
+              AND julianday(ingested_at_utc) <= julianday(?)
             GROUP BY location_id, obs_date
         ) m ON o.location_id = m.location_id
            AND o.obs_date = m.obs_date
            AND o.version_num = m.as_of_ver
         ORDER BY o.obs_date ASC
         """,
-        (location_id, input_window_start, input_window_end, issued_at_utc),
+        (location_id, input_window_start, input_window_end, issued_norm),
     ).fetchall()
     return [dict(r) for r in rows]

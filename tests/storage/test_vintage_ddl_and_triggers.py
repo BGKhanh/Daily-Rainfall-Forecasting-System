@@ -44,6 +44,7 @@ from src.data.vintage_store import (  # noqa: E402
     ingest_nasa_power_window,
     init_schema,
     insert_forecasts_idempotent,
+    normalize_utc_iso,
     query_observations_as_of,
     read_latest_observations,
     seed_historical_csv_vintage_v0,
@@ -1068,9 +1069,150 @@ def test_ddl_v3_2_unpublished_skip_first_non_null_precip_and_temporal_status(tmp
         )
         assert score["obs_first_version_num"] == 1
         assert score["obs_first_mm"] == pytest.approx(8.5)
-        assert score["obs_first_ingested_at_utc"] == "2026-09-10T01:00:00Z"
+        assert score["obs_first_ingested_at_utc"] == normalize_utc_iso("2026-09-10T01:00:00Z")
         assert score["obs_first_age_days_at_ingest"] == 7
         assert score["is_prospective"] == 1
         assert score["abs_error_vs_first_mm"] == pytest.approx(3.5)
     finally:
         conn.close()
+
+
+def test_timestamp_normalization_and_opposing_formats_is_prospective(tmp_path: Path):
+    """
+    Task 2: Verify `normalize_utc_iso()` canonicalizes mixed ISO-8601 strings to
+    `YYYY-MM-DDTHH:MM:SS.ffffffZ` and `julianday()` in `v_forecast_scores` + `query_observations_as_of()`
+    handles opposing ASCII-order formats (`'.' < 'Z'`, `' ' < 'T'`, `+07:00` vs `Z`) cleanly.
+    """
+    assert normalize_utc_iso("2026-11-16T15:00:00Z") == "2026-11-16T15:00:00.000000Z"
+    assert normalize_utc_iso("2026-11-16T15:00:00.500000+00:00") == "2026-11-16T15:00:00.500000Z"
+    assert normalize_utc_iso("2026-11-16 22:30:00+07:00") == "2026-11-16T15:30:00.000000Z"
+    assert normalize_utc_iso("2026-11-16T15:00:00.999000Z") == "2026-11-16T15:00:00.999000Z"
+
+    # Part A: API-level writes normalize timestamps to canonical UTC and score all 3 opposing pairs accurately
+    db_norm = tmp_path / "opposing_ts_norm.db"
+    conn_a = connect_sqlite(db_norm, read_only=False, recursive_triggers=True)
+    try:
+        init_schema(conn_a)
+        pairs = [
+            # (pair_id, target_date, ingested_at_raw, issued_at_raw, expected_is_prospective)
+            ("pair1_micro_vs_z", "2026-11-18", "2026-11-16T15:00:00.500000+00:00", "2026-11-16T15:00:00Z", 1),
+            ("pair2_space_tz_vs_t", "2026-11-19", "2026-11-16 22:30:00+07:00", "2026-11-16T15:00:00Z", 1),
+            ("pair3_z_vs_space_tz", "2026-11-20", "2026-11-16T15:00:00.999000Z", "2026-11-16 22:30:00+07:00", 0),
+        ]
+        # Seed each pair's observation at its raw ingested_at_utc, plus forecast at raw issued_at_utc
+        for idx, (pid, t_date, ing_raw, iss_raw, _) in enumerate(pairs, start=1):
+            df_one = pd.DataFrame([{"DATE": t_date, **_sample_var_dict(rain=3.0 + idx)}])
+            seed_historical_csv_vintage_v0(conn_a, df=df_one, ingested_at_utc=ing_raw)
+            insert_forecasts_idempotent(
+                conn_a,
+                [
+                    {
+                        "forecast_id": f"fc_{pid}",
+                        "issued_at_utc": iss_raw,
+                        "issued_run_date": "2026-11-16",
+                        "location_id": "HCMC",
+                        "model_id": "SC-35",
+                        "model_kind": "ML_SERVING",
+                        "artifact_sha256": "artsha",
+                        "data_as_of": f"2026-11-{10 + idx:02d}",
+                        "horizon_day": 1,
+                        "target_date": t_date,
+                        "temporal_status_at_issue": "future_forecast",
+                        "pred_mm": 5.0,
+                        "input_window_start": "2026-10-15",
+                        "input_window_end": f"2026-11-{10 + idx:02d}",
+                        "input_window_hash": "w",
+                        "input_vintage_manifest_json": "[]",
+                        "input_provisional_days": 30,
+                        "ceres_policy_applied": "NONE_COMPLETE",
+                        "git_sha": "sha",
+                    }
+                ],
+            )
+            row = dict(conn_a.execute("SELECT * FROM v_forecast_scores WHERE forecast_id = ?", (f"fc_{pid}",)).fetchone())
+            assert row["obs_first_ingested_at_utc"].endswith("Z") and len(row["obs_first_ingested_at_utc"]) == 27
+            assert row["issued_at_utc"].endswith("Z") and len(row["issued_at_utc"]) == 27
+            assert row["is_prospective"] == _
+
+        # query_observations_as_of checks: pair3 (15:00:00.999Z) visible at 22:30+07:00 (15:30Z); pair1/pair2 NOT visible at 15:00Z
+        asof_15z = query_observations_as_of(
+            conn_a,
+            location_id="HCMC",
+            input_window_start="2026-11-18",
+            input_window_end="2026-11-20",
+            issued_at_utc="2026-11-16T15:00:00Z",
+        )
+        assert len(asof_15z) == 0
+
+        asof_1530z = query_observations_as_of(
+            conn_a,
+            location_id="HCMC",
+            input_window_start="2026-11-18",
+            input_window_end="2026-11-20",
+            issued_at_utc="2026-11-16 22:30:00+07:00",
+        )
+        assert [r["obs_date"] for r in asof_1530z] == ["2026-11-18", "2026-11-19", "2026-11-20"]
+    finally:
+        conn_a.close()
+
+    # Part B: Direct raw SQL insert with un-normalized opposing strings proves `julianday()` immunity in views/queries
+    db_raw = tmp_path / "opposing_ts_raw_sql.db"
+    conn_b = connect_sqlite(db_raw, read_only=False, recursive_triggers=True)
+    try:
+        init_schema(conn_b)
+        raw_pairs = [
+            ("raw_pair1", "2026-11-18", "2026-11-16T15:00:00.500000+00:00", "2026-11-16T15:00:00Z", 1),
+            ("raw_pair2", "2026-11-19", "2026-11-16 22:30:00+07:00", "2026-11-16T15:00:00Z", 1),
+            ("raw_pair3", "2026-11-20", "2026-11-16T15:00:00.999000Z", "2026-11-16 22:30:00+07:00", 0),
+        ]
+        # ASCII proof: raw string comparisons would invert all 3 pairs!
+        assert not ("2026-11-16T15:00:00.500000+00:00" > "2026-11-16T15:00:00Z")
+        assert not ("2026-11-16 22:30:00+07:00" > "2026-11-16T15:00:00Z")
+        assert not ("2026-11-16T15:00:00.999000Z" <= "2026-11-16 22:30:00+07:00")
+
+        conn_b.execute("BEGIN IMMEDIATE;")
+        conn_b.execute(
+            """
+            INSERT INTO ingestion_runs (
+                run_id, run_type, started_at_utc, finished_at_utc, status,
+                location_id, scan_window_start, scan_window_end,
+                rows_scanned, rows_inserted_v0, rows_new_vintage,
+                rows_late_fill_only, rows_value_change, rows_unchanged, rows_unpublished_skipped, git_sha
+            ) VALUES ('raw_run', 'manual_scan', '2026-11-16T15:00:00Z', '2026-11-16T15:00:01Z', 'SUCCESS',
+                      'HCMC', '2026-11-18', '2026-11-20', 3, 3, 0, 0, 0, 0, 0, 'sha')
+            """
+        )
+        for idx, (pid, t_date, ing_raw, iss_raw, expected_prosp) in enumerate(raw_pairs, start=1):
+            conn_b.execute(
+                """
+                INSERT INTO observations_vintage (
+                    location_id, obs_date, version_num, ingested_at_utc, run_id, age_days_at_ingest,
+                    ingest_origin, missing_count, missing_meteo_count, missing_flashflux_count, missing_ceres_count,
+                    completeness_regime, change_type_summary, row_value_hash, PRECTOTCORR
+                ) VALUES ('HCMC', ?, 0, ?, 'raw_run', 0, 'NASA_POWER_API', 34, 23, 3, 8,
+                          'INCOMPLETE_METEO', 'INITIAL_NRT', ?, 4.0)
+                """,
+                (t_date, ing_raw, f"h_{pid}"),
+            )
+            conn_b.execute(
+                """
+                INSERT INTO forecasts_ledger (
+                    forecast_id, issued_at_utc, issued_run_date, location_id, model_id, model_kind,
+                    artifact_sha256, data_as_of, eval_split_regime, horizon_day, target_date,
+                    temporal_status_at_issue, pred_mm, input_window_start, input_window_end,
+                    input_window_hash, input_vintage_manifest_json, input_provisional_days,
+                    ceres_policy_applied, git_sha
+                ) VALUES (?, ?, '2026-11-16', 'HCMC', 'SC-35', 'ML_SERVING',
+                          'art', ?, 'POST_TEST', 1, ?,
+                          'future_forecast', 4.5, '2026-10-17', ?,
+                          'wh', '[]', 30, 'NONE_COMPLETE', 'sha')
+                """,
+                (f"fc_{pid}", iss_raw, f"2026-11-{10 + idx:02d}", t_date, f"2026-11-{10 + idx:02d}"),
+            )
+        conn_b.execute("COMMIT;")
+
+        for pid, _, _, _, expected_prosp in raw_pairs:
+            sc = conn_b.execute("SELECT is_prospective FROM v_forecast_scores WHERE forecast_id = ?", (f"fc_{pid}",)).fetchone()
+            assert sc["is_prospective"] == expected_prosp
+    finally:
+        conn_b.close()
