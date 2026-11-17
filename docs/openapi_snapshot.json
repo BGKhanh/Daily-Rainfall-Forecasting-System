@@ -1,0 +1,337 @@
+{
+  "components": {
+    "schemas": {
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "PredictionRequest": {
+        "properties": {
+          "anchor_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional anchor date (YYYY-MM-DD) in DB. Must satisfy COMPLETE_ALL_35; defaults to latest complete anchor.",
+            "title": "Anchor Date"
+          },
+          "history": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Historical continuous daily records (at least 30 days). If omitted, loads canonical recent data.",
+            "title": "History"
+          },
+          "location_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Canonical location identifier (locked strictly to HCMC / Ho Chi Minh City aliases).",
+            "title": "Location Id"
+          },
+          "province": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "TP. Hồ Chí Minh",
+            "description": "Backward-compatible location alias (locked strictly to TP. Hồ Chí Minh / HCMC aliases).",
+            "title": "Province"
+          },
+          "run_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Operational run date (YYYY-MM-DD). Defaults to current system date.",
+            "title": "Run Date"
+          }
+        },
+        "title": "PredictionRequest",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Operational API for 1-7 days daily rainfall forecasting locked to HCMC with dynamic horizon calculation and shadow model governance.",
+    "title": "HCMC Daily Rainfall Forecasting Serving Engine",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/benchmark/leaderboard": {
+      "get": {
+        "description": "Returns top audited benchmark scenarios from official benchmark test leaderboards.",
+        "operationId": "get_leaderboard_benchmark_leaderboard_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Leaderboard",
+        "tags": [
+          "Governance"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "description": "Health check endpoint indicating model readiness, active Two-DB role, anchor date, and governance status.",
+        "operationId": "get_health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Health",
+        "tags": [
+          "Monitoring"
+        ]
+      }
+    },
+    "/models": {
+      "get": {
+        "description": "Returns governance metadata, hyperparameters, baselines, and cryptographic SHA-256 hashes.",
+        "operationId": "get_model_metadata_models_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Model Metadata",
+        "tags": [
+          "Governance"
+        ]
+      }
+    },
+    "/models/info": {
+      "get": {
+        "description": "Returns governance metadata, hyperparameters, baselines, and cryptographic SHA-256 hashes.",
+        "operationId": "get_model_metadata_models_info_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Model Metadata",
+        "tags": [
+          "Governance"
+        ]
+      }
+    },
+    "/predict": {
+      "post": {
+        "description": "Generate 7-day multi-horizon rainfall forecasts for Ho Chi Minh City (`HCMC`).\n\nError status contract:\n- `422 Unprocessable Entity`: Invalid Pydantic/JSON schema types or `location_id`/`province` outside HCMC.\n- `400 Bad Request`: Client-supplied `request.history` fails continuity/missingness/physical-bound checks\n  (or caller-specified `run_date` exceeds 7-day lag limit).\n- `503 Service Unavailable`: Server-side DB/history provider failure or corrupted/incomplete server DB records\n  when `request.history` is omitted (`None`).",
+        "operationId": "predict_rainfall_predict_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PredictionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "description": "Bad Request — Client-supplied `request.history` payload violates business or physical rules (<35 continuous days, calendar date gap, NaN/-999.0 sentinel, physical bound violation, or >7d lag)."
+          },
+          "422": {
+            "description": "Unprocessable Entity — Invalid JSON/Pydantic schema types, unsupported `location_id`/`province` outside Ho Chi Minh City, OR requested `anchor_date` violates `COMPLETE_ALL_35` radiation completeness."
+          },
+          "503": {
+            "description": "Service Unavailable — Predictor not initialized, OR server-side DB/history provider failed or returned incomplete/NaN meteorological records when `request.history` is omitted."
+          }
+        },
+        "summary": "Predict Rainfall",
+        "tags": [
+          "Forecasting"
+        ]
+      }
+    },
+    "/scores": {
+      "get": {
+        "description": "Query `v_forecast_scores` from active SQLite Vintage Store and return per-model overall & horizon\nscores (MAE, MSE, RMSE, MASE), Moving Block Bootstrap 95% CIs (`block_length = 7`), sample sizes,\nand mandatory methodological notes.",
+        "operationId": "get_scores_scores_get",
+        "parameters": [
+          {
+            "description": "Canonical split regime filter ('DEV_TRAIN', 'VALIDATION', 'TEST', 'POST_TEST').",
+            "in": "query",
+            "name": "eval_split_regime",
+            "required": false,
+            "schema": {
+              "default": "POST_TEST",
+              "description": "Canonical split regime filter ('DEV_TRAIN', 'VALIDATION', 'TEST', 'POST_TEST').",
+              "title": "Eval Split Regime",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional filter: 1 for strictly prospective forecasts, 0 for retrospective, or omit for all.",
+            "in": "query",
+            "name": "is_prospective",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional filter: 1 for strictly prospective forecasts, 0 for retrospective, or omit for all.",
+              "title": "Is Prospective"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Unprocessable Entity — Invalid `eval_split_regime` or `is_prospective` query parameter."
+          },
+          "503": {
+            "description": "Service Unavailable — SQLite vintage database unavailable or corrupted."
+          }
+        },
+        "summary": "Get Scores",
+        "tags": [
+          "Governance"
+        ]
+      }
+    }
+  }
+}

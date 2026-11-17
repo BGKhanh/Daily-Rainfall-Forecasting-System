@@ -12,6 +12,7 @@ Features:
 - Strict HTTP status separation (422 for non-HCMC locations, 400 for invalid user history payload, 503 for server DB data failures).
 """
 
+from copy import deepcopy
 import os
 import sys
 from pathlib import Path
@@ -20,7 +21,7 @@ from typing import List, Dict, Any, Optional
 
 import pandas as pd
 import numpy as np
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field, ConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -29,13 +30,24 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.inference.predictor import StandaloneRainfallPredictor
 from src.inference.validation import ServingValidationError
-from src.data.provider import IncompleteRadiationAtAnchorError, WeatherHistoryProvider
+from src.inference.forecast_runner import (
+    METHODOLOGICAL_NOTES,
+    PERSISTENCE_SPEC_SHA256,
+    evaluate_post_test_retrospective_scores,
+)
+from src.data.provider import (
+    IncompleteRadiationAtAnchorError,
+    WeatherHistoryProvider,
+    resolve_sqlite_db_path_and_role,
+)
 from src.data.vintage_store import (
     HCMC_ALIASES,
     HCMC_DISPLAY_NAME,
     HCMC_LATITUDE,
     HCMC_LOCATION_ID,
     HCMC_LONGITUDE,
+    connect_sqlite,
+    get_default_complete_anchor_date,
 )
 
 from contextlib import asynccontextmanager
@@ -45,6 +57,45 @@ CANONICAL_PROVINCE_NAME = HCMC_DISPLAY_NAME
 CANONICAL_LATITUDE = HCMC_LATITUDE
 CANONICAL_LONGITUDE = HCMC_LONGITUDE
 ALLOWED_HCMC_ALIASES = frozenset(HCMC_ALIASES)
+VALID_EVAL_SPLIT_REGIMES = ("DEV_TRAIN", "VALIDATION", "TEST", "POST_TEST")
+
+
+def _resolve_active_db_info() -> tuple[Optional[Path], str]:
+    """Return active `(sqlite_db_path, db_role)` respecting active `history_provider` and Two-DB convention."""
+    active_provider = history_provider
+    if isinstance(active_provider, WeatherHistoryProvider):
+        if active_provider.backend in ("local", "sqlite"):
+            if active_provider.db_path is not None and Path(active_provider.db_path).exists():
+                return Path(active_provider.db_path), str(active_provider.db_role)
+            return None, str(active_provider.db_role)
+        if active_provider.backend == "sample_csv":
+            return None, "sample_csv"
+        return None, str(active_provider.backend)
+    return resolve_sqlite_db_path_and_role()
+
+
+def _query_baseline_checksums_from_db(db_path: Optional[Path]) -> Dict[str, Optional[str]]:
+    out: Dict[str, Optional[str]] = {
+        "BASELINE_PERSISTENCE": PERSISTENCE_SPEC_SHA256,
+        "BASELINE_CLIMATOLOGY_DOY": None,
+    }
+    if db_path is None or not db_path.exists():
+        return out
+    try:
+        conn = connect_sqlite(db_path, read_only=True)
+        try:
+            for m_id in ("BASELINE_PERSISTENCE", "BASELINE_CLIMATOLOGY_DOY"):
+                row = conn.execute(
+                    "SELECT artifact_sha256 FROM forecasts_ledger WHERE model_id = ? LIMIT 1",
+                    (m_id,),
+                ).fetchone()
+                if row is not None and row["artifact_sha256"]:
+                    out[m_id] = str(row["artifact_sha256"])
+        finally:
+            conn.close()
+    except Exception:
+        pass
+    return out
 
 
 def _normalize_location_token(value: str) -> str:
@@ -142,7 +193,22 @@ class PredictionRequest(BaseModel):
 
 @app.get("/health", tags=["Monitoring"])
 def get_health():
-    """Health check endpoint indicating model readiness and governance status."""
+    """Health check endpoint indicating model readiness, active Two-DB role, anchor date, and governance status."""
+    db_path, db_role = _resolve_active_db_info()
+    default_anchor: Optional[str] = None
+    journal_mode: Optional[str] = None
+    if db_path is not None and db_path.exists():
+        try:
+            conn = connect_sqlite(db_path, read_only=True)
+            try:
+                default_anchor = get_default_complete_anchor_date(conn, location_id=CANONICAL_LOCATION_ID)
+                jm_row = conn.execute("PRAGMA journal_mode;").fetchone()
+                journal_mode = str(jm_row[0]).lower() if jm_row else None
+            finally:
+                conn.close()
+        except Exception:
+            pass
+
     return {
         "status": "healthy",
         "service": "HCMC Rainfall Forecasting Engine",
@@ -150,6 +216,9 @@ def get_health():
         "predictor_loaded": predictor is not None,
         "model_source": predictor.mode if predictor is not None else os.environ.get("SERVING_MODEL_SOURCE", "local"),
         "weather_backend": history_provider.backend if history_provider is not None else os.environ.get("WEATHER_DB_BACKEND", "local"),
+        "db_role": db_role,
+        "default_complete_anchor_date": default_anchor,
+        "journal_mode": journal_mode,
         "serving_model": {
             "scenario_id": "SC-35",
             "model_name": "xgboost_tweedie_F3",
@@ -172,15 +241,48 @@ def get_health():
                 "alias": "shadow_test_contender",
                 "status": "active_shadow"
             }
-        ]
+        ],
+        "baselines": [
+            {"scenario_id": "BASELINE_PERSISTENCE", "model_kind": "BASELINE", "definition": "PRECTOTCORR[data_as_of] for h=1..7"},
+            {"scenario_id": "BASELINE_CLIMATOLOGY_DOY", "model_kind": "BASELINE", "definition": "DevTrain (2001-01-01..2018-04-30) dayofyear mean"},
+        ],
     }
 
+@app.get("/models", tags=["Governance"])
 @app.get("/models/info", tags=["Governance"])
 def get_model_metadata():
-    """Returns governance metadata, hyperparameters, and cryptographic SHA-256 hashes."""
+    """Returns governance metadata, hyperparameters, baselines, and cryptographic SHA-256 hashes."""
     if predictor is None:
         raise HTTPException(status_code=503, detail="Predictor not initialized")
-    return predictor.metadata
+    db_path, db_role = _resolve_active_db_info()
+    baseline_shas = _query_baseline_checksums_from_db(db_path)
+
+    payload = deepcopy(predictor.metadata)
+    models_section = payload.setdefault("models", {})
+    models_section.setdefault(
+        "baseline_persistence",
+        {
+            "scenario_id": "BASELINE_PERSISTENCE",
+            "model_name": "persistence_rain_anchor",
+            "model_kind": "BASELINE",
+            "governance_role": "mandatory_naive_baseline",
+            "definition": "pred_mm(h) = PRECTOTCORR[data_as_of] for h in 1..7",
+            "artifact_sha256": baseline_shas["BASELINE_PERSISTENCE"],
+        },
+    )
+    models_section.setdefault(
+        "baseline_climatology_doy",
+        {
+            "scenario_id": "BASELINE_CLIMATOLOGY_DOY",
+            "model_name": "climatology_doy_dev_train",
+            "model_kind": "BASELINE",
+            "governance_role": "mandatory_seasonal_baseline",
+            "definition": "Day-of-year (1..366) mean precipitation frozen on Dev Train (2001-01-01..2018-04-30)",
+            "artifact_sha256": baseline_shas["BASELINE_CLIMATOLOGY_DOY"],
+        },
+    )
+    payload["db_role"] = db_role
+    return payload
 
 @app.post(
     "/predict",
@@ -298,10 +400,13 @@ def predict_rainfall(request: PredictionRequest):
                 item["note"] = "Day has passed and precipitation observation is recorded in SQLite vintage store."
 
     if prediction_result.get("effective_future_days") == 0:
+        prediction_result["forecast_horizon_mode"] = "retrospective_hindcast_only"
         prediction_result["future_forecast_notice"] = (
             "Không có ngày tương lai (effective_future_days = 0): "
             "ngày neo dữ liệu đầy đủ (COMPLETE_ALL_35) cách ngày chạy hơn 7 ngày."
         )
+    else:
+        prediction_result["forecast_horizon_mode"] = "operational_forecast"
 
     prediction_result["history_backend"] = history_backend
     if anchor_completeness_regime is not None:
@@ -315,6 +420,157 @@ def predict_rainfall(request: PredictionRequest):
     }
 
     return prediction_result
+
+@app.get(
+    "/scores",
+    tags=["Governance"],
+    responses={
+        422: {"description": "Unprocessable Entity — Invalid `eval_split_regime` or `is_prospective` query parameter."},
+        503: {"description": "Service Unavailable — SQLite vintage database unavailable or corrupted."},
+    },
+)
+def get_scores(
+    eval_split_regime: str = Query(
+        "POST_TEST",
+        description="Canonical split regime filter ('DEV_TRAIN', 'VALIDATION', 'TEST', 'POST_TEST').",
+    ),
+    is_prospective: Optional[int] = Query(
+        None,
+        description="Optional filter: 1 for strictly prospective forecasts, 0 for retrospective, or omit for all.",
+    ),
+):
+    """
+    Query `v_forecast_scores` from active SQLite Vintage Store and return per-model overall & horizon
+    scores (MAE, MSE, RMSE, MASE), Moving Block Bootstrap 95% CIs (`block_length = 7`), sample sizes,
+    and mandatory methodological notes.
+    """
+    if eval_split_regime not in VALID_EVAL_SPLIT_REGIMES:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"[INVALID_EVAL_SPLIT_REGIME] Unsupported eval_split_regime={eval_split_regime!r}. "
+                f"Expected one of {VALID_EVAL_SPLIT_REGIMES}."
+            ),
+        )
+    if is_prospective is not None and is_prospective not in (0, 1):
+        raise HTTPException(
+            status_code=422,
+            detail=f"[INVALID_IS_PROSPECTIVE] is_prospective must be 0 or 1, got {is_prospective!r}.",
+        )
+
+    db_path, db_role = _resolve_active_db_info()
+    if db_path is None or not db_path.exists():
+        raise HTTPException(
+            status_code=503,
+            detail="[SERVER_DB_DATA_ERROR] No SQLite vintage database available to serve /scores.",
+        )
+
+    try:
+        conn = connect_sqlite(db_path, read_only=True)
+        try:
+            try:
+                eval_res = evaluate_post_test_retrospective_scores(
+                    conn,
+                    eval_split_regime=eval_split_regime,
+                    location_id=CANONICAL_LOCATION_ID,
+                    is_prospective_filter=is_prospective,
+                    block_length=7,
+                    n_bootstrap=2000,
+                    seed=42,
+                )
+            except ValueError:
+                eval_res = {
+                    "eval_split_regime": eval_split_regime,
+                    "is_prospective_filter": is_prospective,
+                    "mase_scale": 3.7015424361567635,
+                    "origin_min": None,
+                    "origin_max": None,
+                    "target_date_min": None,
+                    "target_date_max": None,
+                    "unique_origins": 0,
+                    "total_scored_rows": 0,
+                    "is_prospective_counts": {},
+                    "temporal_status_at_issue_counts": {},
+                    "obs_revision_delta_nonzero_count": 0,
+                    "leaderboard_vs_latest": [],
+                    "models": {},
+                    "block_bootstrap": {
+                        "method": "moving_block_bootstrap",
+                        "block_length": 7,
+                        "n_bootstrap": 2000,
+                        "seed": 42,
+                        "n_anchor_dates": 0,
+                        "models": {},
+                        "pairwise_delta_mae": {},
+                    },
+                    "methodological_notes": dict(METHODOLOGICAL_NOTES),
+                }
+        finally:
+            conn.close()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"[SERVER_DB_DATA_ERROR] Failed to evaluate /scores from SQLite store: {exc}",
+        ) from exc
+
+    boot = eval_res.get("block_bootstrap", {})
+    boot_models = boot.get("models", {})
+    models_out: Dict[str, Any] = {}
+    for m_id, m_entry in eval_res.get("models", {}).items():
+        m_boot = boot_models.get(m_id, {})
+        models_out[m_id] = {
+            **m_entry,
+            "confidence_intervals_95pct": m_boot,
+        }
+
+    leaderboard_out: List[Dict[str, Any]] = []
+    for row in eval_res.get("leaderboard_vs_latest", []):
+        m_id = row["model_id"]
+        ov_boot = boot_models.get(m_id, {}).get("overall", {})
+        leaderboard_out.append(
+            {
+                **row,
+                "MAE_ci95": ov_boot.get("MAE"),
+                "RMSE_ci95": ov_boot.get("RMSE"),
+                "MASE_ci95": ov_boot.get("MASE"),
+            }
+        )
+
+    n_origins = int(eval_res.get("unique_origins", 0))
+    n_forecasts_per_model = (
+        int(next(iter(eval_res["models"].values()))["n_forecasts"]) if eval_res.get("models") else 0
+    )
+
+    return {
+        "location_id": CANONICAL_LOCATION_ID,
+        "db_role": db_role,
+        "eval_split_regime": eval_split_regime,
+        "is_prospective_filter": is_prospective,
+        "mase_scale": eval_res.get("mase_scale"),
+        "origin_min": eval_res.get("origin_min"),
+        "origin_max": eval_res.get("origin_max"),
+        "target_date_min": eval_res.get("target_date_min"),
+        "target_date_max": eval_res.get("target_date_max"),
+        "n_origins": n_origins,
+        "n_forecasts_per_model": n_forecasts_per_model,
+        "total_scored_rows": int(eval_res.get("total_scored_rows", 0)),
+        "is_prospective_counts": eval_res.get("is_prospective_counts", {}),
+        "temporal_status_at_issue_counts": eval_res.get("temporal_status_at_issue_counts", {}),
+        "leaderboard": leaderboard_out,
+        "models": models_out,
+        "pairwise_delta_mae_ci": boot.get("pairwise_delta_mae", {}),
+        "block_bootstrap": {
+            "method": boot.get("method", "moving_block_bootstrap"),
+            "block_length": boot.get("block_length", 7),
+            "n_bootstrap": boot.get("n_bootstrap", 2000),
+            "seed": boot.get("seed", 42),
+            "n_anchor_dates": boot.get("n_anchor_dates", n_origins),
+        },
+        "methodological_notes": eval_res.get("methodological_notes", dict(METHODOLOGICAL_NOTES)),
+    }
+
 
 @app.get("/benchmark/leaderboard", tags=["Governance"])
 def get_leaderboard(limit: int = 10):

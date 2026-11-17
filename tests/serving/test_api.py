@@ -47,11 +47,38 @@ def test_health_endpoint(client):
     data = resp.json()
     assert data["status"] == "healthy"
     assert data["predictor_loaded"] is True
+    assert data["db_role"] in ("local_or_production_db", "bundled_demo_db", "sample_csv")
+    assert "default_complete_anchor_date" in data
+    assert "journal_mode" in data
+    if data["db_role"] == "bundled_demo_db":
+        assert data["default_complete_anchor_date"] == "2026-08-30"
+        assert data["journal_mode"] == "delete"
+    elif data["db_role"] == "local_or_production_db":
+        assert data["default_complete_anchor_date"] == "2026-08-30"
+        assert data["journal_mode"] in ("delete", "wal")
     assert data["serving_model"]["scenario_id"] == "SC-35"
     assert len(data["shadow_models"]) == 2
     aliases = [m["alias"] for m in data["shadow_models"]]
     assert "shadow_val_champ" in aliases
     assert "shadow_test_contender" in aliases
+    assert len(data["baselines"]) == 2
+
+
+def test_models_endpoint(client):
+    """Task 5: /models returns 3 ML models + 2 baselines + sha256_checksums including demo_rainfall_vintage.db."""
+    resp = client.get("/models")
+    assert resp.status_code == 200
+    data = resp.json()
+    for key in (
+        "serving",
+        "shadow_val_champ",
+        "shadow_test_contender",
+        "baseline_persistence",
+        "baseline_climatology_doy",
+    ):
+        assert key in data["models"], f"Missing {key} in /models response"
+    assert "demo_rainfall_vintage.db" in data["sha256_checksums"]
+    assert data == client.get("/models/info").json()
 
 def test_models_info_endpoint(client):
     resp = client.get("/models/info")
@@ -358,10 +385,11 @@ def test_predict_sample_csv_backend_still_works_for_static_tests(client, monkeyp
 
 
 def test_predict_live_vintage_db_if_present(client):
-    """When live data/vintage/rainfall_vintage.db exists locally, verify end-to-end /predict behavior."""
+    """Verify end-to-end /predict behavior when live or bundled demo SQLite DB exists."""
     live_db = PROJECT_ROOT / "data" / "vintage" / "rainfall_vintage.db"
-    if not live_db.exists():
-        pytest.skip("Live gitignored data/vintage/rainfall_vintage.db not present in CI workspace.")
+    demo_db = PROJECT_ROOT / "artifacts" / "models" / "demo_rainfall_vintage.db"
+    if not (live_db.exists() or demo_db.exists()):
+        pytest.skip("Neither rainfall_vintage.db nor demo_rainfall_vintage.db present.")
 
     resp = client.post("/predict", json={"location_id": "HCMC"})
     assert resp.status_code == 200
@@ -369,12 +397,67 @@ def test_predict_live_vintage_db_if_present(client):
     assert data["history_backend"] == "sqlite"
     assert data["data_as_of"] == "2026-08-30"
     assert data["effective_future_days"] == 0
+    assert data["forecast_horizon_mode"] == "retrospective_hindcast_only"
     assert "future_forecast_notice" in data
     assert all(item["status"] == "past_observed" for item in data["serving_model"]["hindcast_and_current"])
 
     resp_bad_anchor = client.post("/predict", json={"location_id": "HCMC", "anchor_date": "2026-10-15"})
     assert resp_bad_anchor.status_code == 422
     assert "INCOMPLETE_RADIATION_AT_ANCHOR" in str(resp_bad_anchor.json().get("detail", ""))
+
+
+def test_scores_endpoint(client):
+    """Task 5: /scores serves DB-backed POST_TEST scores, 95% Block Bootstrap CIs, and 3 methodological notes."""
+    resp = client.get("/scores")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["eval_split_regime"] == "POST_TEST"
+    assert data["db_role"] in ("local_or_production_db", "bundled_demo_db")
+    assert data["n_origins"] == 122
+    assert data["n_forecasts_per_model"] == 854
+    assert data["total_scored_rows"] == 4270
+    assert data["origin_min"] == "2026-05-01"
+    assert data["origin_max"] == "2026-08-30"
+    assert data["block_bootstrap"]["block_length"] == 7
+    assert data["block_bootstrap"]["n_bootstrap"] == 2000
+
+    for m_id in ("SC-31", "SC-30", "SC-35", "BASELINE_CLIMATOLOGY_DOY", "BASELINE_PERSISTENCE"):
+        assert m_id in data["models"]
+        m_entry = data["models"][m_id]
+        assert set(m_entry["by_horizon_vs_latest"].keys()) == {f"h{h}" for h in range(1, 8)}
+        ci_95 = m_entry["confidence_intervals_95pct"]
+        for metric in ("MAE", "RMSE", "MASE"):
+            assert ci_95["overall"][metric]["ci_lower"] <= ci_95["overall"][metric]["ci_upper"]
+        for h in range(1, 8):
+            assert f"h{h}" in ci_95["by_horizon"]
+
+    assert "SC-35 - BASELINE_CLIMATOLOGY_DOY" in data["pairwise_delta_mae_ci"]
+    assert data["pairwise_delta_mae_ci"]["SC-35 - BASELINE_CLIMATOLOGY_DOY"]["significant_at_95pct"] is True
+    assert set(data["methodological_notes"].keys()) == {
+        "effective_sample_size",
+        "first_vs_latest_equality",
+        "seasonal_regime_note",
+    }
+
+    # Explicit retrospective filter matches 122 origins; invalid params return HTTP 422
+    resp_retro = client.get("/scores?eval_split_regime=POST_TEST&is_prospective=0")
+    assert resp_retro.status_code == 200
+    assert resp_retro.json()["n_origins"] == 122
+
+    assert client.get("/scores?eval_split_regime=INVALID_SPLIT").status_code == 422
+    assert client.get("/scores?is_prospective=9").status_code == 422
+
+
+def test_openapi_snapshot_matches_live_app():
+    """Task 5: Locked OpenAPI snapshot at docs/openapi_snapshot.json matches live FastAPI schema 100%."""
+    import json
+
+    snapshot_path = PROJECT_ROOT / "docs" / "openapi_snapshot.json"
+    assert snapshot_path.exists(), f"Missing {snapshot_path}"
+    expected_spec = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    live_spec = app.openapi()
+    assert live_spec == expected_spec
+    assert set(["/health", "/models", "/models/info", "/predict", "/scores"]).issubset(live_spec["paths"].keys())
 
 
 @pytest.mark.parametrize(

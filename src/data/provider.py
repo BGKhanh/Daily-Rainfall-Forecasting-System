@@ -30,8 +30,8 @@ import pandas as pd
 from src.config.constants import Config
 from src.data.vintage_store import (
     ALL_35_VARS,
-    CANONICAL_VI_COLUMN_ORDER,
     HCMC_LOCATION_ID,
+    align_and_validate_canonical_raw_df,
     connect_sqlite,
     get_default_complete_anchor_date,
 )
@@ -39,7 +39,29 @@ from src.data.vintage_store import (
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SAMPLE_HISTORY_PATH = PROJECT_ROOT / "artifacts" / "models" / "sample_recent_history_35d.csv"
 DEFAULT_VINTAGE_DB_PATH = PROJECT_ROOT / "data" / "vintage" / "rainfall_vintage.db"
+DEFAULT_DEMO_VINTAGE_DB_PATH = PROJECT_ROOT / "artifacts" / "models" / "demo_rainfall_vintage.db"
 SUPPORTED_BACKENDS = ("local", "sqlite", "sample_csv", "supabase", "turso")
+
+
+def resolve_sqlite_db_path_and_role(explicit_db_path: Optional[Path] = None) -> tuple[Optional[Path], str]:
+    """
+    Resolve active SQLite database path and explicit DB role according to Two-DB convention:
+    1. Explicit `db_path` argument (e.g. test fixtures) -> `(path, "local_or_production_db")`
+    2. `VINTAGE_DB_PATH` env var -> `(path, "local_or_production_db")`
+    3. `data/vintage/rainfall_vintage.db` if exists -> `(path, "local_or_production_db")`
+    4. `artifacts/models/demo_rainfall_vintage.db` if exists -> `(path, "bundled_demo_db")`
+    5. Otherwise -> `(None, "sample_csv")`
+    """
+    if explicit_db_path is not None:
+        return Path(explicit_db_path), "local_or_production_db"
+    env_db = os.environ.get("VINTAGE_DB_PATH", "").strip()
+    if env_db:
+        return Path(env_db), "local_or_production_db"
+    if DEFAULT_VINTAGE_DB_PATH.exists():
+        return DEFAULT_VINTAGE_DB_PATH, "local_or_production_db"
+    if DEFAULT_DEMO_VINTAGE_DB_PATH.exists():
+        return DEFAULT_DEMO_VINTAGE_DB_PATH, "bundled_demo_db"
+    return None, "sample_csv"
 
 
 class IncompleteRadiationAtAnchorError(ValueError):
@@ -63,6 +85,7 @@ class WeatherHistoryResult:
     source_detail: str
     observed_precip_by_date: Optional[Dict[str, float]] = None
     anchor_completeness_regime: Optional[str] = None
+    db_role: str = "sample_csv"
 
 
 class BaseWeatherHistoryAdapter(ABC):
@@ -90,8 +113,11 @@ class SQLiteVintageHistoryAdapter(BaseWeatherHistoryAdapter):
         self,
         db_path: Optional[Path] = None,
         location_id: str = HCMC_LOCATION_ID,
+        db_role: Optional[str] = None,
     ) -> None:
-        self.db_path = Path(db_path) if db_path else DEFAULT_VINTAGE_DB_PATH
+        resolved_path, inferred_role = resolve_sqlite_db_path_and_role(db_path)
+        self.db_path = resolved_path if resolved_path is not None else DEFAULT_VINTAGE_DB_PATH
+        self.db_role = db_role or inferred_role
         self.location_id = location_id
 
     def fetch_recent_history(
@@ -225,7 +251,7 @@ class SQLiteVintageHistoryAdapter(BaseWeatherHistoryAdapter):
         df["DATE"] = pd.to_datetime(df["DATE"]).dt.normalize()
         en_to_vi = {k: v for k, v in Config.COLUMN_MAPPING.items() if k == "DATE" or k in ALL_35_VARS}
         df = df.rename(columns=en_to_vi)
-        df = df[list(CANONICAL_VI_COLUMN_ORDER)].sort_values("Ngày").reset_index(drop=True)
+        df = align_and_validate_canonical_raw_df(df).sort_values("Ngày").reset_index(drop=True)
 
         return WeatherHistoryResult(
             history_df=df,
@@ -235,6 +261,7 @@ class SQLiteVintageHistoryAdapter(BaseWeatherHistoryAdapter):
             source_detail=f"sqlite:{self.db_path.name}",
             observed_precip_by_date=observed_precip,
             anchor_completeness_regime=anchor_regime,
+            db_role=self.db_role,
         )
 
 
@@ -467,22 +494,32 @@ class WeatherHistoryProvider:
             )
         self.backend = resolved
         self.sample_csv_path = sample_csv_path
-        self.db_path = Path(db_path) if db_path else DEFAULT_VINTAGE_DB_PATH
+        resolved_db, resolved_role = resolve_sqlite_db_path_and_role(db_path)
+        self.explicit_db_path = db_path
+        self.db_path = resolved_db
+        self.db_role = "sample_csv" if resolved == "sample_csv" else resolved_role
         self.fallback_to_local = fallback_to_local
         self._adapter = self._build_adapter(resolved)
 
     def _build_adapter(self, backend: str) -> BaseWeatherHistoryAdapter:
         if backend == "sqlite":
-            return SQLiteVintageHistoryAdapter(db_path=self.db_path)
+            return SQLiteVintageHistoryAdapter(
+                db_path=self.db_path or DEFAULT_VINTAGE_DB_PATH,
+                db_role=self.db_role if self.db_path is not None else "local_or_production_db",
+            )
         if backend == "sample_csv":
+            self.db_role = "sample_csv"
             return LocalWeatherHistoryAdapter(sample_csv_path=self.sample_csv_path)
         if backend == "local":
-            if self.sample_csv_path is None and self.db_path.exists():
-                return SQLiteVintageHistoryAdapter(db_path=self.db_path)
+            if self.sample_csv_path is None and self.db_path is not None and self.db_path.exists():
+                return SQLiteVintageHistoryAdapter(db_path=self.db_path, db_role=self.db_role)
+            self.db_role = "sample_csv"
             return LocalWeatherHistoryAdapter(sample_csv_path=self.sample_csv_path)
         if backend == "supabase":
+            self.db_role = "supabase"
             return SupabaseWeatherHistoryAdapter()
         if backend == "turso":
+            self.db_role = "turso"
             return TursoWeatherHistoryAdapter()
         raise ValueError(f"Unsupported WEATHER_DB_BACKEND='{backend}'.")
 
