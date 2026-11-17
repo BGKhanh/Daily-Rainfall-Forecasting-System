@@ -38,6 +38,9 @@ from src.data.vintage_store import (  # noqa: E402
     compute_row_value_hash,
     connect_sqlite,
     derive_eval_split_regime,
+    derive_temporal_status_at_issue,
+    finalize_db_for_read_only,
+    get_default_complete_anchor_date,
     ingest_nasa_power_window,
     init_schema,
     insert_forecasts_idempotent,
@@ -653,14 +656,23 @@ def test_flashflux_incomplete_and_eval_split_regime():
     finally:
         conn.close()
 
-    # 3) derive_eval_split_regime canonical boundaries
+    # 3) derive_eval_split_regime canonical calendar boundaries (all 724 Val & 2,184 Test origins)
     assert derive_eval_split_regime("2015-06-01") == "DEV_TRAIN"
     assert derive_eval_split_regime("2018-04-30") == "DEV_TRAIN"
     assert derive_eval_split_regime("2018-05-01") == "VALIDATION"
     assert derive_eval_split_regime("2020-04-30") == "VALIDATION"
     assert derive_eval_split_regime("2020-05-01") == "TEST"
     assert derive_eval_split_regime("2026-04-27") == "TEST"
-    assert derive_eval_split_regime("2026-04-28") == "LIVE"
+    assert derive_eval_split_regime("2026-04-30") == "TEST"
+    assert derive_eval_split_regime("2026-05-01") == "POST_TEST"
+
+    val_origins = pd.date_range("2018-05-01", "2020-04-23", freq="D")
+    assert len(val_origins) == 724
+    assert all(derive_eval_split_regime(d.strftime("%Y-%m-%d")) == "VALIDATION" for d in val_origins)
+
+    test_origins = pd.date_range("2020-05-01", "2026-04-23", freq="D")
+    assert len(test_origins) == 2184
+    assert all(derive_eval_split_regime(d.strftime("%Y-%m-%d")) == "TEST" for d in test_origins)
 
 
 def test_insert_forecasts_idempotent_skips_duplicates(caplog):
@@ -685,7 +697,7 @@ def test_insert_forecasts_idempotent_skips_duplicates(caplog):
                 "artifact_sha256": "artsha",
                 "feature_builder_sha256": "fbsha",
                 "data_as_of": data_as_of,
-                "eval_split_regime": "DEV_TRAIN",  # Intentionally wrong manual string; must be overridden to LIVE
+                "eval_split_regime": "DEV_TRAIN",  # Intentionally wrong manual string; must be overridden to POST_TEST
                 "horizon_day": horizon,
                 "target_date": tgt,
                 "temporal_status_at_issue": "future_forecast",
@@ -710,7 +722,7 @@ def test_insert_forecasts_idempotent_skips_duplicates(caplog):
 
         rows = conn.execute("SELECT horizon_day, eval_split_regime FROM forecasts_ledger ORDER BY horizon_day").fetchall()
         assert [r["horizon_day"] for r in rows] == [1, 2, 3, 4, 5, 6, 7]
-        assert all(r["eval_split_regime"] == "LIVE" for r in rows)
+        assert all(r["eval_split_regime"] == "POST_TEST" for r in rows)
 
         # Raw INSERT OR REPLACE must still be blocked by trigger
         with pytest.raises(sqlite3.IntegrityError, match="IMMUTABLE_VIOLATION"):
@@ -725,7 +737,7 @@ def test_insert_forecasts_idempotent_skips_duplicates(caplog):
                     ceres_policy_applied, git_sha
                 ) VALUES (
                     'HCMC_SC-35_2026-05-01_h1', 't', '2026-05-04', 'HCMC',
-                    'SC-35', 'ML_SERVING', 'x', '2026-05-01', 'LIVE',
+                    'SC-35', 'ML_SERVING', 'x', '2026-05-01', 'POST_TEST',
                     1, '2026-05-02', 'future_forecast', 99.0,
                     '2026-04-02', '2026-05-01', 'w', '[]', 30, 'NONE_COMPLETE', 's'
                 )
@@ -735,48 +747,66 @@ def test_insert_forecasts_idempotent_skips_duplicates(caplog):
         conn.close()
 
 
-def test_read_only_wal_sqlite_and_immutable_fallback(tmp_path: Path, monkeypatch):
-    """Verify connect_sqlite(read_only=True) works on WAL DBs and falls back to immutable=1 when -shm fails."""
-    db_path = tmp_path / "wal_ro_test.db"
+def test_wal_checkpoint_prevents_immutable_snapshot_bug(tmp_path: Path):
+    """
+    Prove that uncheckpointed WAL commits are missed by single-file copy or ?immutable=1,
+    and that finalize_db_for_read_only() / VACUUM INTO guarantees 100% visibility via ?mode=ro.
+    """
+    import shutil
+
+    db_path = tmp_path / "wal_snapshot_test.db"
     w_conn = connect_sqlite(db_path, read_only=False, recursive_triggers=True)
     try:
         init_schema(w_conn)
-        assert w_conn.execute("PRAGMA journal_mode;").fetchone()[0].lower() == "wal"
-        dates = pd.date_range("2026-03-27", periods=35, freq="D")
-        df_35 = pd.DataFrame([{"DATE": d.strftime("%Y-%m-%d"), **_sample_var_dict(rain=3.0)} for d in dates])
+        dates_35 = pd.date_range("2026-03-27", periods=35, freq="D")
+        df_35 = pd.DataFrame([{"DATE": d.strftime("%Y-%m-%d"), **_sample_var_dict(rain=3.0)} for d in dates_35])
         seed_historical_csv_vintage_v0(w_conn, df=df_35)
+
+        # Force WAL mode and prevent automatic passive checkpoint on a fresh uncheckpointed insert
+        w_conn.execute("PRAGMA journal_mode = WAL;")
+        w_conn.execute("PRAGMA wal_autocheckpoint = 0;")
+        w_conn.execute("BEGIN IMMEDIATE;")
+        w_conn.execute(
+            """
+            INSERT INTO locations (location_id, display_name, latitude, longitude, created_at_utc)
+            VALUES ('WAL_PROBE', 'Uncheckpointed Probe', 10.0, 106.0, '2026-11-16T00:00:00Z')
+            """
+        )
+        w_conn.execute("COMMIT;")
+
+        # 1) Copying ONLY the .db file without -wal (or opening with immutable=1) silently misses 'WAL_PROBE'
+        copied_only_db = tmp_path / "copied_only.db"
+        shutil.copy2(db_path, copied_only_db)
+        c_only = sqlite3.connect(f"{copied_only_db.resolve().as_uri()}?mode=ro", uri=True)
+        try:
+            assert c_only.execute("SELECT COUNT(*) FROM locations WHERE location_id = 'WAL_PROBE'").fetchone()[0] == 0
+        finally:
+            c_only.close()
+
+        c_imm = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro&immutable=1", uri=True)
+        try:
+            assert c_imm.execute("SELECT COUNT(*) FROM locations WHERE location_id = 'WAL_PROBE'").fetchone()[0] == 0
+        finally:
+            c_imm.close()
+
+        # 2) After finalize_db_for_read_only(), journal_mode switches cleanly to DELETE & 100% rows reside in .db
+        finalize_db_for_read_only(w_conn)
+        assert w_conn.execute("PRAGMA journal_mode;").fetchone()[0].lower() == "delete"
     finally:
         w_conn.close()
 
-    # 1) Direct read_only=True
-    r_conn = connect_sqlite(db_path, read_only=True)
+    # Single-file copy now contains 100% of rows and opens strictly via connect_sqlite(read_only=True) (?mode=ro)
+    copied_finalized = tmp_path / "copied_finalized.db"
+    shutil.copy2(db_path, copied_finalized)
+    r_conn = connect_sqlite(copied_finalized, read_only=True)
     try:
         assert r_conn.execute("PRAGMA query_only;").fetchone()[0] == 1
-        cnt = r_conn.execute("SELECT COUNT(*) FROM v_observations_latest").fetchone()[0]
-        assert cnt == 35
+        assert r_conn.execute("SELECT COUNT(*) FROM locations WHERE location_id = 'WAL_PROBE'").fetchone()[0] == 1
+        assert r_conn.execute("SELECT COUNT(*) FROM v_observations_latest").fetchone()[0] == 35
         with pytest.raises(sqlite3.OperationalError, match="readonly"):
             r_conn.execute("UPDATE locations SET display_name = 'Tamper'")
     finally:
         r_conn.close()
-
-    # 2) Simulate read-only container mount blocking WAL -shm -> must fallback to ?mode=ro&immutable=1
-    real_connect = sqlite3.connect
-    calls: list[str] = []
-
-    def _mock_connect(target, *args, **kwargs):
-        calls.append(str(target))
-        if isinstance(target, str) and target.endswith("?mode=ro"):
-            raise sqlite3.OperationalError("attempt to write a readonly database")
-        return real_connect(target, *args, **kwargs)
-
-    monkeypatch.setattr(sqlite3, "connect", _mock_connect)
-    fb_conn = connect_sqlite(db_path, read_only=True)
-    try:
-        assert any(c.endswith("?mode=ro") for c in calls)
-        assert any(c.endswith("?mode=ro&immutable=1") for c in calls)
-        assert fb_conn.execute("SELECT COUNT(*) FROM v_observations_latest").fetchone()[0] == 35
-    finally:
-        fb_conn.close()
 
 
 def test_mock_nasa_api_revision_and_as_of_scores(tmp_path: Path):
@@ -913,5 +943,134 @@ def test_mock_nasa_api_revision_and_as_of_scores(tmp_path: Path):
         assert score["obs_latest_mm"] == pytest.approx(10.0)
         assert score["abs_error_vs_first_mm"] == pytest.approx(4.5)
         assert score["abs_error_vs_latest_mm"] == pytest.approx(4.0)
+        # First observation of 2026-04-29 (1.5 mm) was ingested at t1_scan (01:00Z) before t1_issue (02:00Z)
+        assert score["is_prospective"] == 0
+    finally:
+        conn.close()
+
+
+def test_ddl_v3_2_unpublished_skip_first_non_null_precip_and_temporal_status(tmp_path: Path):
+    """
+    Verify DDL V3.2 contracts:
+    1. Dates with missing_count == 35 are skipped (rows_unpublished_skipped) and not inserted.
+    2. _compute_latest_valid_by_group exposes per_variable_last_valid_date & incomplete_dates_in_window.
+    3. When v0 has PRECTOTCORR=NULL and v1 has 8.5, v_forecast_scores picks v1 for obs_first_* and sets is_prospective.
+    4. derive_temporal_status_at_issue supports 'past_observed', 'past_unverified', 'today', 'future_forecast'.
+    5. get_default_complete_anchor_date returns latest COMPLETE_ALL_35 date with 30-day window.
+    """
+    assert derive_temporal_status_at_issue("2026-08-30", "2026-11-16", True) == "past_observed"
+    assert derive_temporal_status_at_issue("2026-08-30", "2026-11-16", False) == "past_unverified"
+    assert derive_temporal_status_at_issue("2026-11-16", "2026-11-16", True) == "today"
+    assert derive_temporal_status_at_issue("2026-11-17", "2026-11-16", False) == "future_forecast"
+
+    db_path = tmp_path / "ddl_v32_test.db"
+    conn = connect_sqlite(db_path, read_only=False, recursive_triggers=True)
+    try:
+        init_schema(conn)
+        dates = pd.date_range("2026-07-30", "2026-09-05", freq="D")
+
+        def _fetcher_v0(**kwargs) -> dict:
+            param_map: dict[str, dict[str, float]] = {var: {} for var in ALL_35_VARS}
+            for d in dates:
+                ds = d.strftime("%Y-%m-%d")
+                ymd = d.strftime("%Y%m%d")
+                base = _sample_var_dict(rain=2.0)
+                for var in ALL_35_VARS:
+                    val = base[var]
+                    if ds in ("2026-09-04", "2026-09-05"):
+                        val = -999.0  # All 35/35 unpublished
+                    elif ds == "2026-09-03" and var == "PRECTOTCORR":
+                        val = -999.0  # Missing rain at v0
+                    elif ds == "2026-09-01" and var in FLASHFLUX_3_VARS:
+                        val = -999.0  # Flashflux incomplete interior/tail
+                    elif ds == "2026-09-02" and var in CERES_ONLY_8_VARS:
+                        val = -999.0
+                    param_map[var][ymd] = val
+            return {
+                "header": {"api": {"version": "v2.10.3"}, "sources": ["GEOSIT", "FLASHFLUX"]},
+                "properties": {"parameter": param_map},
+            }
+
+        res1 = ingest_nasa_power_window(
+            conn,
+            start_date="2026-07-30",
+            end_date="2026-09-05",
+            fetcher=_fetcher_v0,
+            ingested_at_utc="2026-09-06T01:00:00Z",
+        )
+        assert res1["rows_unpublished_skipped"] == 2
+        assert res1["rows_inserted_v0"] == len(dates) - 2
+        assert res1["revision_stats_json"]["unpublished_dates_skipped"] == ["2026-09-04", "2026-09-05"]
+        assert conn.execute("SELECT COUNT(*) FROM observations_vintage WHERE missing_count = 35").fetchone()[0] == 0
+
+        ff_stats = res1["latest_valid_by_group_json"]["RAD_FLASHFLUX"]
+        assert ff_stats["per_variable_last_valid_date"]["ALLSKY_SFC_SW_DWN"] == "2026-09-03"
+        assert "2026-09-01" in ff_stats["incomplete_dates_in_window"]
+        assert get_default_complete_anchor_date(conn) == "2026-08-31"
+
+        # Issue forecast anchored on 2026-08-31 targeting 2026-09-03 (at issue time, 2026-09-03 has NULL rain)
+        win = query_observations_as_of(
+            conn,
+            location_id="HCMC",
+            input_window_start="2026-08-02",
+            input_window_end="2026-08-31",
+            issued_at_utc="2026-09-06T02:00:00Z",
+        )
+        assert len(win) == 30
+        insert_forecasts_idempotent(
+            conn,
+            [
+                {
+                    "forecast_id": "fc_v32_null_precip_probe",
+                    "issued_at_utc": "2026-09-06T02:00:00Z",
+                    "issued_run_date": "2026-09-06",
+                    "location_id": "HCMC",
+                    "model_id": "SC-35",
+                    "model_kind": "ML_SERVING",
+                    "artifact_sha256": "artsha",
+                    "data_as_of": "2026-08-31",
+                    "horizon_day": 3,
+                    "target_date": "2026-09-03",
+                    "temporal_status_at_issue": None,  # Derived automatically: past_unverified since v0 PRECTOTCORR is NULL
+                    "pred_mm": 5.0,
+                    "input_window_start": "2026-08-02",
+                    "input_window_end": "2026-08-31",
+                    "input_window_hash": compute_input_window_hash(win),
+                    "input_vintage_manifest_json": "[]",
+                    "input_provisional_days": 30,
+                    "ceres_policy_applied": "NONE_COMPLETE",
+                    "git_sha": "testsha",
+                }
+            ],
+        )
+        fc_row = conn.execute(
+            "SELECT temporal_status_at_issue FROM forecasts_ledger WHERE forecast_id = 'fc_v32_null_precip_probe'"
+        ).fetchone()
+        assert fc_row["temporal_status_at_issue"] == "past_unverified"
+
+        # Second scan fills 2026-09-03 PRECTOTCORR = 8.5 in v1
+        def _fetcher_v1(**kwargs) -> dict:
+            p = _fetcher_v0(**kwargs)
+            p["properties"]["parameter"]["PRECTOTCORR"]["20260903"] = 8.5
+            return p
+
+        ingest_nasa_power_window(
+            conn,
+            start_date="2026-07-30",
+            end_date="2026-09-05",
+            fetcher=_fetcher_v1,
+            ingested_at_utc="2026-09-10T01:00:00Z",
+        )
+        score = dict(
+            conn.execute(
+                "SELECT * FROM v_forecast_scores WHERE forecast_id = 'fc_v32_null_precip_probe'"
+            ).fetchone()
+        )
+        assert score["obs_first_version_num"] == 1
+        assert score["obs_first_mm"] == pytest.approx(8.5)
+        assert score["obs_first_ingested_at_utc"] == "2026-09-10T01:00:00Z"
+        assert score["obs_first_age_days_at_ingest"] == 7
+        assert score["is_prospective"] == 1
+        assert score["abs_error_vs_first_mm"] == pytest.approx(3.5)
     finally:
         conn.close()

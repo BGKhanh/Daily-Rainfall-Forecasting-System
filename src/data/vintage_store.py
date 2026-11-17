@@ -1,13 +1,13 @@
 """
-Immutable Vintage Time-Series & Forecast Ledger Store (DDL V3.1)
+Immutable Vintage Time-Series & Forecast Ledger Store (DDL V3.2)
 ================================================================
-Implements the frozen V3.1 SQLite (3.35+ / Turso libSQL compatible) schema for:
+Implements the frozen V3.2 SQLite (3.35+ / Turso libSQL compatible) schema for:
 - `locations` (single source of truth for `HCMC` coordinates & `provisional_window_days`)
-- `ingestion_runs` (strict append-only audit log with `SUCCESS` / `FAILED` states only)
+- `ingestion_runs` (strict append-only audit log with `SUCCESS` / `FAILED` states only & `rows_unpublished_skipped`)
 - `observations_vintage` (append-only meteorological vintages + deterministic completeness checks)
-- `forecasts_ledger` (immutable issued forecasts + `is_degraded_input` contract + deterministic `eval_split_regime`)
+- `forecasts_ledger` (immutable issued forecasts + `is_degraded_input` contract + deterministic `eval_split_regime` / `temporal_status_at_issue`)
 - 9 immutability triggers (`BEFORE INSERT` no-replace, `BEFORE UPDATE`, `BEFORE DELETE`)
-- 3 derived views (`v_observations_latest`, `v_observations_first_seen`, `v_forecast_scores`)
+- 3 derived views (`v_observations_latest`, `v_observations_first_seen`, `v_forecast_scores` with `is_prospective`)
 """
 
 from __future__ import annotations
@@ -96,6 +96,14 @@ METEO_24_VARS: Tuple[str, ...] = (
 
 ALL_35_VARS: Tuple[str, ...] = FLASHFLUX_3_VARS + CERES_ONLY_8_VARS + METEO_24_VARS
 
+# Canonical DataLoader / training column order (matches FeatureBuilder positional ndarray contract)
+CANONICAL_EN_COLUMN_ORDER: Tuple[str, ...] = ("DATE",) + tuple(
+    k for k in Config.COLUMN_MAPPING if k in ALL_35_VARS
+)
+CANONICAL_VI_COLUMN_ORDER: Tuple[str, ...] = tuple(
+    Config.COLUMN_MAPPING[k] for k in CANONICAL_EN_COLUMN_ORDER
+)
+
 # Reverse mapping: Vietnamese column names -> English NASA parameter names
 VI_TO_EN_COLUMNS: Dict[str, str] = {vi: en for en, vi in Config.COLUMN_MAPPING.items() if en in ALL_35_VARS or en == "DATE"}
 
@@ -135,11 +143,12 @@ DDL_V3_STATEMENTS: Tuple[str, ...] = (
         rows_late_fill_only        INTEGER NOT NULL DEFAULT 0 CHECK (rows_late_fill_only >= 0),
         rows_value_change          INTEGER NOT NULL DEFAULT 0 CHECK (rows_value_change >= 0),
         rows_unchanged             INTEGER NOT NULL DEFAULT 0 CHECK (rows_unchanged >= 0),
+        rows_unpublished_skipped   INTEGER NOT NULL DEFAULT 0 CHECK (rows_unpublished_skipped >= 0),
         latest_valid_by_group_json TEXT,
         revision_stats_json        TEXT,
         git_sha                    TEXT NOT NULL,
         error_message              TEXT,
-        CHECK (status = 'SUCCESS' OR (rows_inserted_v0 = 0 AND rows_new_vintage = 0))
+        CHECK (status = 'SUCCESS' OR (rows_inserted_v0 = 0 AND rows_new_vintage = 0 AND rows_unpublished_skipped = 0))
     );
     """,
     # 3. observations_vintage
@@ -248,10 +257,10 @@ DDL_V3_STATEMENTS: Tuple[str, ...] = (
         artifact_sha256             TEXT NOT NULL,
         feature_builder_sha256      TEXT,
         data_as_of                  TEXT NOT NULL,
-        eval_split_regime           TEXT NOT NULL CHECK (eval_split_regime IN ('DEV_TRAIN', 'VALIDATION', 'TEST', 'LIVE')),
+        eval_split_regime           TEXT NOT NULL CHECK (eval_split_regime IN ('DEV_TRAIN', 'VALIDATION', 'TEST', 'POST_TEST')),
         horizon_day                 INTEGER NOT NULL CHECK (horizon_day BETWEEN 1 AND 7),
         target_date                 TEXT NOT NULL,
-        temporal_status_at_issue    TEXT NOT NULL CHECK (temporal_status_at_issue IN ('past_unverified', 'today', 'future_forecast')),
+        temporal_status_at_issue    TEXT NOT NULL CHECK (temporal_status_at_issue IN ('past_observed', 'past_unverified', 'today', 'future_forecast')),
         pred_mm                     REAL NOT NULL CHECK (pred_mm >= 0.0),
         input_window_start          TEXT NOT NULL,
         input_window_end            TEXT NOT NULL,
@@ -413,6 +422,8 @@ DDL_V3_STATEMENTS: Tuple[str, ...] = (
         f.model_kind,
         f.registry_alias,
         f.registry_model_version,
+        f.issued_at_utc,
+        f.issued_run_date,
         f.data_as_of,
         f.eval_split_regime,
         f.horizon_day,
@@ -423,13 +434,20 @@ DDL_V3_STATEMENTS: Tuple[str, ...] = (
         f.pred_mm,
         fst.version_num                           AS obs_first_version_num,
         fst.ingest_origin                         AS obs_first_ingest_origin,
+        fst.ingested_at_utc                       AS obs_first_ingested_at_utc,
         fst.age_days_at_ingest                    AS obs_first_age_days_at_ingest,
         fst.completeness_regime                   AS obs_first_completeness,
         fst.PRECTOTCORR                           AS obs_first_mm,
+        CASE
+            WHEN fst.ingested_at_utc IS NULL THEN NULL
+            WHEN fst.ingested_at_utc > f.issued_at_utc THEN 1
+            ELSE 0
+        END                                       AS is_prospective,
         ABS(f.pred_mm - fst.PRECTOTCORR)          AS abs_error_vs_first_mm,
         (f.pred_mm - fst.PRECTOTCORR)             AS signed_error_vs_first_mm,
         lat.version_num                           AS obs_latest_version_num,
         lat.ingest_origin                         AS obs_latest_ingest_origin,
+        lat.ingested_at_utc                       AS obs_latest_ingested_at_utc,
         lat.age_days_at_ingest                    AS obs_latest_age_days_at_ingest,
         lat.completeness_regime                   AS obs_latest_completeness,
         lat.is_provisional                        AS obs_latest_is_provisional,
@@ -438,8 +456,18 @@ DDL_V3_STATEMENTS: Tuple[str, ...] = (
         (f.pred_mm - lat.PRECTOTCORR)             AS signed_error_vs_latest_mm,
         (lat.PRECTOTCORR - fst.PRECTOTCORR)       AS obs_revision_delta_mm
     FROM forecasts_ledger f
-    LEFT JOIN v_observations_first_seen fst
-           ON f.location_id = fst.location_id AND f.target_date = fst.obs_date
+    LEFT JOIN (
+        SELECT o.*
+        FROM observations_vintage o
+        INNER JOIN (
+            SELECT location_id, obs_date, MIN(version_num) AS first_precip_ver
+            FROM observations_vintage
+            WHERE PRECTOTCORR IS NOT NULL
+            GROUP BY location_id, obs_date
+        ) fp ON o.location_id = fp.location_id
+            AND o.obs_date = fp.obs_date
+            AND o.version_num = fp.first_precip_ver
+    ) fst ON f.location_id = fst.location_id AND f.target_date = fst.obs_date
     LEFT JOIN v_observations_latest lat
            ON f.location_id = lat.location_id AND f.target_date = lat.obs_date;
     """,
@@ -476,12 +504,11 @@ def connect_sqlite(
     recursive_triggers: bool = True,
 ) -> sqlite3.Connection:
     """
-    Open SQLite connection with required V3.1 pragmas.
+    Open SQLite connection with required V3.2 pragmas.
 
-    When `read_only=True`, opens via SQLite URI `mode=ro` (falling back automatically
-    to `mode=ro&immutable=1` if a read-only container mount blocks WAL `-shm` creation),
-    enforces `PRAGMA foreign_keys = ON; PRAGMA query_only = ON;`, and avoids
-    `PRAGMA journal_mode = WAL;`.
+    When `read_only=True`, opens strictly via SQLite URI `file:{path}?mode=ro`,
+    enforces `PRAGMA foreign_keys = ON; PRAGMA query_only = ON;`, and NEVER falls
+    back to `immutable=1` (preventing silent reads of stale uncheckpointed snapshots).
     """
     if read_only:
         if str(db_path) == ":memory:":
@@ -490,23 +517,17 @@ def connect_sqlite(
         if not resolved.exists():
             raise FileNotFoundError(f"SQLite database not found for read_only mode: {resolved}")
 
-        base_uri = resolved.as_uri()
-        last_err: Optional[sqlite3.Error] = None
-        for suffix in ("?mode=ro", "?mode=ro&immutable=1"):
-            conn: Optional[sqlite3.Connection] = None
-            try:
-                conn = sqlite3.connect(f"{base_uri}{suffix}", uri=True, isolation_level=None)
-                conn.row_factory = sqlite3.Row
-                conn.execute("PRAGMA foreign_keys = ON;")
-                conn.execute("PRAGMA query_only = ON;")
-                # Probe sqlite_master immediately so WAL -shm permission errors trigger immutable fallback
-                conn.execute("SELECT name FROM sqlite_master LIMIT 1;").fetchall()
-                return conn
-            except sqlite3.OperationalError as exc:
-                last_err = exc
-                if conn is not None:
-                    conn.close()
-        raise last_err if last_err is not None else sqlite3.OperationalError("Failed to open SQLite in read_only mode.")
+        ro_uri = f"{resolved.as_uri()}?mode=ro"
+        conn = sqlite3.connect(ro_uri, uri=True, isolation_level=None)
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA foreign_keys = ON;")
+            conn.execute("PRAGMA query_only = ON;")
+            conn.execute("SELECT name FROM sqlite_master LIMIT 1;").fetchall()
+            return conn
+        except Exception:
+            conn.close()
+            raise
 
     conn = sqlite3.connect(str(db_path), isolation_level=None)
     conn.row_factory = sqlite3.Row
@@ -517,8 +538,23 @@ def connect_sqlite(
     return conn
 
 
+def finalize_db_for_read_only(conn: sqlite3.Connection) -> None:
+    """Checkpoint WAL frames cleanly and switch to DELETE mode so single-file ?mode=ro reads see 100% of commits."""
+    try:
+        db_list = conn.execute("PRAGMA database_list;").fetchall()
+        main_file = next((row[2] for row in db_list if row[1] == "main"), "")
+        if not main_file:
+            return
+        if conn.execute("PRAGMA query_only;").fetchone()[0]:
+            return
+    except sqlite3.Error:
+        return
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+    conn.execute("PRAGMA journal_mode = DELETE;")
+
+
 def init_schema(conn: sqlite3.Connection, *, seed_hcmc_location: bool = True) -> None:
-    """Apply DDL V3 tables, indexes, 9 triggers, and 3 views cleanly."""
+    """Apply DDL V3.2 tables, indexes, 9 triggers, and 3 views cleanly, then finalize WAL."""
     for stmt in DDL_V3_STATEMENTS:
         conn.execute(stmt)
     if seed_hcmc_location:
@@ -539,6 +575,7 @@ def init_schema(conn: sqlite3.Connection, *, seed_hcmc_location: bool = True) ->
                 utc_now_iso(),
             ),
         )
+    finalize_db_for_read_only(conn)
 
 
 def _normalize_float_token(val: Any) -> Optional[float]:
@@ -736,6 +773,7 @@ def seed_historical_csv_vintage_v0(
             raise RuntimeError(f"Simulated mid-batch failure after {fail_after_rows} rows.")
         conn.executemany(insert_obs_sql, records)
         conn.execute("COMMIT;")
+        finalize_db_for_read_only(conn)
         return run_id
     except Exception as exc:
         try:
@@ -751,12 +789,13 @@ def seed_historical_csv_vintage_v0(
                 location_id, scan_window_start, scan_window_end,
                 rows_scanned, rows_inserted_v0, rows_new_vintage,
                 rows_late_fill_only, rows_value_change, rows_unchanged,
-                git_sha, error_message
-            ) VALUES (?, 'historical_seed', ?, ?, 'FAILED', ?, ?, ?, ?, 0, 0, 0, 0, 0, ?, ?)
+                rows_unpublished_skipped, git_sha, error_message
+            ) VALUES (?, 'historical_seed', ?, ?, 'FAILED', ?, ?, ?, ?, 0, 0, 0, 0, 0, 0, ?, ?)
             """,
             (run_id, started_at, utc_now_iso(), location_id, win_start, win_end, total_rows, sha, str(exc)),
         )
         conn.execute("COMMIT;")
+        finalize_db_for_read_only(conn)
         raise
 
 
@@ -788,22 +827,89 @@ def read_latest_observations(
     if as_vietnamese:
         en_to_vi = {k: v for k, v in Config.COLUMN_MAPPING.items() if k == "DATE" or k in ALL_35_VARS}
         df = df.rename(columns=en_to_vi)
+        default_order = list(CANONICAL_VI_COLUMN_ORDER)
+    else:
+        default_order = list(CANONICAL_EN_COLUMN_ORDER)
 
     if target_column_order is not None:
         df = df[list(target_column_order)]
+    else:
+        df = df[default_order]
     return df.reset_index(drop=True)
 
 
+def get_default_complete_anchor_date(
+    conn: sqlite3.Connection,
+    location_id: str = HCMC_LOCATION_ID,
+    max_date: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Return the latest `obs_date` in `v_observations_latest` with `completeness_regime = 'COMPLETE_ALL_35'`
+    (optionally `<= max_date`) whose trailing 30-day window `[anchor - 29d .. anchor]` is continuous and
+    contains no missing meteorological/precipitation observations.
+    """
+    where_clauses = ["location_id = ?", "completeness_regime = 'COMPLETE_ALL_35'"]
+    params: List[Any] = [location_id]
+    if max_date is not None:
+        max_date_str = pd.to_datetime(max_date).strftime("%Y-%m-%d")
+        where_clauses.append("obs_date <= ?")
+        params.append(max_date_str)
+
+    candidates = conn.execute(
+        f"""
+        SELECT obs_date
+        FROM v_observations_latest
+        WHERE {' AND '.join(where_clauses)}
+        ORDER BY obs_date DESC
+        """,
+        tuple(params),
+    ).fetchall()
+
+    for cand in candidates:
+        anchor_str = str(cand["obs_date"])
+        anchor_dt = pd.to_datetime(anchor_str)
+        win_start = (anchor_dt - timedelta(days=29)).strftime("%Y-%m-%d")
+        stats = conn.execute(
+            """
+            SELECT
+                COUNT(*) AS cnt,
+                SUM(CASE WHEN missing_count = 0 THEN 1 ELSE 0 END) AS complete_cnt
+            FROM v_observations_latest
+            WHERE location_id = ?
+              AND obs_date BETWEEN ? AND ?
+            """,
+            (location_id, win_start, anchor_str),
+        ).fetchone()
+        if stats is not None and int(stats["cnt"] or 0) == 30 and int(stats["complete_cnt"] or 0) == 30:
+            return anchor_str
+    return None
+
+
 def derive_eval_split_regime(data_as_of: str) -> str:
-    """Deterministically assign split regime from canonical project boundaries."""
+    """Deterministically assign split regime from canonical project calendar boundaries."""
     date_str = pd.to_datetime(data_as_of).strftime("%Y-%m-%d")
     if date_str <= "2018-04-30":
         return "DEV_TRAIN"
     if date_str <= "2020-04-30":
         return "VALIDATION"
-    if date_str <= "2026-04-27":
+    if date_str <= "2026-04-30":
         return "TEST"
-    return "LIVE"
+    return "POST_TEST"
+
+
+def derive_temporal_status_at_issue(
+    target_date: str,
+    issued_run_date: str,
+    target_has_precip_at_issue: bool = False,
+) -> str:
+    """Deterministically assign temporal status at forecast issue time."""
+    tgt = pd.to_datetime(target_date).strftime("%Y-%m-%d")
+    run_d = pd.to_datetime(issued_run_date).strftime("%Y-%m-%d")
+    if tgt < run_d:
+        return "past_observed" if target_has_precip_at_issue else "past_unverified"
+    if tgt == run_d:
+        return "today"
+    return "future_forecast"
 
 
 def insert_forecasts_idempotent(
@@ -858,12 +964,36 @@ def insert_forecasts_idempotent(
         seen_batch_keys.add(nat_key)
         seen_batch_ids.add(forecast_id)
         eval_regime = derive_eval_split_regime(data_as_of)
+        issued_at_str = str(row["issued_at_utc"])
+        issued_run_str = pd.to_datetime(row["issued_run_date"]).strftime("%Y-%m-%d")
+        target_date_str = pd.to_datetime(row["target_date"]).strftime("%Y-%m-%d")
+        temp_status = row.get("temporal_status_at_issue")
+        if temp_status is None:
+            has_precip_row = conn.execute(
+                """
+                SELECT 1
+                FROM observations_vintage
+                WHERE location_id = ?
+                  AND obs_date = ?
+                  AND ingested_at_utc <= ?
+                  AND PRECTOTCORR IS NOT NULL
+                LIMIT 1
+                """,
+                (location_id, target_date_str, issued_at_str),
+            ).fetchone()
+            temp_status = derive_temporal_status_at_issue(
+                target_date_str,
+                issued_run_str,
+                target_has_precip_at_issue=(has_precip_row is not None),
+            )
+        else:
+            temp_status = str(temp_status)
 
         to_insert.append(
             (
                 forecast_id,
-                str(row["issued_at_utc"]),
-                str(row["issued_run_date"]),
+                issued_at_str,
+                issued_run_str,
                 str(row.get("run_timezone", "Asia/Ho_Chi_Minh")),
                 location_id,
                 model_id,
@@ -875,8 +1005,8 @@ def insert_forecasts_idempotent(
                 data_as_of,
                 eval_regime,
                 horizon_day,
-                pd.to_datetime(row["target_date"]).strftime("%Y-%m-%d"),
-                str(row["temporal_status_at_issue"]),
+                target_date_str,
+                temp_status,
                 float(row["pred_mm"]),
                 pd.to_datetime(row["input_window_start"]).strftime("%Y-%m-%d"),
                 pd.to_datetime(row["input_window_end"]).strftime("%Y-%m-%d"),
@@ -924,6 +1054,7 @@ def insert_forecasts_idempotent(
         except Exception:
             conn.execute("ROLLBACK;")
             raise
+        finalize_db_for_read_only(conn)
 
     return (len(to_insert), skipped_count)
 
@@ -1004,11 +1135,25 @@ def _compute_latest_valid_by_group(
     }
     summary: Dict[str, Any] = {}
     for group_name, cols in groups.items():
-        valid_dates = [
-            obs_date
-            for obs_date, row_vals in parsed_rows
-            if all(_normalize_float_token(row_vals.get(c)) is not None for c in cols)
-        ]
+        valid_dates: List[str] = []
+        incomplete_dates: List[str] = []
+        for obs_date, row_vals in parsed_rows:
+            if all(_normalize_float_token(row_vals.get(c)) is not None for c in cols):
+                valid_dates.append(obs_date)
+            else:
+                incomplete_dates.append(obs_date)
+
+        per_var_last_valid: Dict[str, Optional[str]] = {}
+        per_var_valid_days: Dict[str, int] = {}
+        for var in cols:
+            var_dates = [
+                obs_date
+                for obs_date, row_vals in parsed_rows
+                if _normalize_float_token(row_vals.get(var)) is not None
+            ]
+            per_var_last_valid[var] = max(var_dates) if var_dates else None
+            per_var_valid_days[var] = len(var_dates)
+
         if valid_dates:
             latest_dt = max(valid_dates)
             lag_days = max(0, int((end_dt - pd.to_datetime(latest_dt)).days))
@@ -1016,12 +1161,18 @@ def _compute_latest_valid_by_group(
                 "last_valid_date": latest_dt,
                 "lag_days_vs_scan_end": lag_days,
                 "valid_days_in_window": len(valid_dates),
+                "incomplete_dates_in_window": incomplete_dates,
+                "per_variable_last_valid_date": per_var_last_valid,
+                "per_variable_valid_days_in_window": per_var_valid_days,
             }
         else:
             summary[group_name] = {
                 "last_valid_date": None,
                 "lag_days_vs_scan_end": None,
                 "valid_days_in_window": 0,
+                "incomplete_dates_in_window": incomplete_dates,
+                "per_variable_last_valid_date": per_var_last_valid,
+                "per_variable_valid_days_in_window": per_var_valid_days,
             }
     return summary
 
@@ -1142,12 +1293,18 @@ def ingest_nasa_power_window(
         rows_late_fill_only = 0
         rows_value_change = 0
         rows_unchanged = 0
+        rows_unpublished_skipped = 0
+        unpublished_dates_skipped: List[str] = []
         revision_records: List[Dict[str, Any]] = []
         obs_inserts: List[Tuple[Any, ...]] = []
 
         for obs_date_str, row_vals in parsed_rows:
             age_days = max(0, int((ingest_dt - pd.to_datetime(obs_date_str)).days))
             comp = classify_completeness(row_vals)
+            if comp["missing_count"] == len(ALL_35_VARS):
+                rows_unpublished_skipped += 1
+                unpublished_dates_skipped.append(obs_date_str)
+                continue
             q_flags = compute_physical_quality_flags(row_vals)
             new_hash = compute_row_value_hash(row_vals)
             prev_row = existing_latest.get(obs_date_str)
@@ -1229,6 +1386,7 @@ def ingest_nasa_power_window(
         latest_valid_by_group = _compute_latest_valid_by_group(parsed_rows, win_end)
         revision_stats = {
             "mixed_fill_and_change_count": sum(1 for r in revision_records if r["change_type_summary"] == "MIXED_FILL_AND_CHANGE"),
+            "unpublished_dates_skipped": unpublished_dates_skipped,
             "revisions": revision_records,
         }
         latest_group_json = json.dumps(latest_valid_by_group)
@@ -1256,20 +1414,21 @@ def ingest_nasa_power_window(
                 nasa_api_version, nasa_sources_header_json,
                 rows_scanned, rows_inserted_v0, rows_new_vintage,
                 rows_late_fill_only, rows_value_change, rows_unchanged,
-                latest_valid_by_group_json, revision_stats_json, git_sha
-            ) VALUES (?, ?, ?, ?, 'SUCCESS', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                rows_unpublished_skipped, latest_valid_by_group_json, revision_stats_json, git_sha
+            ) VALUES (?, ?, ?, ?, 'SUCCESS', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 run_id, run_type, started_at, finished_at, location_id, win_start, win_end,
                 api_version, sources_json,
                 rows_scanned, rows_inserted_v0, rows_new_vintage,
                 rows_late_fill_only, rows_value_change, rows_unchanged,
-                latest_group_json, revision_stats_json, sha,
+                rows_unpublished_skipped, latest_group_json, revision_stats_json, sha,
             ),
         )
         if obs_inserts:
             conn.executemany(insert_obs_sql, obs_inserts)
         conn.execute("COMMIT;")
+        finalize_db_for_read_only(conn)
 
         return {
             "run_id": run_id,
@@ -1286,6 +1445,7 @@ def ingest_nasa_power_window(
             "rows_late_fill_only": rows_late_fill_only,
             "rows_value_change": rows_value_change,
             "rows_unchanged": rows_unchanged,
+            "rows_unpublished_skipped": rows_unpublished_skipped,
             "latest_valid_by_group_json": latest_valid_by_group,
             "revision_stats_json": revision_stats,
         }
@@ -1302,12 +1462,13 @@ def ingest_nasa_power_window(
                 location_id, scan_window_start, scan_window_end,
                 rows_scanned, rows_inserted_v0, rows_new_vintage,
                 rows_late_fill_only, rows_value_change, rows_unchanged,
-                git_sha, error_message
-            ) VALUES (?, ?, ?, ?, 'FAILED', ?, ?, ?, 0, 0, 0, 0, 0, 0, ?, ?)
+                rows_unpublished_skipped, git_sha, error_message
+            ) VALUES (?, ?, ?, ?, 'FAILED', ?, ?, ?, 0, 0, 0, 0, 0, 0, 0, ?, ?)
             """,
             (run_id, run_type, started_at, utc_now_iso(), location_id, win_start, win_end, sha, str(exc)),
         )
         conn.execute("COMMIT;")
+        finalize_db_for_read_only(conn)
         raise
 
 
