@@ -2,6 +2,24 @@
 
 All notable canonical reconciliation, MLOps tracking, runtime optimization, and operational limitation updates are recorded in this file.
 
+## [1.2.0-ddl-v3.2 / Step 4 Forecast Runner & Step 5 DB Serving] - 2026-11-16
+
+### Changed — DDL V3.2 Freeze (`src/data/vintage_store.py`)
+- Added `rows_unpublished_skipped` to `ingestion_runs` and skipped 35/35 missing days in `ingest_nasa_power_window()` while logging skipped dates in `revision_stats_json["unpublished_dates_skipped"]`.
+- Extended `_compute_latest_valid_by_group()` with `per_variable_last_valid_date`, `per_variable_valid_days_in_window`, and `incomplete_dates_in_window` to expose interior single-day radiation gaps (e.g., `2026-11-06` in `RAD_FLASHFLUX`).
+- Updated `eval_split_regime` to `('DEV_TRAIN', 'VALIDATION', 'TEST', 'POST_TEST')` with canonical `2026-04-30` Test calendar cutoff (`derive_eval_split_regime()`).
+- Updated `v_forecast_scores` so `obs_first_*` uses the first non-null precipitation observation (`MIN(version_num) WHERE PRECTOTCORR IS NOT NULL`) and added `obs_first_ingested_at_utc` + dynamic `is_prospective`.
+- Added `'past_observed'` to `temporal_status_at_issue` + helper `derive_temporal_status_at_issue()`.
+- Added shared `get_default_complete_anchor_date()`, added `finalize_db_for_read_only()` (`PRAGMA wal_checkpoint(TRUNCATE); PRAGMA journal_mode = DELETE;`), and removed unsafe `?mode=ro&immutable=1` fallback from `connect_sqlite(read_only=True)`.
+- Enforced canonical DataLoader/FeatureBuilder column order (`CANONICAL_VI_COLUMN_ORDER` / `CANONICAL_EN_COLUMN_ORDER`) across SQLite observation readers.
+
+### Added — Step 4 Forecast Runner & Step 5 DB-Backed API
+- Added `src/inference/forecast_runner.py` and CLI `scripts/mlops/run_forecast_ledger.py`:
+  - Verified `0.0 mm` max abs diff across all `2,184` canonical Test origins (`v_observations_latest` DB path vs `ml_tweedie_test_forecasts.npz`) for `SC-35`, `SC-30`, and `SC-31`.
+  - Issued `4,270` Post-Test retrospective ledger forecasts (`2026-05-01..2026-08-30`, `122` anchors x `5` models x `7` horizons), verified `122/122` `input_window_hash` As-Of matches, and recorded scores in `reports/storage_audit/post_test_retrospective_scores.json`.
+- Added `SQLiteVintageHistoryAdapter` & `IncompleteRadiationAtAnchorError` in `src/data/provider.py` and wired `/predict` in `src/api/main.py` with optional `anchor_date` rejection (`422 [INCOMPLETE_RADIATION_AT_ANCHOR]`), DB error handling (`503 [SERVER_DB_DATA_ERROR]`), `"past_observed"` horizon enrichment, and `"future_forecast_notice"` when `effective_future_days == 0`.
+- Added DDL V3.2, WAL snapshot, Step 4 runner parity, and Step 5 DB API tests in `tests/storage/` and `tests/serving/` (`68 passed` locally).
+
 ## [1.1.0-serving / Config A Canonical Reconciliation] - 2026-11-16
 
 ### Changed — Canonical Config A Lock (`max_depth=-1`) for LightGBM Tweedie (`SC-28..31`)
@@ -47,12 +65,12 @@ All notable canonical reconciliation, MLOps tracking, runtime optimization, and 
 - Verified full Linux parity across Validation (`724` origins) and Test (`2,184` origins) inside `kgb0630/ds_108:1.1.0-serving`: `SC-35` (`2.384e-07` / `4.768e-07`), `SC-30` (`1.776e-15` / `8.882e-16`), `SC-31` (`8.882e-16` / `1.776e-15`) — all `< 1e-5 mm`.
 
 ### Added — Operational Limitations, DDL V3.1 Immutable Store, HCMC Lock & CI Tiering
-- Implemented **DDL V3.1** in [`src/data/vintage_store.py`](src/data/vintage_store.py): replaced `'MISSING_ALL_RAD'` with `'FLASHFLUX_INCOMPLETE'` (plus explicit SQL precedence comment), tightened `eval_split_regime` to `('DEV_TRAIN', 'VALIDATION', 'TEST', 'LIVE')` via deterministic `derive_eval_split_regime(data_as_of)`, added idempotent `insert_forecasts_idempotent(conn, forecast_rows)`, added `read_only=True` URI `?mode=ro` -> `?mode=ro&immutable=1` WAL fallback in `connect_sqlite()`, and added `ingest_nasa_power_window()` + CLI [`scripts/data/ingest_nasa_vintage.py`](scripts/data/ingest_nasa_vintage.py).
-- Added [`tests/storage/test_vintage_ddl_and_triggers.py`](tests/storage/test_vintage_ddl_and_triggers.py) testing all 30 trigger combinations (`recursive_triggers=0/1`), FK deferred COMMIT & rollback audit, Vintage 0 CSV parity (`0.0` numeric diff across `9,251` rows), `FLASHFLUX_INCOMPLETE` / `derive_eval_split_regime`, idempotent forecast batches (`4` inserted / `3` skipped), `read_only` WAL container fallback, As-Of hash reconstruction, and mock NASA POWER revision ingestion.
+- Implemented **DDL V3.1** in [`src/data/vintage_store.py`](../src/data/vintage_store.py): replaced `'MISSING_ALL_RAD'` with `'FLASHFLUX_INCOMPLETE'` (plus explicit SQL precedence comment), tightened `eval_split_regime` to `('DEV_TRAIN', 'VALIDATION', 'TEST', 'LIVE')` via deterministic `derive_eval_split_regime(data_as_of)`, added idempotent `insert_forecasts_idempotent(conn, forecast_rows)`, added `read_only=True` URI `?mode=ro` -> `?mode=ro&immutable=1` WAL fallback in `connect_sqlite()`, and added `ingest_nasa_power_window()` + CLI [`scripts/data/ingest_nasa_vintage.py`](../scripts/data/ingest_nasa_vintage.py).
+- Added [`tests/storage/test_vintage_ddl_and_triggers.py`](../tests/storage/test_vintage_ddl_and_triggers.py) testing all 30 trigger combinations (`recursive_triggers=0/1`), FK deferred COMMIT & rollback audit, Vintage 0 CSV parity (`0.0` numeric diff across `9,251` rows), `FLASHFLUX_INCOMPLETE` / `derive_eval_split_regime`, idempotent forecast batches (`4` inserted / `3` skipped), `read_only` WAL container fallback, As-Of hash reconstruction, and mock NASA POWER revision ingestion.
 - **Removed legacy test**: Permanently deleted obsolete `tests/unit/test_feature_complexity_infrastructure.py` (which imported intentionally purged `src.training` module) instead of skipping at collection time.
-- Fixed clean-runner import resolution in [`tests/conftest.py`](tests/conftest.py) (`sys.path`) & [`pytest.ini`](pytest.ini) (`pythonpath = .`) so GitHub Actions `Backend Serving CI` runs green (`run_id=43840073114`), and enabled the verified Backend CI status badge in [`README.md`](README.md).
-- Locked [`src/api/main.py`](src/api/main.py) `/predict` strictly to single-source `HCMC_ALIASES` imported from `src.data.vintage_store` (zero duplicate alias constants), added explicit OpenAPI `400`/`422`/`503` response documentation, and updated [`tests/serving/test_api.py`](tests/serving/test_api.py).
-- Added [`pytest.ini`](pytest.ini), updated [`.gitignore`](.gitignore) (`!tests/storage/**`, `!scripts/data/ingest_nasa_vintage.py`, ignore `data/vintage/**` & WAL files), and separated `.github/workflows/ci.yml` into Tier 1 (`tier1-ci`) and Tier 2 (`docker-smoke`).
-- Corrected `Dev Train` period (`2001-01-01` to `2018-04-30`, `6,329` days / `6,293` origins), `tweedie_variance_power = 1.5`, `LGBMRegressor`/`XGBRegressor` labels, verified NASA POWER non-versioned API citation, and finalized-sequence / no-live-NRT disclaimer in [`README.md`](README.md) and [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md).
-- Added [`tests/test_mlflow_registry_consistency.py`](tests/test_mlflow_registry_consistency.py) enforcing `backfill_mlflow_tracking.py`, canonical JSON/CSVs, horizon breakdowns, and `artifacts/models/metadata.json` consistency.
-- Appended parameterized 8-column CERES strict validation & FastAPI HTTP 400 rejection tests to [`tests/serving/test_serving_hardening.py`](tests/serving/test_serving_hardening.py).
+- Fixed clean-runner import resolution in [`tests/conftest.py`](../tests/conftest.py) (`sys.path`) & [`pytest.ini`](../pytest.ini) (`pythonpath = .`) so GitHub Actions `Backend Serving CI` runs green (`run_id=43840073114`), and enabled the verified Backend CI status badge in [`README.md`](../README.md).
+- Locked [`src/api/main.py`](../src/api/main.py) `/predict` strictly to single-source `HCMC_ALIASES` imported from `src.data.vintage_store` (zero duplicate alias constants), added explicit OpenAPI `400`/`422`/`503` response documentation, and updated [`tests/serving/test_api.py`](../tests/serving/test_api.py).
+- Added [`pytest.ini`](../pytest.ini), updated [`.gitignore`](../.gitignore) (`!tests/storage/**`, `!scripts/data/ingest_nasa_vintage.py`, ignore `data/vintage/**` & WAL files), and separated `.github/workflows/ci.yml` into Tier 1 (`tier1-ci`) and Tier 2 (`docker-smoke`).
+- Corrected `Dev Train` period (`2001-01-01` to `2018-04-30`, `6,329` days / `6,293` origins), `tweedie_variance_power = 1.5`, `LGBMRegressor`/`XGBRegressor` labels, verified NASA POWER non-versioned API citation, and finalized-sequence / no-live-NRT disclaimer in [`README.md`](../README.md) and [`docs/LIMITATIONS.md`](LIMITATIONS.md).
+- Added `tests/test_mlflow_registry_consistency.py` enforcing `backfill_mlflow_tracking.py`, canonical JSON/CSVs, horizon breakdowns, and `artifacts/models/metadata.json` consistency.
+- Appended parameterized 8-column CERES strict validation & FastAPI HTTP 400 rejection tests to [`tests/serving/test_serving_hardening.py`](../tests/serving/test_serving_hardening.py).
