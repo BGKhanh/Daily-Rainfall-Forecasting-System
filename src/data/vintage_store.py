@@ -28,7 +28,6 @@ import pandas as pd
 import requests
 
 from src.config.constants import Config
-from src.inference.validation import PHYSICAL_METEO_BOUNDS
 
 logger = logging.getLogger(__name__)
 
@@ -1061,6 +1060,8 @@ def insert_forecasts_idempotent(
 
 def compute_physical_quality_flags(values: Mapping[str, Any]) -> Dict[str, Any]:
     """Check non-null observation values against PHYSICAL_METEO_BOUNDS without blocking INSERT."""
+    from src.inference.validation import PHYSICAL_METEO_BOUNDS
+
     flags: Dict[str, Dict[str, Any]] = {}
     for en_var in ALL_35_VARS:
         val = _normalize_float_token(values.get(en_var))

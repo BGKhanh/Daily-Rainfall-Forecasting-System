@@ -375,3 +375,26 @@ def test_predict_live_vintage_db_if_present(client):
     resp_bad_anchor = client.post("/predict", json={"location_id": "HCMC", "anchor_date": "2026-10-15"})
     assert resp_bad_anchor.status_code == 422
     assert "INCOMPLETE_RADIATION_AT_ANCHOR" in str(resp_bad_anchor.json().get("detail", ""))
+
+
+@pytest.mark.parametrize(
+    "import_stmt",
+    [
+        "import src.api.main",
+        "import src.inference.validation",
+        "import src.data.provider",
+        "import src.data.vintage_store",
+    ],
+)
+def test_fresh_process_imports_have_no_circular_dependency(import_stmt: str):
+    """Ensure every serving entrypoint imports cleanly in a fresh Python interpreter without circular imports."""
+    import subprocess
+
+    proc = subprocess.run(
+        [sys.executable, "-c", import_stmt],
+        cwd=str(PROJECT_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert proc.returncode == 0, f"{import_stmt} failed:\n{proc.stderr}"

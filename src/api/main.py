@@ -248,8 +248,13 @@ def predict_rainfall(request: PredictionRequest):
             history_backend = history_res.backend
             observed_precip_by_date = dict(getattr(history_res, "observed_precip_by_date", None) or {})
             anchor_completeness_regime = getattr(history_res, "anchor_completeness_regime", None)
-            if effective_run_date is None and history_res.is_static_sample:
-                effective_run_date = (history_res.data_as_of + timedelta(days=3)).strftime("%Y-%m-%d")
+            if effective_run_date is None:
+                if history_res.is_static_sample:
+                    effective_run_date = (history_res.data_as_of + timedelta(days=3)).strftime("%Y-%m-%d")
+                else:
+                    effective_run_date = (
+                        pd.Timestamp.now(tz="Asia/Ho_Chi_Minh").tz_localize(None).normalize().strftime("%Y-%m-%d")
+                    )
             # Operational DB-backed runs anchored at latest COMPLETE_ALL_35 date (~78d CERES lag) allow lag > 7d
             # and switch to past_observed + future_forecast_notice when effective_future_days == 0.
             enforce_lag_limit = bool(history_res.is_static_sample)

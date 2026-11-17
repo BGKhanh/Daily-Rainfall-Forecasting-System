@@ -18,7 +18,8 @@ All notable canonical reconciliation, MLOps tracking, runtime optimization, and 
   - Verified `0.0 mm` max abs diff across all `2,184` canonical Test origins (`v_observations_latest` DB path vs `ml_tweedie_test_forecasts.npz`) for `SC-35`, `SC-30`, and `SC-31`.
   - Issued `4,270` Post-Test retrospective ledger forecasts (`2026-05-01..2026-08-30`, `122` anchors x `5` models x `7` horizons), verified `122/122` `input_window_hash` As-Of matches, and recorded scores in `reports/storage_audit/post_test_retrospective_scores.json`.
 - Added `SQLiteVintageHistoryAdapter` & `IncompleteRadiationAtAnchorError` in `src/data/provider.py` and wired `/predict` in `src/api/main.py` with optional `anchor_date` rejection (`422 [INCOMPLETE_RADIATION_AT_ANCHOR]`), DB error handling (`503 [SERVER_DB_DATA_ERROR]`), `"past_observed"` horizon enrichment, and `"future_forecast_notice"` when `effective_future_days == 0`.
-- Added DDL V3.2, WAL snapshot, Step 4 runner parity, and Step 5 DB API tests in `tests/storage/` and `tests/serving/` (`68 passed` locally).
+- Added DDL V3.2, WAL snapshot, Step 4 runner parity, and Step 5 DB API tests in `tests/storage/` and `tests/serving/` (`72 passed` locally, including fresh-process circular-import checks & `198.75 MB` Linux container RSS smoke test).
+- Moved `PHYSICAL_METEO_BOUNDS` import inside `compute_physical_quality_flags()` in `src/data/vintage_store.py` to eliminate Uvicorn container startup circular import (`src.inference.validation` <-> `src.data.vintage_store`), and set `Asia/Ho_Chi_Minh` today as default `effective_run_date` for DB-backed `/predict` requests with omitted `run_date`.
 
 ## [1.1.0-serving / Config A Canonical Reconciliation] - 2026-11-16
 
