@@ -1,10 +1,13 @@
 """
 Weather History Provider Abstraction (DS108)
 ============================================
-Decouples FastAPI operational serving from the raw local CSV archive by
-supporting selectable history backends via WEATHER_DB_BACKEND:
-- "local" (default): lightweight bundled 35-day canonical sample CSV
-  (artifacts/models/sample_recent_history_35d.csv) with fallback to DataLoader.
+Decouples FastAPI operational serving from raw archival CSVs by supporting
+selectable history backends via WEATHER_DB_BACKEND:
+- "local" (default): uses SQLite Vintage Store (`data/vintage/rainfall_vintage.db`) when present,
+  falling back cleanly to the bundled 35-day canonical sample CSV (`sample_recent_history_35d.csv`)
+  in stateless CI/container environments without a mounted DB.
+- "sqlite": explicit SQLite Vintage Store (`v_observations_latest`) adapter using DDL V3.2.
+- "sample_csv": explicit static 35-day canonical sample CSV adapter.
 - "supabase": PostgreSQL / PostgREST HTTPS adapter for Supabase deployments.
 - "turso": LibSQL HTTP pipeline adapter for Turso serverless SQLite.
 """
@@ -18,14 +21,35 @@ import urllib.parse
 import urllib.request
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 import pandas as pd
 
+from src.config.constants import Config
+from src.data.vintage_store import (
+    ALL_35_VARS,
+    CANONICAL_VI_COLUMN_ORDER,
+    HCMC_LOCATION_ID,
+    connect_sqlite,
+    get_default_complete_anchor_date,
+)
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SAMPLE_HISTORY_PATH = PROJECT_ROOT / "artifacts" / "models" / "sample_recent_history_35d.csv"
-SUPPORTED_BACKENDS = ("local", "supabase", "turso")
+DEFAULT_VINTAGE_DB_PATH = PROJECT_ROOT / "data" / "vintage" / "rainfall_vintage.db"
+SUPPORTED_BACKENDS = ("local", "sqlite", "sample_csv", "supabase", "turso")
+
+
+class IncompleteRadiationAtAnchorError(ValueError):
+    """Raised when an anchor date lacks COMPLETE_ALL_35 radiation/meteo completeness (Invariant #5)."""
+
+    def __init__(self, message: str, *, anchor_date: str, completeness_regime: Optional[str] = None) -> None:
+        self.code = "INCOMPLETE_RADIATION_AT_ANCHOR"
+        self.anchor_date = anchor_date
+        self.completeness_regime = completeness_regime
+        super().__init__(f"[{self.code}] {message}")
 
 
 @dataclass(frozen=True)
@@ -37,6 +61,8 @@ class WeatherHistoryResult:
     is_static_sample: bool
     data_as_of: pd.Timestamp
     source_detail: str
+    observed_precip_by_date: Optional[Dict[str, float]] = None
+    anchor_completeness_regime: Optional[str] = None
 
 
 class BaseWeatherHistoryAdapter(ABC):
@@ -50,8 +76,166 @@ class BaseWeatherHistoryAdapter(ABC):
         province: str = "TP.HCM",
         days: int = 35,
         run_date: Optional[str] = None,
+        anchor_date: Optional[str] = None,
     ) -> WeatherHistoryResult:
         """Fetch at least `days` consecutive historical daily rows ending on or before run_date."""
+
+
+class SQLiteVintageHistoryAdapter(BaseWeatherHistoryAdapter):
+    """Reads canonical daily observations directly from DDL V3.2 `v_observations_latest`."""
+
+    backend_name = "sqlite"
+
+    def __init__(
+        self,
+        db_path: Optional[Path] = None,
+        location_id: str = HCMC_LOCATION_ID,
+    ) -> None:
+        self.db_path = Path(db_path) if db_path else DEFAULT_VINTAGE_DB_PATH
+        self.location_id = location_id
+
+    def fetch_recent_history(
+        self,
+        province: str = "TP.HCM",
+        days: int = 35,
+        run_date: Optional[str] = None,
+        anchor_date: Optional[str] = None,
+    ) -> WeatherHistoryResult:
+        del province  # Location is strictly locked to canonical HCMC.
+        if not self.db_path.exists():
+            raise FileNotFoundError(f"SQLite vintage DB not found: {self.db_path}")
+
+        conn = connect_sqlite(self.db_path, read_only=True)
+        try:
+            total_rows = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM v_observations_latest WHERE location_id = ?",
+                    (self.location_id,),
+                ).fetchone()[0]
+            )
+            if total_rows < days:
+                raise RuntimeError(
+                    f"[SERVER_DB_DATA_ERROR] SQLite DB has only {total_rows} row(s), need >= {days} continuous days."
+                )
+
+            if anchor_date is not None:
+                parsed_anchor = pd.to_datetime(anchor_date, errors="coerce")
+                if pd.isna(parsed_anchor):
+                    raise IncompleteRadiationAtAnchorError(
+                        f"Invalid anchor_date format {anchor_date!r}; expected YYYY-MM-DD.",
+                        anchor_date=str(anchor_date),
+                    )
+                chosen_anchor = pd.Timestamp(parsed_anchor).strftime("%Y-%m-%d")
+                anchor_row = conn.execute(
+                    """
+                    SELECT obs_date, completeness_regime, missing_count, missing_meteo_count,
+                           missing_flashflux_count, missing_ceres_count
+                    FROM v_observations_latest
+                    WHERE location_id = ? AND obs_date = ?
+                    """,
+                    (self.location_id, chosen_anchor),
+                ).fetchone()
+                if anchor_row is None:
+                    raise IncompleteRadiationAtAnchorError(
+                        f"Requested anchor_date={chosen_anchor} has no published observations in SQLite vintage store.",
+                        anchor_date=chosen_anchor,
+                        completeness_regime=None,
+                    )
+                if str(anchor_row["completeness_regime"]) != "COMPLETE_ALL_35":
+                    raise IncompleteRadiationAtAnchorError(
+                        (
+                            f"Requested anchor_date={chosen_anchor} has completeness_regime="
+                            f"{anchor_row['completeness_regime']!r} (missing_meteo={anchor_row['missing_meteo_count']}, "
+                            f"missing_flashflux={anchor_row['missing_flashflux_count']}, "
+                            f"missing_ceres={anchor_row['missing_ceres_count']}); "
+                            "operational ML inference requires COMPLETE_ALL_35."
+                        ),
+                        anchor_date=chosen_anchor,
+                        completeness_regime=str(anchor_row["completeness_regime"]),
+                    )
+                anchor_regime = str(anchor_row["completeness_regime"])
+            else:
+                chosen_anchor = get_default_complete_anchor_date(
+                    conn,
+                    location_id=self.location_id,
+                    max_date=run_date,
+                )
+                if chosen_anchor is None:
+                    raise RuntimeError(
+                        f"[SERVER_DB_DATA_ERROR] No valid COMPLETE_ALL_35 anchor date with continuous 30-day window "
+                        f"found in {self.db_path} (max_date={run_date})."
+                    )
+                anchor_regime = "COMPLETE_ALL_35"
+
+            anchor_dt = pd.to_datetime(chosen_anchor).normalize()
+            win_start = (anchor_dt - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+
+            rows = conn.execute(
+                f"""
+                SELECT obs_date, completeness_regime, {', '.join(ALL_35_VARS)}
+                FROM v_observations_latest
+                WHERE location_id = ?
+                  AND obs_date BETWEEN ? AND ?
+                ORDER BY obs_date ASC
+                """,
+                (self.location_id, win_start, chosen_anchor),
+            ).fetchall()
+
+            if len(rows) < days:
+                raise RuntimeError(
+                    f"[SERVER_DB_DATA_ERROR] Expected {days} continuous daily rows in [{win_start}, {chosen_anchor}], "
+                    f"got {len(rows)}."
+                )
+
+            incomplete_in_win = [
+                (str(r["obs_date"]), str(r["completeness_regime"]))
+                for r in rows
+                if str(r["completeness_regime"]) != "COMPLETE_ALL_35"
+            ]
+            if anchor_date is not None and incomplete_in_win:
+                bad_date, bad_reg = incomplete_in_win[-1]
+                raise IncompleteRadiationAtAnchorError(
+                    (
+                        f"35-day window ending {chosen_anchor} contains incomplete observation on {bad_date} "
+                        f"(completeness_regime={bad_reg!r})."
+                    ),
+                    anchor_date=chosen_anchor,
+                    completeness_regime=bad_reg,
+                )
+
+            target_start = (anchor_dt + timedelta(days=1)).strftime("%Y-%m-%d")
+            target_end = (anchor_dt + timedelta(days=7)).strftime("%Y-%m-%d")
+            target_rows = conn.execute(
+                """
+                SELECT obs_date, PRECTOTCORR
+                FROM v_observations_latest
+                WHERE location_id = ?
+                  AND obs_date BETWEEN ? AND ?
+                  AND PRECTOTCORR IS NOT NULL
+                ORDER BY obs_date ASC
+                """,
+                (self.location_id, target_start, target_end),
+            ).fetchall()
+            observed_precip = {str(r["obs_date"]): float(r["PRECTOTCORR"]) for r in target_rows}
+        finally:
+            conn.close()
+
+        df = pd.DataFrame([dict(r) for r in rows]).drop(columns=["completeness_regime"])
+        df = df.rename(columns={"obs_date": "DATE"})
+        df["DATE"] = pd.to_datetime(df["DATE"]).dt.normalize()
+        en_to_vi = {k: v for k, v in Config.COLUMN_MAPPING.items() if k == "DATE" or k in ALL_35_VARS}
+        df = df.rename(columns=en_to_vi)
+        df = df[list(CANONICAL_VI_COLUMN_ORDER)].sort_values("Ngày").reset_index(drop=True)
+
+        return WeatherHistoryResult(
+            history_df=df,
+            backend=self.backend_name,
+            is_static_sample=False,
+            data_as_of=anchor_dt,
+            source_detail=f"sqlite:{self.db_path.name}",
+            observed_precip_by_date=observed_precip,
+            anchor_completeness_regime=anchor_regime,
+        )
 
 
 class LocalWeatherHistoryAdapter(BaseWeatherHistoryAdapter):
@@ -67,8 +251,9 @@ class LocalWeatherHistoryAdapter(BaseWeatherHistoryAdapter):
         province: str = "TP.HCM",
         days: int = 35,
         run_date: Optional[str] = None,
+        anchor_date: Optional[str] = None,
     ) -> WeatherHistoryResult:
-        del province  # Canonical static sample represents HCMC station; future multi-station DB keys by province.
+        del province, anchor_date  # Static sample fallback has fixed HCMC 35d window.
         if self.sample_csv_path.exists():
             df = pd.read_csv(self.sample_csv_path)
             source_detail = str(self.sample_csv_path)
@@ -127,7 +312,9 @@ class SupabaseWeatherHistoryAdapter(BaseWeatherHistoryAdapter):
         province: str = "TP.HCM",
         days: int = 35,
         run_date: Optional[str] = None,
+        anchor_date: Optional[str] = None,
     ) -> WeatherHistoryResult:
+        del anchor_date
         self._validate_config()
         params: Dict[str, Any] = {
             "select": "*",
@@ -202,7 +389,9 @@ class TursoWeatherHistoryAdapter(BaseWeatherHistoryAdapter):
         province: str = "TP.HCM",
         days: int = 35,
         run_date: Optional[str] = None,
+        anchor_date: Optional[str] = None,
     ) -> WeatherHistoryResult:
+        del anchor_date
         self._validate_config()
         if not self.table.replace("_", "").isalnum():
             raise ValueError(f"Unsafe Turso table identifier: '{self.table}'")
@@ -262,12 +451,13 @@ class TursoWeatherHistoryAdapter(BaseWeatherHistoryAdapter):
 
 
 class WeatherHistoryProvider:
-    """Factory and router selecting local sample vs cloud DB history adapters."""
+    """Factory and router selecting SQLite vintage DB, local sample CSV, or cloud DB history adapters."""
 
     def __init__(
         self,
         backend: Optional[str] = None,
         sample_csv_path: Optional[Path] = None,
+        db_path: Optional[Path] = None,
         fallback_to_local: bool = False,
     ) -> None:
         resolved = (backend or os.environ.get("WEATHER_DB_BACKEND", "local")).strip().lower()
@@ -277,11 +467,18 @@ class WeatherHistoryProvider:
             )
         self.backend = resolved
         self.sample_csv_path = sample_csv_path
+        self.db_path = Path(db_path) if db_path else DEFAULT_VINTAGE_DB_PATH
         self.fallback_to_local = fallback_to_local
         self._adapter = self._build_adapter(resolved)
 
     def _build_adapter(self, backend: str) -> BaseWeatherHistoryAdapter:
+        if backend == "sqlite":
+            return SQLiteVintageHistoryAdapter(db_path=self.db_path)
+        if backend == "sample_csv":
+            return LocalWeatherHistoryAdapter(sample_csv_path=self.sample_csv_path)
         if backend == "local":
+            if self.sample_csv_path is None and self.db_path.exists():
+                return SQLiteVintageHistoryAdapter(db_path=self.db_path)
             return LocalWeatherHistoryAdapter(sample_csv_path=self.sample_csv_path)
         if backend == "supabase":
             return SupabaseWeatherHistoryAdapter()
@@ -294,11 +491,15 @@ class WeatherHistoryProvider:
         province: str = "TP.HCM",
         days: int = 35,
         run_date: Optional[str] = None,
+        anchor_date: Optional[str] = None,
     ) -> WeatherHistoryResult:
         try:
-            return self._adapter.fetch_recent_history(province=province, days=days, run_date=run_date)
+            kwargs: Dict[str, Any] = {"province": province, "days": days, "run_date": run_date}
+            if anchor_date is not None:
+                kwargs["anchor_date"] = anchor_date
+            return self._adapter.fetch_recent_history(**kwargs)
         except Exception:
-            if self.fallback_to_local and self.backend != "local":
+            if self.fallback_to_local and self.backend not in ("local", "sample_csv"):
                 return LocalWeatherHistoryAdapter(sample_csv_path=self.sample_csv_path).fetch_recent_history(
                     province=province,
                     days=days,

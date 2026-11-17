@@ -29,7 +29,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.inference.predictor import StandaloneRainfallPredictor
 from src.inference.validation import ServingValidationError
-from src.data.provider import WeatherHistoryProvider
+from src.data.provider import IncompleteRadiationAtAnchorError, WeatherHistoryProvider
 from src.data.vintage_store import (
     HCMC_ALIASES,
     HCMC_DISPLAY_NAME,
@@ -127,6 +127,10 @@ class PredictionRequest(BaseModel):
         None,
         description="Operational run date (YYYY-MM-DD). Defaults to current system date."
     )
+    anchor_date: Optional[str] = Field(
+        None,
+        description="Optional anchor date (YYYY-MM-DD) in DB. Must satisfy COMPLETE_ALL_35; defaults to latest complete anchor."
+    )
     location_id: Optional[str] = Field(
         None,
         description="Canonical location identifier (locked strictly to HCMC / Ho Chi Minh City aliases)."
@@ -190,8 +194,8 @@ def get_model_metadata():
         },
         422: {
             "description": (
-                "Unprocessable Entity — Invalid JSON/Pydantic schema types OR unsupported `location_id`/`province` "
-                "outside Ho Chi Minh City (endpoint is strictly locked to canonical HCMC aliases)."
+                "Unprocessable Entity — Invalid JSON/Pydantic schema types, unsupported `location_id`/`province` "
+                "outside Ho Chi Minh City, OR requested `anchor_date` violates `COMPLETE_ALL_35` radiation completeness."
             )
         },
         503: {
@@ -223,30 +227,45 @@ def predict_rainfall(request: PredictionRequest):
 
     history_backend = "request_payload"
     effective_run_date = request.run_date
+    observed_precip_by_date: Dict[str, float] = {}
+    anchor_completeness_regime: Optional[str] = None
+    enforce_lag_limit = True
+
     if request.history is not None:
         df_history = pd.DataFrame(request.history)
     else:
         try:
             active_provider = history_provider or WeatherHistoryProvider()
-            history_res = active_provider.fetch_recent_history(
-                province=prov,
-                days=35,
-                run_date=request.run_date,
-            )
+            fetch_kwargs: Dict[str, Any] = {
+                "province": prov,
+                "days": 35,
+                "run_date": request.run_date,
+            }
+            if request.anchor_date is not None:
+                fetch_kwargs["anchor_date"] = request.anchor_date
+            history_res = active_provider.fetch_recent_history(**fetch_kwargs)
             df_history = history_res.history_df
             history_backend = history_res.backend
+            observed_precip_by_date = dict(getattr(history_res, "observed_precip_by_date", None) or {})
+            anchor_completeness_regime = getattr(history_res, "anchor_completeness_regime", None)
             if effective_run_date is None and history_res.is_static_sample:
                 effective_run_date = (history_res.data_as_of + timedelta(days=3)).strftime("%Y-%m-%d")
+            # Operational DB-backed runs anchored at latest COMPLETE_ALL_35 date (~78d CERES lag) allow lag > 7d
+            # and switch to past_observed + future_forecast_notice when effective_future_days == 0.
+            enforce_lag_limit = bool(history_res.is_static_sample)
+        except IncompleteRadiationAtAnchorError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
         except Exception as e:
-            raise HTTPException(
-                status_code=503,
-                detail=f"[SERVER_HISTORY_UNAVAILABLE] Server history provider failed: {e}",
-            ) from e
+            detail_str = str(e)
+            if "[SERVER_DB_DATA_ERROR]" not in detail_str:
+                detail_str = f"[SERVER_DB_DATA_ERROR] Server history provider failed: {detail_str}"
+            raise HTTPException(status_code=503, detail=detail_str) from e
 
     try:
         prediction_result = predictor.predict(
             raw_history_df=df_history,
             run_date=effective_run_date,
+            enforce_lag_limit=enforce_lag_limit,
         )
     except ServingValidationError as e:
         if history_backend != "request_payload":
@@ -263,7 +282,25 @@ def predict_rainfall(request: PredictionRequest):
         status_code = 503 if history_backend != "request_payload" else 400
         raise HTTPException(status_code=status_code, detail=str(e)) from e
 
+    if observed_precip_by_date:
+        for item in prediction_result.get("serving_model", {}).get("hindcast_and_current", []):
+            tgt = item.get("target_date")
+            if item.get("status") == "past_unverified" and tgt in observed_precip_by_date:
+                obs_mm = float(observed_precip_by_date[tgt])
+                item["status"] = "past_observed"
+                item["observed_mm"] = round(obs_mm, 4)
+                item["abs_error_mm"] = round(abs(float(item["pred_mm"]) - obs_mm), 4)
+                item["note"] = "Day has passed and precipitation observation is recorded in SQLite vintage store."
+
+    if prediction_result.get("effective_future_days") == 0:
+        prediction_result["future_forecast_notice"] = (
+            "Không có ngày tương lai (effective_future_days = 0): "
+            "ngày neo dữ liệu đầy đủ (COMPLETE_ALL_35) cách ngày chạy hơn 7 ngày."
+        )
+
     prediction_result["history_backend"] = history_backend
+    if anchor_completeness_regime is not None:
+        prediction_result["anchor_completeness_regime"] = anchor_completeness_regime
     prediction_result["location"] = {
         "location_id": canonical_loc_id,
         "province": prov,

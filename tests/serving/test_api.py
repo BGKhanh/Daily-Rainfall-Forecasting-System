@@ -13,6 +13,9 @@ import sys
 import pytest
 from pathlib import Path
 from datetime import datetime, timedelta
+from typing import Optional
+
+import pandas as pd
 
 from fastapi.testclient import TestClient
 
@@ -193,3 +196,182 @@ def test_predict_server_db_data_error_returns_503(client, monkeypatch):
     )
     assert resp_client.status_code == 400
     assert "INVALID_OR_MISSING_METEO_INPUT" in str(resp_client.json().get("detail", ""))
+
+
+def _seed_round6_api_sqlite_db(db_path: Path, *, include_aug31_to_nov13: bool = True, corrupt_nan: bool = False, truncate_rows: Optional[int] = None) -> None:
+    """Create a deterministic DDL V3.2 SQLite DB mirroring HCMC data (COMPLETE up to 2026-08-30, MISSING_CERES afterwards)."""
+    from src.data.vintage_store import (
+        ALL_35_VARS,
+        CERES_ONLY_8_VARS,
+        connect_sqlite,
+        init_schema,
+        ingest_nasa_power_window,
+        seed_historical_csv_vintage_v0,
+    )
+
+    sample_csv = PROJECT_ROOT / "artifacts" / "models" / "sample_recent_history_35d.csv"
+    df_sample = pd.read_csv(sample_csv)
+    base_row = df_sample.iloc[-1]
+    from src.config.constants import Config
+
+    vi_map = {k: Config.COLUMN_MAPPING[k] for k in ALL_35_VARS}
+
+    dates = pd.date_range("2026-07-15", "2026-08-30", freq="D")
+    if truncate_rows is not None:
+        dates = dates[:truncate_rows]
+
+    conn = connect_sqlite(db_path, read_only=False, recursive_triggers=True)
+    try:
+        init_schema(conn)
+        seed_rows = []
+        for idx, d in enumerate(dates):
+            row = {"DATE": d.strftime("%Y-%m-%d")}
+            for var in ALL_35_VARS:
+                val = float(base_row[vi_map[var]])
+                if var == "PRECTOTCORR":
+                    val = float(round((idx % 6) * 2.5, 2))
+                elif var in ("ALLSKY_SFC_SW_DWN", "ALLSKY_SFC_LW_DWN"):
+                    val = val + (idx % 5) * 0.25
+                row[var] = val
+            seed_rows.append(row)
+        df_seed = pd.DataFrame(seed_rows)
+        if corrupt_nan:
+            # Place NaN at -32 (outside 30d anchor completeness window, inside 35d API history fetch)
+            df_seed.loc[df_seed.index[-32], "T2M"] = float("nan")
+        seed_historical_csv_vintage_v0(conn, df=df_seed, ingested_at_utc="2026-11-16T00:00:00Z")
+
+        if include_aug31_to_nov13 and not corrupt_nan and truncate_rows is None:
+            ext_dates = pd.date_range("2026-08-31", "2026-11-13", freq="D")
+
+            def _mock_fetcher(**kwargs):
+                param_map = {v: {} for v in ALL_35_VARS}
+                for idx, d in enumerate(ext_dates):
+                    ymd = d.strftime("%Y%m%d")
+                    for var in ALL_35_VARS:
+                        if var in CERES_ONLY_8_VARS:
+                            param_map[var][ymd] = -999.0
+                        elif var == "PRECTOTCORR":
+                            param_map[var][ymd] = float(round(1.0 + (idx % 7) * 3.0, 2))
+                        else:
+                            param_map[var][ymd] = float(base_row[vi_map[var]]) + (idx % 4) * 0.1
+                return {
+                    "header": {"api": {"version": "v2.10.3"}, "sources": ["GEOSIT", "FLASHFLUX"]},
+                    "properties": {"parameter": param_map},
+                }
+
+            ingest_nasa_power_window(
+                conn,
+                start_date="2026-08-31",
+                end_date="2026-11-13",
+                fetcher=_mock_fetcher,
+                ingested_at_utc="2026-11-16T01:00:00Z",
+            )
+    finally:
+        conn.close()
+
+
+def test_predict_reads_from_sqlite_db_effective_zero_past_observed_and_notice(client, tmp_path: Path, monkeypatch):
+    """Step 5: /predict reading SQLite DB defaults to 2026-08-30, sets past_observed & future_forecast_notice."""
+    import src.api.main as api_main
+    from src.data.provider import WeatherHistoryProvider
+
+    db_path = tmp_path / "api_sqlite_fixture.db"
+    _seed_round6_api_sqlite_db(db_path)
+
+    provider = WeatherHistoryProvider(backend="sqlite", db_path=db_path)
+    monkeypatch.setattr(api_main, "history_provider", provider)
+
+    resp = client.post("/predict", json={"location_id": "HCMC", "run_date": "2026-11-16"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["history_backend"] == "sqlite"
+    assert data["data_as_of"] == "2026-08-30"
+    assert data["anchor_completeness_regime"] == "COMPLETE_ALL_35"
+    assert data["lag_days"] == 78
+    assert data["effective_future_days"] == 0
+    assert "future_forecast_notice" in data
+    assert "effective_future_days = 0" in data["future_forecast_notice"]
+
+    hc = data["serving_model"]["hindcast_and_current"]
+    assert len(hc) == 7
+    assert len(data["serving_model"]["forecast_future"]) == 0
+    assert all(item["status"] == "past_observed" for item in hc)
+    assert all(item["observed_mm"] is not None for item in hc)
+
+
+def test_predict_rejects_incomplete_ceres_anchor_date(client, tmp_path: Path, monkeypatch):
+    """Step 5 / Invariant 5: Explicit anchor_date='2026-10-15' (MISSING_CERES_ONLY) is rejected cleanly."""
+    import src.api.main as api_main
+    from src.data.provider import WeatherHistoryProvider
+
+    db_path = tmp_path / "api_anchor_reject.db"
+    _seed_round6_api_sqlite_db(db_path)
+
+    provider = WeatherHistoryProvider(backend="sqlite", db_path=db_path)
+    monkeypatch.setattr(api_main, "history_provider", provider)
+
+    resp = client.post(
+        "/predict",
+        json={"location_id": "HCMC", "anchor_date": "2026-10-15", "run_date": "2026-11-16"},
+    )
+    assert resp.status_code == 422
+    detail = str(resp.json().get("detail", ""))
+    assert "INCOMPLETE_RADIATION_AT_ANCHOR" in detail
+    assert "MISSING_CERES_ONLY" in detail
+
+
+@pytest.mark.parametrize("mode", ["insufficient_rows", "nan_meteo"])
+def test_predict_sqlite_db_errors_return_503(client, tmp_path: Path, monkeypatch, mode: str):
+    """Step 5: Corrupted or <35-row SQLite DB returns HTTP 503 SERVER_DB_DATA_ERROR."""
+    import src.api.main as api_main
+    from src.data.provider import WeatherHistoryProvider
+
+    db_path = tmp_path / f"api_err_{mode}.db"
+    if mode == "insufficient_rows":
+        _seed_round6_api_sqlite_db(db_path, include_aug31_to_nov13=False, truncate_rows=20)
+    else:
+        _seed_round6_api_sqlite_db(db_path, include_aug31_to_nov13=False, corrupt_nan=True)
+
+    provider = WeatherHistoryProvider(backend="sqlite", db_path=db_path)
+    monkeypatch.setattr(api_main, "history_provider", provider)
+
+    resp = client.post("/predict", json={"location_id": "HCMC"})
+    assert resp.status_code == 503
+    assert "SERVER_DB_DATA_ERROR" in str(resp.json().get("detail", ""))
+
+
+def test_predict_sample_csv_backend_still_works_for_static_tests(client, monkeypatch):
+    """Step 5: WEATHER_DB_BACKEND=sample_csv continues to serve sample_recent_history_35d.csv cleanly."""
+    import src.api.main as api_main
+    from src.data.provider import WeatherHistoryProvider
+
+    provider = WeatherHistoryProvider(backend="sample_csv")
+    monkeypatch.setattr(api_main, "history_provider", provider)
+
+    resp = client.post("/predict", json={"province": "TP. Hồ Chí Minh"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["history_backend"] == "local"
+    assert data["lag_days"] == 3
+    assert data["effective_future_days"] == 4
+    assert "future_forecast_notice" not in data
+
+
+def test_predict_live_vintage_db_if_present(client):
+    """When live data/vintage/rainfall_vintage.db exists locally, verify end-to-end /predict behavior."""
+    live_db = PROJECT_ROOT / "data" / "vintage" / "rainfall_vintage.db"
+    if not live_db.exists():
+        pytest.skip("Live gitignored data/vintage/rainfall_vintage.db not present in CI workspace.")
+
+    resp = client.post("/predict", json={"location_id": "HCMC"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["history_backend"] == "sqlite"
+    assert data["data_as_of"] == "2026-08-30"
+    assert data["effective_future_days"] == 0
+    assert "future_forecast_notice" in data
+    assert all(item["status"] == "past_observed" for item in data["serving_model"]["hindcast_and_current"])
+
+    resp_bad_anchor = client.post("/predict", json={"location_id": "HCMC", "anchor_date": "2026-10-15"})
+    assert resp_bad_anchor.status_code == 422
+    assert "INCOMPLETE_RADIATION_AT_ANCHOR" in str(resp_bad_anchor.json().get("detail", ""))

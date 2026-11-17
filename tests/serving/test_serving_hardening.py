@@ -110,6 +110,7 @@ def test_optional_pyfunc_small_sample_parity(sample_35d_df: pd.DataFrame, local_
 def test_validation_rejection_matrix_python_and_api(
     sample_35d_df: pd.DataFrame,
     local_predictor: StandaloneRainfallPredictor,
+    monkeypatch,
 ):
     """Check (2e): Every invalid/stale payload is rejected in Python and returns HTTP 400 on /predict."""
     valid_run_date = pd.to_datetime(sample_35d_df["Ngày"]).max().strftime("%Y-%m-%d")
@@ -160,7 +161,11 @@ def test_validation_rejection_matrix_python_and_api(
             assert resp.status_code == 400
             assert expected_code in str(resp.json().get("detail", ""))
 
-        # Omitted history + explicit stale run_date -> HTTP 400
+        # Omitted history + explicit stale run_date against static sample CSV -> HTTP 400
+        monkeypatch.setattr(
+            "src.api.main.history_provider",
+            WeatherHistoryProvider(backend="sample_csv", sample_csv_path=SAMPLE_CSV),
+        )
         resp_stale_omitted = client.post("/predict", json={"run_date": stale_run_date})
         assert resp_stale_omitted.status_code == 400
         assert "STALE_RADIATION_OR_LAG" in str(resp_stale_omitted.json().get("detail", ""))

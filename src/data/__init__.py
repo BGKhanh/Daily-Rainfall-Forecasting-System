@@ -2,7 +2,12 @@
 
 from .loader import DataLoader, time_series_split, DEFAULT_TEST_START_DATE
 from .dataquality import DataQualityAssessment, assess_data_quality, check_continuity
-from .provider import WeatherHistoryProvider, WeatherHistoryResult
+from .provider import (
+    IncompleteRadiationAtAnchorError,
+    SQLiteVintageHistoryAdapter,
+    WeatherHistoryProvider,
+    WeatherHistoryResult,
+)
 
 __all__ = [
     "DataLoader",
@@ -11,6 +16,8 @@ __all__ = [
     "DataQualityAssessment",
     "assess_data_quality",
     "check_continuity",
+    "IncompleteRadiationAtAnchorError",
+    "SQLiteVintageHistoryAdapter",
     "WeatherHistoryProvider",
     "WeatherHistoryResult",
 ]
