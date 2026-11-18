@@ -15,6 +15,7 @@ Verifies:
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -130,14 +131,20 @@ def test_forecast_runner_end_to_end_on_seeded_db(tmp_path: Path):
         conn.close()
 
 
-def test_db_vs_npz_2184_origin_test_parity_and_live_post_test():
-    """Verify Check (a) DB-vs-NPZ parity < 1e-5 mm across 2,184 Test origins when local files exist."""
+def test_db_vs_npz_2184_origin_test_parity_and_demo_post_test():
+    """Verify Check (a) DB-vs-NPZ parity < 1e-5 mm across 2,184 Test origins and Two-DB contract."""
+    demo_db = PROJECT_ROOT / "artifacts" / "models" / "demo_rainfall_vintage.db"
     live_db = PROJECT_ROOT / "data" / "vintage" / "rainfall_vintage.db"
     npz_path = PROJECT_ROOT / "data" / "processed" / "results" / "ml_tweedie_test_forecasts.npz"
-    if not (live_db.exists() and npz_path.exists()):
-        pytest.skip("Live gitignored rainfall_vintage.db or ml_tweedie_test_forecasts.npz not present in CI workspace.")
+    require_parity = os.environ.get("CI_REQUIRE_PARITY") == "1"
 
-    parity = verify_db_vs_npz_test_parity(db_path=live_db, npz_path=npz_path)
+    missing = [str(p) for p in (demo_db, npz_path) if not p.exists()]
+    if missing:
+        if require_parity:
+            pytest.fail(f"CI_REQUIRE_PARITY=1 but required parity artifact(s) missing: {missing}")
+        pytest.skip(f"Demo DB or NPZ missing locally: {missing}")
+
+    parity = verify_db_vs_npz_test_parity(db_path=demo_db, npz_path=npz_path)
     assert parity["passed"] is True
     assert parity["origins_verified"] == 2184
     assert parity["y_true_max_abs_diff"] < 1e-5
@@ -145,7 +152,7 @@ def test_db_vs_npz_2184_origin_test_parity_and_live_post_test():
     for m_id in ("SC-35", "SC-30", "SC-31"):
         assert parity["models"][m_id]["max_abs_diff_vs_npz"] < 1e-5
 
-    conn = connect_sqlite(live_db, read_only=True)
+    conn = connect_sqlite(demo_db, read_only=True)
     try:
         hash_chk = verify_input_window_hash_reconstruction(conn, eval_split_regime="POST_TEST")
         assert hash_chk["passed"] is True
@@ -154,8 +161,28 @@ def test_db_vs_npz_2184_origin_test_parity_and_live_post_test():
         assert scores["unique_origins"] == 122
         assert scores["total_scored_rows"] == 4270
         assert scores["block_bootstrap"]["block_length"] == 7
+        assert scores["block_bootstrap"]["n_blocks"] == 18
         assert scores["block_bootstrap"]["n_bootstrap"] == 2000
-        assert "SC-35 - BASELINE_CLIMATOLOGY_DOY" in scores["block_bootstrap"]["pairwise_delta_mae"]
+        for pair_key in (
+            "SC-35 - BASELINE_CLIMATOLOGY_DOY",
+            "SC-31 - BASELINE_CLIMATOLOGY_DOY",
+            "SC-30 - BASELINE_CLIMATOLOGY_DOY",
+            "SC-35 - SC-31",
+            "SC-35 - SC-30",
+            "SC-30 - SC-31",
+        ):
+            assert pair_key in scores["block_bootstrap"]["pairwise_delta_mae"]
         assert len(scores["methodological_notes"]) == 3
     finally:
         conn.close()
+
+    # Round 8 Two-DB invariant: live production DB (if present locally) must hold observations only (ledger = 0)
+    if live_db.exists():
+        conn_live = connect_sqlite(live_db, read_only=True)
+        try:
+            obs_count = int(conn_live.execute("SELECT COUNT(*) FROM observations_vintage").fetchone()[0])
+            ledger_count = int(conn_live.execute("SELECT COUNT(*) FROM forecasts_ledger").fetchone()[0])
+            assert obs_count >= 9449
+            assert ledger_count == 0, f"Expected 0 retrospective ledger rows in live DB, got {ledger_count}"
+        finally:
+            conn_live.close()

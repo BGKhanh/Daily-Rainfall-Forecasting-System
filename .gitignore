@@ -209,9 +209,13 @@ reports/*
 *.doc
 EDA.txt
 
-# Processed datasets and binary predictions
-data/processed/**
+# Processed datasets and binary predictions (allow canonical Test parity NPZ for CI)
+data/processed/*
+!data/processed/results/
+data/processed/results/*
+!data/processed/results/ml_tweedie_test_forecasts.npz
 *.npz
+!data/processed/results/ml_tweedie_test_forecasts.npz
 
 # Internal scripts, tests, scratch & specs (keep minimal serving + storage tests & MLOps registry/check scripts for CI)
 tests/*
@@ -239,3 +243,6 @@ mlruns/**
 *.db-journal
 data/vintage/**
 archive/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/

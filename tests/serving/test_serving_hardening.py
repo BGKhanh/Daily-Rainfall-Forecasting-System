@@ -159,7 +159,9 @@ def test_validation_rejection_matrix_python_and_api(
             records = [] if bad_df.empty else _to_api_records(bad_df)
             resp = client.post("/predict", json={"history": records, "run_date": r_date})
             assert resp.status_code == 400
-            assert expected_code in str(resp.json().get("detail", ""))
+            err = resp.json()["error"]
+            assert err["code"] == "INVALID_CLIENT_HISTORY"
+            assert expected_code in err["message"] or err["details"].get("validation_code") == expected_code
 
         # Omitted history + explicit stale run_date against static sample CSV -> HTTP 400
         monkeypatch.setattr(
@@ -168,7 +170,9 @@ def test_validation_rejection_matrix_python_and_api(
         )
         resp_stale_omitted = client.post("/predict", json={"run_date": stale_run_date})
         assert resp_stale_omitted.status_code == 400
-        assert "STALE_RADIATION_OR_LAG" in str(resp_stale_omitted.json().get("detail", ""))
+        err_stale = resp_stale_omitted.json()["error"]
+        assert err_stale["code"] == "INVALID_CLIENT_HISTORY"
+        assert "STALE_RADIATION_OR_LAG" in err_stale["message"]
 
 
 def test_weather_history_provider_backends(sample_35d_df: pd.DataFrame):
@@ -351,4 +355,6 @@ def test_strict_validation_rejects_missing_or_nan_ceres_columns(ceres_col: str):
             json={"history": df_sentinel.to_dict(orient="records"), "province": "TP. Hồ Chí Minh"},
         )
         assert resp.status_code == 400
-        assert "INVALID_OR_MISSING_METEO_INPUT" in resp.json()["detail"]
+        err = resp.json()["error"]
+        assert err["code"] == "INVALID_CLIENT_HISTORY"
+        assert "INVALID_OR_MISSING_METEO_INPUT" in err["message"]
