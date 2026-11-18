@@ -1,5 +1,5 @@
 # Stage 1: Build Vite + React SPA static bundle
-FROM node:20-alpine AS frontend-builder
+FROM node:24-alpine AS frontend-builder
 
 WORKDIR /frontend
 

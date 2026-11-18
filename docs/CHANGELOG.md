@@ -2,6 +2,13 @@
 
 All notable canonical reconciliation, MLOps tracking, runtime optimization, and operational limitation updates are recorded in this file.
 
+## [1.3.0-serving / Node 24 LTS Frontend Builder] - 2026-11-18
+
+### Changed
+- **Frontend Builder Toolchain Upgrade (Node 20 EOL → Node 24 LTS)**:
+  - Upgraded multi-stage `Dockerfile` Stage 1 (`frontend-builder`) from `node:20-alpine` to `node:24-alpine` (`v24.22.3` Maintenance LTS, `npm 11.19.1`), updated `.github/workflows/ci.yml` (`node-version: "24"`), updated `docs/LIMITATIONS.md`, and added `.nvmrc` (`24.22.3`) while keeping Stage 2 (`python:3.12-slim`) free of Node.js.
+  - Bumped serving container image tag to `kgb0630/ds_108:1.3.0-serving` (`.github/workflows/ci.yml`, `.agents/rules/project-structure.md`, `.agents/skills/serving-and-vintage-ops/SKILL.md`), keeping locked API schema/OpenAPI version at `1.2.0`.
+
 ## [1.2.2-round8-locked-contract-ui-v1] - 2026-11-18
 
 ### Locked API Contract & Added SPA UI v1
