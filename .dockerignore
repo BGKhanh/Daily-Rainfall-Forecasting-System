@@ -26,3 +26,7 @@ tests
 scripts
 scratch
 tasks
+scratch
+frontend/node_modules
+frontend/dist
+frontend/.vite

@@ -1,5 +1,27 @@
-# Dockerfile for DS108 Rainfall Forecasting Serving Engine
-FROM python:3.12-slim
+# Stage 1: Build Vite + React SPA static bundle
+FROM node:20-alpine AS frontend-builder
+
+WORKDIR /frontend
+
+ARG VITE_API_BASE_URL=""
+ARG VITE_COLD_START_THRESHOLD_MS="3000"
+ARG VITE_REPO_URL="https://github.com/BGKhanh/Precipitation-EDA"
+ARG VITE_CI_URL="https://github.com/BGKhanh/Precipitation-EDA/actions"
+ARG VITE_MLFLOW_URL="https://dagshub.com/BGKhanh/Precipitation-EDA.mlflow"
+
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL \
+    VITE_COLD_START_THRESHOLD_MS=$VITE_COLD_START_THRESHOLD_MS \
+    VITE_REPO_URL=$VITE_REPO_URL \
+    VITE_CI_URL=$VITE_CI_URL \
+    VITE_MLFLOW_URL=$VITE_MLFLOW_URL
+
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+# Stage 2: Minimal Python 3.12 CPU runtime (no Node.js in final image)
+FROM python:3.12-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -20,20 +42,17 @@ RUN pip install --no-cache-dir -r requirements-serving.txt
 RUN groupadd --gid 10001 appuser && \
     useradd --uid 10001 --gid 10001 --create-home --shell /usr/sbin/nologin appuser
 
-# Copy minimal runtime source code, model artifacts, and test benchmark leaderboard
+# Copy minimal runtime source code, model artifacts, benchmark leaderboard, and built SPA static files
 COPY --chown=appuser:appuser src/ /app/src/
 COPY --chown=appuser:appuser artifacts/models/ /app/artifacts/models/
 COPY --chown=appuser:appuser reports/test_benchmark/ /app/reports/test_benchmark/
+COPY --from=frontend-builder --chown=appuser:appuser /frontend/dist /app/frontend/dist
 
 USER appuser
 
-# Expose port
 EXPOSE 8000
 
-# Healthcheck
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:8000/health || exit 1
 
-# Launch FastAPI app with Uvicorn
 CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
-
