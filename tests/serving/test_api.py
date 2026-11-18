@@ -27,7 +27,6 @@ from src.evaluation.protocols import get_global_read_guard
 import src.config.clock as clock_mod
 from src.api.main import app, load_serving_models
 from src.api.schemas import (
-    ErrorResponse,
     HealthResponse,
     LeaderboardResponse,
     LocationsResponse,
