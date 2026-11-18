@@ -27,6 +27,7 @@ from sklearn.metrics import (
     root_mean_squared_error,
 )
 
+from src.config.clock import today_hcmc
 from src.config.constants import Config
 from src.data.vintage_store import (
     ALL_35_VARS,
@@ -84,14 +85,14 @@ PAIRWISE_DELTA_MAE_PAIRS: Tuple[Tuple[str, str], ...] = (
     ("SC-31", "BASELINE_CLIMATOLOGY_DOY"),
     ("SC-30", "BASELINE_CLIMATOLOGY_DOY"),
     ("SC-35", "SC-31"),
+    ("SC-35", "SC-30"),
+    ("SC-30", "SC-31"),
 )
-
-VN_TZ = timezone(timedelta(hours=7))
 
 
 def hcmc_today_str() -> str:
     """Return current operational date in Asia/Ho_Chi_Minh (UTC+7)."""
-    return datetime.now(VN_TZ).strftime("%Y-%m-%d")
+    return today_hcmc().strftime("%Y-%m-%d")
 
 
 def compute_file_sha256(path: Path) -> str:
@@ -582,6 +583,7 @@ def _summarize_bootstrap_samples(samples: np.ndarray, point_estimate: float) -> 
         "point_estimate": round(float(point_estimate), 6),
         "ci_lower": round(float(lo), 6),
         "ci_upper": round(float(hi), 6),
+        "ci_width": round(float(hi - lo), 6),
         "bootstrap_se": round(float(np.std(samples, ddof=1)), 6),
     }
 
@@ -691,12 +693,79 @@ def compute_block_bootstrap_ci(
         "method": "moving_block_bootstrap",
         "block_length": int(block_length),
         "effective_block_length": eff_block,
+        "n_blocks": int(blocks_per_sample),
+        "candidate_blocks": int(num_blocks),
         "n_bootstrap": int(n_bootstrap),
         "seed": int(seed),
         "n_anchor_dates": n_origins,
         "target_col": target_col,
         "models": models_ci,
         "pairwise_delta_mae": pairwise_delta_mae,
+    }
+
+
+def compute_block_length_sensitivity(
+    conn: sqlite3.Connection,
+    *,
+    block_lengths: Sequence[int] = (7, 14, 21),
+    eval_split_regime: str = "POST_TEST",
+    location_id: str = HCMC_LOCATION_ID,
+    mase_scale: float = OFFICIAL_MASE_SCALE_POST_TEST,
+    n_bootstrap: int = 2000,
+    seed: int = 42,
+) -> Dict[str, Any]:
+    """
+    Evaluate Moving Block Bootstrap 95% CI sensitivity across `block_lengths` (e.g. 7, 14, 21)
+    on `v_forecast_scores` and return MAE, CI bounds, CI width, and effective `n_blocks`.
+    """
+    rows = conn.execute(
+        """
+        SELECT *
+        FROM v_forecast_scores
+        WHERE location_id = ? AND eval_split_regime = ?
+        ORDER BY model_id ASC, data_as_of ASC, horizon_day ASC
+        """,
+        (location_id, eval_split_regime),
+    ).fetchall()
+    if not rows:
+        raise ValueError(f"No rows found in v_forecast_scores for eval_split_regime='{eval_split_regime}'.")
+    df = pd.DataFrame([dict(r) for r in rows])
+
+    by_block_length: Dict[str, Any] = {}
+    for blk in block_lengths:
+        boot = compute_block_bootstrap_ci(
+            df,
+            block_length=int(blk),
+            n_bootstrap=n_bootstrap,
+            seed=seed,
+            mase_scale=mase_scale,
+            target_col="obs_latest_mm",
+        )
+        models_summary: Dict[str, Any] = {}
+        for m_id, m_entry in boot["models"].items():
+            mae_ci = m_entry["overall"]["MAE"]
+            models_summary[m_id] = {
+                "MAE": mae_ci["point_estimate"],
+                "ci_lower": mae_ci["ci_lower"],
+                "ci_upper": mae_ci["ci_upper"],
+                "ci_width": mae_ci["ci_width"],
+                "bootstrap_se": mae_ci["bootstrap_se"],
+            }
+        by_block_length[str(int(blk))] = {
+            "block_length": int(blk),
+            "n_anchor_dates": boot["n_anchor_dates"],
+            "n_blocks": boot["n_blocks"],
+            "candidate_blocks": boot["candidate_blocks"],
+            "models": models_summary,
+            "pairwise_delta_mae": boot["pairwise_delta_mae"],
+        }
+
+    return {
+        "eval_split_regime": eval_split_regime,
+        "n_bootstrap": int(n_bootstrap),
+        "seed": int(seed),
+        "block_lengths": [int(b) for b in block_lengths],
+        "by_block_length": by_block_length,
     }
 
 

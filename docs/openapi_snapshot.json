@@ -1,244 +1,82 @@
 {
-  "components": {
-    "schemas": {
-      "HTTPValidationError": {
-        "properties": {
-          "detail": {
-            "items": {
-              "$ref": "#/components/schemas/ValidationError"
-            },
-            "title": "Detail",
-            "type": "array"
-          }
-        },
-        "title": "HTTPValidationError",
-        "type": "object"
-      },
-      "PredictionRequest": {
-        "properties": {
-          "anchor_date": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Optional anchor date (YYYY-MM-DD) in DB. Must satisfy COMPLETE_ALL_35; defaults to latest complete anchor.",
-            "title": "Anchor Date"
-          },
-          "history": {
-            "anyOf": [
-              {
-                "items": {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Historical continuous daily records (at least 30 days). If omitted, loads canonical recent data.",
-            "title": "History"
-          },
-          "location_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Canonical location identifier (locked strictly to HCMC / Ho Chi Minh City aliases).",
-            "title": "Location Id"
-          },
-          "province": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": "TP. Hồ Chí Minh",
-            "description": "Backward-compatible location alias (locked strictly to TP. Hồ Chí Minh / HCMC aliases).",
-            "title": "Province"
-          },
-          "run_date": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Operational run date (YYYY-MM-DD). Defaults to current system date.",
-            "title": "Run Date"
-          }
-        },
-        "title": "PredictionRequest",
-        "type": "object"
-      },
-      "ValidationError": {
-        "properties": {
-          "ctx": {
-            "title": "Context",
-            "type": "object"
-          },
-          "input": {
-            "title": "Input"
-          },
-          "loc": {
-            "items": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "integer"
-                }
-              ]
-            },
-            "title": "Location",
-            "type": "array"
-          },
-          "msg": {
-            "title": "Message",
-            "type": "string"
-          },
-          "type": {
-            "title": "Error Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "loc",
-          "msg",
-          "type"
-        ],
-        "title": "ValidationError",
-        "type": "object"
-      }
-    }
-  },
-  "info": {
-    "description": "Operational API for 1-7 days daily rainfall forecasting locked to HCMC with dynamic horizon calculation and shadow model governance.",
-    "title": "HCMC Daily Rainfall Forecasting Serving Engine",
-    "version": "1.0.0"
-  },
   "openapi": "3.1.0",
+  "info": {
+    "title": "HCMC Daily Rainfall Forecasting Serving Engine",
+    "description": "Operational API for 7-day multi-horizon daily rainfall forecasting locked to HCMC with locked OpenAPI schemas, Two-DB SQLite DDL V3.2 governance, and shadow model telemetry.",
+    "version": "1.2.0"
+  },
   "paths": {
-    "/benchmark/leaderboard": {
-      "get": {
-        "description": "Returns top audited benchmark scenarios from official benchmark test leaderboards.",
-        "operationId": "get_leaderboard_benchmark_leaderboard_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 10,
-              "title": "Limit",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Leaderboard",
-        "tags": [
-          "Governance"
-        ]
-      }
-    },
     "/health": {
       "get": {
-        "description": "Health check endpoint indicating model readiness, active Two-DB role, anchor date, and governance status.",
+        "tags": [
+          "Monitoring"
+        ],
+        "summary": "Get Health",
+        "description": "Health check endpoint reporting model readiness, active Two-DB role, anchor range, and group latency.",
         "operationId": "get_health_health_get",
         "responses": {
           "200": {
+            "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
               }
-            },
-            "description": "Successful Response"
+            }
+          },
+          "503": {
+            "description": "Service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
-        },
-        "summary": "Get Health",
-        "tags": [
-          "Monitoring"
-        ]
+        }
       }
     },
     "/models": {
       "get": {
+        "tags": [
+          "Governance"
+        ],
+        "summary": "Get Model Metadata",
         "description": "Returns governance metadata, hyperparameters, baselines, and cryptographic SHA-256 hashes.",
         "operationId": "get_model_metadata_models_get",
         "responses": {
           "200": {
+            "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ModelsResponse"
+                }
               }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Get Model Metadata",
-        "tags": [
-          "Governance"
-        ]
-      }
-    },
-    "/models/info": {
-      "get": {
-        "description": "Returns governance metadata, hyperparameters, baselines, and cryptographic SHA-256 hashes.",
-        "operationId": "get_model_metadata_models_info_get",
-        "responses": {
-          "200": {
+            }
+          },
+          "503": {
+            "description": "Predictor not initialized",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
               }
-            },
-            "description": "Successful Response"
+            }
           }
-        },
-        "summary": "Get Model Metadata",
-        "tags": [
-          "Governance"
-        ]
+        }
       }
     },
     "/predict": {
       "post": {
-        "description": "Generate 7-day multi-horizon rainfall forecasts for Ho Chi Minh City (`HCMC`).\n\nError status contract:\n- `422 Unprocessable Entity`: Invalid Pydantic/JSON schema types or `location_id`/`province` outside HCMC.\n- `400 Bad Request`: Client-supplied `request.history` fails continuity/missingness/physical-bound checks\n  (or caller-specified `run_date` exceeds 7-day lag limit).\n- `503 Service Unavailable`: Server-side DB/history provider failure or corrupted/incomplete server DB records\n  when `request.history` is omitted (`None`).",
+        "tags": [
+          "Forecasting"
+        ],
+        "summary": "Predict Rainfall",
+        "description": "Generate 7-day multi-horizon rainfall predictions after `anchor_date` for Ho Chi Minh City (`HCMC`).",
         "operationId": "predict_rainfall_predict_post",
         "requestBody": {
           "content": {
@@ -252,50 +90,72 @@
         },
         "responses": {
           "200": {
+            "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/PredictResponse"
+                }
               }
-            },
-            "description": "Successful Response"
+            }
           },
           "400": {
-            "description": "Bad Request — Client-supplied `request.history` payload violates business or physical rules (<35 continuous days, calendar date gap, NaN/-999.0 sentinel, physical bound violation, or >7d lag)."
+            "description": "Bad Request — Client-supplied `request.history` payload violates business or physical rules (<30 continuous days, calendar date gap, NaN/-999.0 sentinel, physical bound violation, or invalid/stale run_date).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "422": {
-            "description": "Unprocessable Entity — Invalid JSON/Pydantic schema types, unsupported `location_id`/`province` outside Ho Chi Minh City, OR requested `anchor_date` violates `COMPLETE_ALL_35` radiation completeness."
+            "description": "Unprocessable Entity — Invalid JSON/Pydantic schema types, unsupported `location_id`/`province` outside Ho Chi Minh City, OR `anchor_date` missing/violating `COMPLETE_ALL_35` radiation completeness.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "503": {
-            "description": "Service Unavailable — Predictor not initialized, OR server-side DB/history provider failed or returned incomplete/NaN meteorological records when `request.history` is omitted."
+            "description": "Service Unavailable — Predictor not initialized, OR server-side DB/history provider failed or returned incomplete/NaN meteorological records when `request.history` is omitted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
-        },
-        "summary": "Predict Rainfall",
-        "tags": [
-          "Forecasting"
-        ]
+        }
       }
     },
     "/scores": {
       "get": {
-        "description": "Query `v_forecast_scores` from active SQLite Vintage Store and return per-model overall & horizon\nscores (MAE, MSE, RMSE, MASE), Moving Block Bootstrap 95% CIs (`block_length = 7`), sample sizes,\nand mandatory methodological notes.",
+        "tags": [
+          "Governance"
+        ],
+        "summary": "Get Scores",
+        "description": "Query `v_forecast_scores` from active SQLite Vintage Store and return per-model overall & horizon\nscores (MAE, MSE, RMSE, MASE), Moving Block Bootstrap 95% CIs (`block_length = 7`), sample sizes,\npairwise ML differences, and mandatory methodological notes.",
         "operationId": "get_scores_scores_get",
         "parameters": [
           {
-            "description": "Canonical split regime filter ('DEV_TRAIN', 'VALIDATION', 'TEST', 'POST_TEST').",
-            "in": "query",
             "name": "eval_split_regime",
+            "in": "query",
             "required": false,
             "schema": {
-              "default": "POST_TEST",
+              "type": "string",
               "description": "Canonical split regime filter ('DEV_TRAIN', 'VALIDATION', 'TEST', 'POST_TEST').",
-              "title": "Eval Split Regime",
-              "type": "string"
-            }
+              "default": "POST_TEST",
+              "title": "Eval Split Regime"
+            },
+            "description": "Canonical split regime filter ('DEV_TRAIN', 'VALIDATION', 'TEST', 'POST_TEST')."
           },
           {
-            "description": "Optional filter: 1 for strictly prospective forecasts, 0 for retrospective, or omit for all.",
-            "in": "query",
             "name": "is_prospective",
+            "in": "query",
             "required": false,
             "schema": {
               "anyOf": [
@@ -308,29 +168,1545 @@
               ],
               "description": "Optional filter: 1 for strictly prospective forecasts, 0 for retrospective, or omit for all.",
               "title": "Is Prospective"
+            },
+            "description": "Optional filter: 1 for strictly prospective forecasts, 0 for retrospective, or omit for all."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoresResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity — Invalid `eval_split_regime` or `is_prospective` query parameter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable — SQLite vintage database unavailable or corrupted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/benchmark/leaderboard": {
+      "get": {
+        "tags": [
+          "Governance"
+        ],
+        "summary": "Get Leaderboard",
+        "description": "Returns top audited benchmark scenarios from official benchmark test leaderboards.",
+        "operationId": "get_leaderboard_benchmark_leaderboard_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 72,
+              "minimum": 1,
+              "default": 10,
+              "title": "Limit"
             }
           }
         ],
         "responses": {
           "200": {
+            "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/LeaderboardResponse"
+                }
               }
-            },
-            "description": "Successful Response"
+            }
           },
           "422": {
-            "description": "Unprocessable Entity — Invalid `eval_split_regime` or `is_prospective` query parameter."
+            "description": "Invalid limit parameter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "503": {
-            "description": "Service Unavailable — SQLite vintage database unavailable or corrupted."
+            "description": "Benchmark leaderboard artifact unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AnchorRange": {
+        "properties": {
+          "min": {
+            "type": "string",
+            "title": "Min"
+          },
+          "max": {
+            "type": "string",
+            "title": "Max"
           }
         },
-        "summary": "Get Scores",
-        "tags": [
-          "Governance"
-        ]
+        "type": "object",
+        "required": [
+          "min",
+          "max"
+        ],
+        "title": "AnchorRange"
+      },
+      "BlockBootstrapMeta": {
+        "properties": {
+          "method": {
+            "type": "string",
+            "title": "Method"
+          },
+          "block_length": {
+            "type": "integer",
+            "title": "Block Length"
+          },
+          "n_blocks": {
+            "type": "integer",
+            "title": "N Blocks"
+          },
+          "candidate_blocks": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Blocks"
+          },
+          "n_bootstrap": {
+            "type": "integer",
+            "title": "N Bootstrap"
+          },
+          "seed": {
+            "type": "integer",
+            "title": "Seed"
+          },
+          "n_anchor_dates": {
+            "type": "integer",
+            "title": "N Anchor Dates"
+          }
+        },
+        "type": "object",
+        "required": [
+          "method",
+          "block_length",
+          "n_blocks",
+          "n_bootstrap",
+          "seed",
+          "n_anchor_dates"
+        ],
+        "title": "BlockBootstrapMeta"
+      },
+      "BootstrapSummary": {
+        "properties": {
+          "point_estimate": {
+            "type": "number",
+            "title": "Point Estimate"
+          },
+          "ci_lower": {
+            "type": "number",
+            "title": "Ci Lower"
+          },
+          "ci_upper": {
+            "type": "number",
+            "title": "Ci Upper"
+          },
+          "ci_width": {
+            "type": "number",
+            "title": "Ci Width"
+          },
+          "bootstrap_se": {
+            "type": "number",
+            "title": "Bootstrap Se"
+          },
+          "significant_at_95pct": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Significant At 95Pct"
+          }
+        },
+        "type": "object",
+        "required": [
+          "point_estimate",
+          "ci_lower",
+          "ci_upper",
+          "ci_width",
+          "bootstrap_se"
+        ],
+        "title": "BootstrapSummary"
+      },
+      "DailyForecastItem": {
+        "properties": {
+          "target_date": {
+            "type": "string",
+            "title": "Target Date"
+          },
+          "horizon_day": {
+            "type": "integer",
+            "maximum": 7.0,
+            "minimum": 1.0,
+            "title": "Horizon Day"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "past_observed",
+              "today",
+              "future_forecast",
+              "past_unverified"
+            ],
+            "title": "Status"
+          },
+          "observed_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed Mm"
+          },
+          "predictions": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "propertyNames": {
+              "enum": [
+                "SC-35",
+                "SC-30",
+                "SC-31",
+                "BASELINE_CLIMATOLOGY_DOY",
+                "BASELINE_PERSISTENCE"
+              ]
+            },
+            "type": "object",
+            "title": "Predictions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "target_date",
+          "horizon_day",
+          "status",
+          "predictions"
+        ],
+        "title": "DailyForecastItem"
+      },
+      "DataGroupLatency": {
+        "properties": {
+          "last_valid_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Valid Date"
+          },
+          "lag_days_vs_scan_end": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lag Days Vs Scan End"
+          },
+          "valid_days_in_window": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid Days In Window"
+          }
+        },
+        "type": "object",
+        "title": "DataGroupLatency"
+      },
+      "DataLatencyInfo": {
+        "properties": {
+          "last_ingest_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Ingest Run Id"
+          },
+          "last_ingest_at_utc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Ingest At Utc"
+          },
+          "scan_window_end": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scan Window End"
+          },
+          "groups": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DataGroupLatency"
+            },
+            "type": "object",
+            "title": "Groups"
+          }
+        },
+        "type": "object",
+        "title": "DataLatencyInfo"
+      },
+      "ErrorDetail": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "UNSUPPORTED_LOCATION",
+              "INCOMPLETE_RADIATION_AT_ANCHOR",
+              "ANCHOR_DATE_NOT_FOUND",
+              "INVALID_CLIENT_HISTORY",
+              "SERVER_DB_DATA_ERROR",
+              "PREDICTOR_NOT_READY",
+              "INVALID_QUERY_PARAMETER"
+            ],
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "details": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Details"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ErrorDetail"
+      },
+      "ErrorResponse": {
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorDetail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "title": "ErrorResponse"
+      },
+      "FourMetricBlock": {
+        "properties": {
+          "MAE": {
+            "type": "number",
+            "title": "Mae"
+          },
+          "MSE": {
+            "type": "number",
+            "title": "Mse"
+          },
+          "RMSE": {
+            "type": "number",
+            "title": "Rmse"
+          },
+          "MASE": {
+            "type": "number",
+            "title": "Mase"
+          }
+        },
+        "type": "object",
+        "required": [
+          "MAE",
+          "MSE",
+          "RMSE",
+          "MASE"
+        ],
+        "title": "FourMetricBlock"
+      },
+      "HealthBaselineModel": {
+        "properties": {
+          "scenario_id": {
+            "type": "string",
+            "title": "Scenario Id"
+          },
+          "model_kind": {
+            "type": "string",
+            "title": "Model Kind"
+          },
+          "definition": {
+            "type": "string",
+            "title": "Definition"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scenario_id",
+          "model_kind",
+          "definition"
+        ],
+        "title": "HealthBaselineModel"
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "service": {
+            "type": "string",
+            "title": "Service"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "predictor_loaded": {
+            "type": "boolean",
+            "title": "Predictor Loaded"
+          },
+          "model_source": {
+            "type": "string",
+            "title": "Model Source"
+          },
+          "weather_backend": {
+            "type": "string",
+            "title": "Weather Backend"
+          },
+          "db_role": {
+            "type": "string",
+            "title": "Db Role"
+          },
+          "default_complete_anchor_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Complete Anchor Date"
+          },
+          "data_snapshot_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Snapshot Date"
+          },
+          "anchor_range": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnchorRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "data_latency": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DataLatencyInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "journal_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Journal Mode"
+          },
+          "serving_model": {
+            "$ref": "#/components/schemas/HealthServingModel"
+          },
+          "shadow_models": {
+            "items": {
+              "$ref": "#/components/schemas/HealthShadowModel"
+            },
+            "type": "array",
+            "title": "Shadow Models"
+          },
+          "baselines": {
+            "items": {
+              "$ref": "#/components/schemas/HealthBaselineModel"
+            },
+            "type": "array",
+            "title": "Baselines"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "service",
+          "version",
+          "predictor_loaded",
+          "model_source",
+          "weather_backend",
+          "db_role",
+          "serving_model",
+          "shadow_models",
+          "baselines"
+        ],
+        "title": "HealthResponse"
+      },
+      "HealthServingModel": {
+        "properties": {
+          "scenario_id": {
+            "type": "string",
+            "title": "Scenario Id"
+          },
+          "model_name": {
+            "type": "string",
+            "title": "Model Name"
+          },
+          "governance_role": {
+            "type": "string",
+            "title": "Governance Role"
+          },
+          "alias": {
+            "type": "string",
+            "title": "Alias"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scenario_id",
+          "model_name",
+          "governance_role",
+          "alias",
+          "status"
+        ],
+        "title": "HealthServingModel"
+      },
+      "HealthShadowModel": {
+        "properties": {
+          "scenario_id": {
+            "type": "string",
+            "title": "Scenario Id"
+          },
+          "model_name": {
+            "type": "string",
+            "title": "Model Name"
+          },
+          "governance_role": {
+            "type": "string",
+            "title": "Governance Role"
+          },
+          "alias": {
+            "type": "string",
+            "title": "Alias"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scenario_id",
+          "model_name",
+          "governance_role",
+          "alias",
+          "status"
+        ],
+        "title": "HealthShadowModel"
+      },
+      "HorizonBootstrapCI": {
+        "properties": {
+          "MAE": {
+            "$ref": "#/components/schemas/BootstrapSummary"
+          },
+          "RMSE": {
+            "$ref": "#/components/schemas/BootstrapSummary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "MAE",
+          "RMSE"
+        ],
+        "title": "HorizonBootstrapCI"
+      },
+      "LeaderboardResponse": {
+        "properties": {
+          "benchmark_dataset": {
+            "type": "string",
+            "title": "Benchmark Dataset"
+          },
+          "evaluation_rule": {
+            "type": "string",
+            "title": "Evaluation Rule"
+          },
+          "test_set_exposure_note": {
+            "type": "string",
+            "title": "Test Set Exposure Note"
+          },
+          "config_note": {
+            "type": "string",
+            "title": "Config Note"
+          },
+          "top_scenarios": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Top Scenarios"
+          }
+        },
+        "type": "object",
+        "required": [
+          "benchmark_dataset",
+          "evaluation_rule",
+          "test_set_exposure_note",
+          "config_note",
+          "top_scenarios"
+        ],
+        "title": "LeaderboardResponse"
+      },
+      "ModelConfidenceIntervals": {
+        "properties": {
+          "block_length": {
+            "type": "integer",
+            "title": "Block Length"
+          },
+          "n_blocks": {
+            "type": "integer",
+            "title": "N Blocks"
+          },
+          "overall": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OverallBootstrapCI"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "by_horizon": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/HorizonBootstrapCI"
+            },
+            "type": "object",
+            "title": "By Horizon"
+          }
+        },
+        "type": "object",
+        "required": [
+          "block_length",
+          "n_blocks"
+        ],
+        "title": "ModelConfidenceIntervals"
+      },
+      "ModelsResponse": {
+        "properties": {
+          "project": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "date_packaged": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Packaged"
+          },
+          "model_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Source"
+          },
+          "db_role": {
+            "type": "string",
+            "title": "Db Role"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
+          },
+          "governance_frozen_constants": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Governance Frozen Constants"
+          },
+          "models": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "object",
+            "title": "Models"
+          },
+          "sha256_checksums": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Sha256 Checksums"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "db_role",
+          "models"
+        ],
+        "title": "ModelsResponse"
+      },
+      "OverallBootstrapCI": {
+        "properties": {
+          "MAE": {
+            "$ref": "#/components/schemas/BootstrapSummary"
+          },
+          "RMSE": {
+            "$ref": "#/components/schemas/BootstrapSummary"
+          },
+          "MASE": {
+            "$ref": "#/components/schemas/BootstrapSummary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "MAE",
+          "RMSE",
+          "MASE"
+        ],
+        "title": "OverallBootstrapCI"
+      },
+      "PredictLocationInfo": {
+        "properties": {
+          "location_id": {
+            "type": "string",
+            "title": "Location Id"
+          },
+          "province": {
+            "type": "string",
+            "title": "Province"
+          },
+          "latitude": {
+            "type": "number",
+            "title": "Latitude"
+          },
+          "longitude": {
+            "type": "number",
+            "title": "Longitude"
+          },
+          "grid_resolution_note": {
+            "type": "string",
+            "title": "Grid Resolution Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "location_id",
+          "province",
+          "latitude",
+          "longitude",
+          "grid_resolution_note"
+        ],
+        "title": "PredictLocationInfo"
+      },
+      "PredictResponse": {
+        "properties": {
+          "anchor_date": {
+            "type": "string",
+            "title": "Anchor Date"
+          },
+          "anchor_split_regime": {
+            "type": "string",
+            "enum": [
+              "DEV_TRAIN",
+              "VALIDATION",
+              "TEST",
+              "POST_TEST"
+            ],
+            "title": "Anchor Split Regime"
+          },
+          "run_date": {
+            "type": "string",
+            "title": "Run Date"
+          },
+          "run_timezone": {
+            "type": "string",
+            "title": "Run Timezone"
+          },
+          "effective_future_days": {
+            "type": "integer",
+            "maximum": 7.0,
+            "minimum": 0.0,
+            "title": "Effective Future Days"
+          },
+          "future_forecast_notice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Future Forecast Notice"
+          },
+          "db_role": {
+            "type": "string",
+            "title": "Db Role"
+          },
+          "daily_forecasts": {
+            "items": {
+              "$ref": "#/components/schemas/DailyForecastItem"
+            },
+            "type": "array",
+            "title": "Daily Forecasts"
+          },
+          "run_timestamp": {
+            "type": "string",
+            "title": "Run Timestamp"
+          },
+          "model_source": {
+            "type": "string",
+            "title": "Model Source"
+          },
+          "history_backend": {
+            "type": "string",
+            "title": "History Backend"
+          },
+          "data_as_of": {
+            "type": "string",
+            "title": "Data As Of"
+          },
+          "lag_days": {
+            "type": "integer",
+            "title": "Lag Days"
+          },
+          "forecast_horizon_mode": {
+            "type": "string",
+            "enum": [
+              "operational_forecast",
+              "retrospective_hindcast_only"
+            ],
+            "title": "Forecast Horizon Mode"
+          },
+          "anchor_completeness_regime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anchor Completeness Regime"
+          },
+          "serving_model": {
+            "$ref": "#/components/schemas/PredictServingModel"
+          },
+          "shadow_models": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PredictShadowModel"
+            },
+            "type": "object",
+            "title": "Shadow Models"
+          },
+          "shadow_model": {
+            "$ref": "#/components/schemas/PredictShadowModel"
+          },
+          "location": {
+            "$ref": "#/components/schemas/PredictLocationInfo"
+          }
+        },
+        "type": "object",
+        "required": [
+          "anchor_date",
+          "anchor_split_regime",
+          "run_date",
+          "run_timezone",
+          "effective_future_days",
+          "db_role",
+          "daily_forecasts",
+          "run_timestamp",
+          "model_source",
+          "history_backend",
+          "data_as_of",
+          "lag_days",
+          "forecast_horizon_mode",
+          "serving_model",
+          "shadow_models",
+          "shadow_model",
+          "location"
+        ],
+        "title": "PredictResponse"
+      },
+      "PredictServingModel": {
+        "properties": {
+          "scenario_id": {
+            "type": "string",
+            "title": "Scenario Id"
+          },
+          "model_name": {
+            "type": "string",
+            "title": "Model Name"
+          },
+          "governance_role": {
+            "type": "string",
+            "title": "Governance Role"
+          },
+          "registry_alias": {
+            "type": "string",
+            "title": "Registry Alias"
+          },
+          "feature_level": {
+            "type": "string",
+            "title": "Feature Level"
+          },
+          "predictions_7d_mm": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Predictions 7D Mm"
+          },
+          "hindcast_and_current": {
+            "items": {
+              "$ref": "#/components/schemas/ServingHorizonDetailItem"
+            },
+            "type": "array",
+            "title": "Hindcast And Current"
+          },
+          "forecast_future": {
+            "items": {
+              "$ref": "#/components/schemas/ServingHorizonDetailItem"
+            },
+            "type": "array",
+            "title": "Forecast Future"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scenario_id",
+          "model_name",
+          "governance_role",
+          "registry_alias",
+          "feature_level",
+          "predictions_7d_mm",
+          "hindcast_and_current",
+          "forecast_future"
+        ],
+        "title": "PredictServingModel"
+      },
+      "PredictShadowModel": {
+        "properties": {
+          "scenario_id": {
+            "type": "string",
+            "title": "Scenario Id"
+          },
+          "model_name": {
+            "type": "string",
+            "title": "Model Name"
+          },
+          "governance_role": {
+            "type": "string",
+            "title": "Governance Role"
+          },
+          "registry_alias": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Registry Alias"
+          },
+          "feature_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Level"
+          },
+          "predictions_7d_mm": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Predictions 7D Mm"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scenario_id",
+          "model_name",
+          "governance_role",
+          "predictions_7d_mm"
+        ],
+        "title": "PredictShadowModel"
+      },
+      "PredictionRequest": {
+        "properties": {
+          "history": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "History",
+            "description": "Historical continuous daily records (at least 30 days). If omitted, loads canonical recent data."
+          },
+          "run_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Date",
+            "description": "Operational run date (YYYY-MM-DD). Defaults to current HCMC date or anchor date."
+          },
+          "anchor_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anchor Date",
+            "description": "Optional anchor date (YYYY-MM-DD) in DB. Must satisfy COMPLETE_ALL_35; defaults to latest complete anchor."
+          },
+          "location_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location Id",
+            "description": "Canonical location identifier (locked strictly to HCMC / Ho Chi Minh City aliases)."
+          },
+          "province": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Province",
+            "description": "Backward-compatible location alias (locked strictly to TP. Hồ Chí Minh / HCMC aliases).",
+            "default": "TP. Hồ Chí Minh"
+          }
+        },
+        "type": "object",
+        "title": "PredictionRequest"
+      },
+      "ScoreLeaderboardEntry": {
+        "properties": {
+          "model_id": {
+            "type": "string",
+            "title": "Model Id"
+          },
+          "model_kind": {
+            "type": "string",
+            "title": "Model Kind"
+          },
+          "n_origins": {
+            "type": "integer",
+            "title": "N Origins"
+          },
+          "n_forecasts": {
+            "type": "integer",
+            "title": "N Forecasts"
+          },
+          "MAE": {
+            "type": "number",
+            "title": "Mae"
+          },
+          "MSE": {
+            "type": "number",
+            "title": "Mse"
+          },
+          "RMSE": {
+            "type": "number",
+            "title": "Rmse"
+          },
+          "MASE": {
+            "type": "number",
+            "title": "Mase"
+          },
+          "MAE_vs_first": {
+            "type": "number",
+            "title": "Mae Vs First"
+          },
+          "rank": {
+            "type": "integer",
+            "title": "Rank"
+          },
+          "MAE_ci95": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BootstrapSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "RMSE_ci95": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BootstrapSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "MASE_ci95": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BootstrapSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "model_id",
+          "model_kind",
+          "n_origins",
+          "n_forecasts",
+          "MAE",
+          "MSE",
+          "RMSE",
+          "MASE",
+          "MAE_vs_first",
+          "rank"
+        ],
+        "title": "ScoreLeaderboardEntry"
+      },
+      "ScoreModelDetail": {
+        "properties": {
+          "model_id": {
+            "type": "string",
+            "title": "Model Id"
+          },
+          "model_kind": {
+            "type": "string",
+            "title": "Model Kind"
+          },
+          "n_origins": {
+            "type": "integer",
+            "title": "N Origins"
+          },
+          "n_forecasts": {
+            "type": "integer",
+            "title": "N Forecasts"
+          },
+          "overall_vs_first": {
+            "$ref": "#/components/schemas/FourMetricBlock"
+          },
+          "overall_vs_latest": {
+            "$ref": "#/components/schemas/FourMetricBlock"
+          },
+          "by_horizon_vs_first": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/FourMetricBlock"
+            },
+            "type": "object",
+            "title": "By Horizon Vs First"
+          },
+          "by_horizon_vs_latest": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/FourMetricBlock"
+            },
+            "type": "object",
+            "title": "By Horizon Vs Latest"
+          },
+          "confidence_intervals_95pct": {
+            "$ref": "#/components/schemas/ModelConfidenceIntervals"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model_id",
+          "model_kind",
+          "n_origins",
+          "n_forecasts",
+          "overall_vs_first",
+          "overall_vs_latest",
+          "by_horizon_vs_first",
+          "by_horizon_vs_latest",
+          "confidence_intervals_95pct"
+        ],
+        "title": "ScoreModelDetail"
+      },
+      "ScoresResponse": {
+        "properties": {
+          "location_id": {
+            "type": "string",
+            "title": "Location Id"
+          },
+          "db_role": {
+            "type": "string",
+            "title": "Db Role"
+          },
+          "eval_split_regime": {
+            "type": "string",
+            "enum": [
+              "DEV_TRAIN",
+              "VALIDATION",
+              "TEST",
+              "POST_TEST"
+            ],
+            "title": "Eval Split Regime"
+          },
+          "is_prospective_filter": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Prospective Filter"
+          },
+          "mase_scale": {
+            "type": "number",
+            "title": "Mase Scale"
+          },
+          "origin_min": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Min"
+          },
+          "origin_max": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Max"
+          },
+          "target_date_min": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Date Min"
+          },
+          "target_date_max": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Date Max"
+          },
+          "n_origins": {
+            "type": "integer",
+            "title": "N Origins"
+          },
+          "n_forecasts_per_model": {
+            "type": "integer",
+            "title": "N Forecasts Per Model"
+          },
+          "total_scored_rows": {
+            "type": "integer",
+            "title": "Total Scored Rows"
+          },
+          "is_prospective_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Is Prospective Counts"
+          },
+          "temporal_status_at_issue_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Temporal Status At Issue Counts"
+          },
+          "leaderboard": {
+            "items": {
+              "$ref": "#/components/schemas/ScoreLeaderboardEntry"
+            },
+            "type": "array",
+            "title": "Leaderboard"
+          },
+          "models": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ScoreModelDetail"
+            },
+            "type": "object",
+            "title": "Models"
+          },
+          "pairwise_delta_mae_ci": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BootstrapSummary"
+            },
+            "type": "object",
+            "title": "Pairwise Delta Mae Ci"
+          },
+          "block_bootstrap": {
+            "$ref": "#/components/schemas/BlockBootstrapMeta"
+          },
+          "methodological_notes": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Methodological Notes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "location_id",
+          "db_role",
+          "eval_split_regime",
+          "mase_scale",
+          "n_origins",
+          "n_forecasts_per_model",
+          "total_scored_rows",
+          "is_prospective_counts",
+          "temporal_status_at_issue_counts",
+          "leaderboard",
+          "models",
+          "pairwise_delta_mae_ci",
+          "block_bootstrap",
+          "methodological_notes"
+        ],
+        "title": "ScoresResponse"
+      },
+      "ServingHorizonDetailItem": {
+        "properties": {
+          "horizon": {
+            "type": "integer",
+            "maximum": 7.0,
+            "minimum": 1.0,
+            "title": "Horizon"
+          },
+          "target_date": {
+            "type": "string",
+            "title": "Target Date"
+          },
+          "pred_mm": {
+            "type": "number",
+            "title": "Pred Mm"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "past_observed",
+              "today",
+              "future_forecast",
+              "past_unverified"
+            ],
+            "title": "Status"
+          },
+          "observed_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed Mm"
+          },
+          "abs_error_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Abs Error Mm"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "horizon",
+          "target_date",
+          "pred_mm",
+          "status"
+        ],
+        "title": "ServingHorizonDetailItem"
       }
     }
   }

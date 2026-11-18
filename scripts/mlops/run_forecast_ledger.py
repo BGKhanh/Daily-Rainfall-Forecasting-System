@@ -34,6 +34,7 @@ from src.data.vintage_store import (  # noqa: E402
 from src.inference.forecast_runner import (  # noqa: E402
     DEFAULT_ARTIFACT_DIR,
     DEFAULT_DB_PATH,
+    compute_block_length_sensitivity,
     evaluate_post_test_retrospective_scores,
     issue_forecasts_for_anchors,
     list_complete_anchor_dates,
@@ -138,6 +139,12 @@ def main() -> int:
                 location_id=HCMC_LOCATION_ID,
             )
             output["post_test_evaluation"] = scores
+            output["block_length_sensitivity"] = compute_block_length_sensitivity(
+                conn,
+                block_lengths=(7, 14, 21),
+                eval_split_regime="POST_TEST",
+                location_id=HCMC_LOCATION_ID,
+            )
         elif args.anchor_date is not None or default_anchor is not None:
             chosen = args.anchor_date or default_anchor
             assert chosen is not None

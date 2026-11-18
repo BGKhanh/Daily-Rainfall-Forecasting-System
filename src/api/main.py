@@ -1,41 +1,54 @@
 """
 FastAPI Serving Engine for HCMC Daily Rainfall Forecasting System
-==================================================================
+=================================================================
 Serves operational multi-horizon rainfall forecasts using:
 - Serving Champion: SC-35 XGBoost Tweedie F3 (governance_role: test_ranking_winner_as_originally_benchmarked)
 - Shadow Model 1: SC-30 LightGBM Tweedie F2 Config A (governance_role: validation_selected_champion)
 - Shadow Model 2: SC-31 LightGBM Tweedie F3 Config A (governance_role: post_audit_test_contender)
 
 Features:
-- Dynamic horizon tagging (past_unverified, today, future_forecast) based on data_as_of vs run_date.
+- Locked Pydantic v2 request/response schemas and unified ErrorResponse across 4xx/5xx.
+- Canonical HCMC operational clock (`Asia/Ho_Chi_Minh`) and true UTC timestamps (`now_utc`).
+- Dynamic horizon tagging (`past_observed`, `past_unverified`, `today`, `future_forecast`).
 - Strict location lock to Ho Chi Minh City (`location_id = "HCMC"`, 10.7769N, 106.7009E).
-- Strict HTTP status separation (422 for non-HCMC locations, 400 for invalid user history payload, 503 for server DB data failures).
+- Serves built SPA static files at `/` when `frontend/dist` is present.
 """
 
+from contextlib import asynccontextmanager
 from copy import deepcopy
-import os
-import sys
-from pathlib import Path
 from datetime import timedelta
-from typing import List, Dict, Any, Optional
+import os
+from pathlib import Path
+import sys
+from typing import Any, Dict, List, Optional
 
-import pandas as pd
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 import numpy as np
-from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel, Field, ConfigDict
+import pandas as pd
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.inference.predictor import StandaloneRainfallPredictor
-from src.inference.validation import ServingValidationError
-from src.inference.forecast_runner import (
-    METHODOLOGICAL_NOTES,
-    PERSISTENCE_SPEC_SHA256,
-    evaluate_post_test_retrospective_scores,
+from src.api.schemas import (
+    ErrorCode,
+    ErrorResponse,
+    HealthResponse,
+    LeaderboardResponse,
+    ModelsResponse,
+    PredictionRequest,
+    PredictResponse,
+    ScoresResponse,
 )
+from src.config.clock import HCMC_TIMEZONE_NAME, today_hcmc
 from src.data.provider import (
+    DEFAULT_DEMO_VINTAGE_DB_PATH,
     IncompleteRadiationAtAnchorError,
     WeatherHistoryProvider,
     resolve_sqlite_db_path_and_role,
@@ -47,10 +60,20 @@ from src.data.vintage_store import (
     HCMC_LOCATION_ID,
     HCMC_LONGITUDE,
     connect_sqlite,
+    derive_eval_split_regime,
+    get_complete_anchor_range,
+    get_data_snapshot_date,
     get_default_complete_anchor_date,
+    get_latest_ingest_latency,
 )
-
-from contextlib import asynccontextmanager
+from src.inference.forecast_runner import (
+    METHODOLOGICAL_NOTES,
+    PERSISTENCE_SPEC_SHA256,
+    compute_dev_train_doy_climatology,
+    evaluate_post_test_retrospective_scores,
+)
+from src.inference.predictor import StandaloneRainfallPredictor
+from src.inference.validation import ServingValidationError
 
 CANONICAL_LOCATION_ID = HCMC_LOCATION_ID
 CANONICAL_PROVINCE_NAME = HCMC_DISPLAY_NAME
@@ -58,6 +81,35 @@ CANONICAL_LATITUDE = HCMC_LATITUDE
 CANONICAL_LONGITUDE = HCMC_LONGITUDE
 ALLOWED_HCMC_ALIASES = frozenset(HCMC_ALIASES)
 VALID_EVAL_SPLIT_REGIMES = ("DEV_TRAIN", "VALIDATION", "TEST", "POST_TEST")
+
+TEST_SET_EXPOSURE_NOTE = (
+    "Tập Test (2020-05-01..2026-04-30) đã được xem; chủ dự án chọn @serving (SC-35) "
+    "sau khi xem Test, trong khi mô hình vô địch chọn theo Validation là SC-30 Config A."
+)
+CONFIG_NOTE = (
+    "Config A là chuẩn chính thức cho LightGBM (num_leaves=31, max_depth=-1); "
+    "SC-30 Config A và SC-31 Config A đối khớp 0.000000 mm với NPZ chuẩn."
+)
+
+predictor: Optional[StandaloneRainfallPredictor] = None
+history_provider: Optional[WeatherHistoryProvider] = None
+_cached_doy_climatology: Optional[Dict[int, float]] = None
+
+
+def _api_error(
+    status_code: int,
+    code: ErrorCode,
+    message: str,
+    details: Optional[Dict[str, Any]] = None,
+) -> HTTPException:
+    return HTTPException(
+        status_code=status_code,
+        detail={
+            "code": code,
+            "message": message,
+            "details": details or {},
+        },
+    )
 
 
 def _resolve_active_db_info() -> tuple[Optional[Path], str]:
@@ -72,6 +124,20 @@ def _resolve_active_db_info() -> tuple[Optional[Path], str]:
             return None, "sample_csv"
         return None, str(active_provider.backend)
     return resolve_sqlite_db_path_and_role()
+
+
+def _load_doy_climatology_table(db_path: Optional[Path]) -> Optional[Dict[int, float]]:
+    if db_path is None or not db_path.exists():
+        return None
+    try:
+        conn = connect_sqlite(db_path, read_only=True)
+        try:
+            doy_table, _ = compute_dev_train_doy_climatology(conn, location_id=CANONICAL_LOCATION_ID)
+            return doy_table
+        finally:
+            conn.close()
+    except Exception:
+        return None
 
 
 def _query_baseline_checksums_from_db(db_path: Optional[Path]) -> Dict[str, Optional[str]]:
@@ -93,6 +159,16 @@ def _query_baseline_checksums_from_db(db_path: Optional[Path]) -> Dict[str, Opti
                     out[m_id] = str(row["artifact_sha256"])
         finally:
             conn.close()
+        if out["BASELINE_CLIMATOLOGY_DOY"] is None and DEFAULT_DEMO_VINTAGE_DB_PATH.exists() and db_path.resolve() != DEFAULT_DEMO_VINTAGE_DB_PATH.resolve():
+            demo_conn = connect_sqlite(DEFAULT_DEMO_VINTAGE_DB_PATH, read_only=True)
+            try:
+                row = demo_conn.execute(
+                    "SELECT artifact_sha256 FROM forecasts_ledger WHERE model_id = 'BASELINE_CLIMATOLOGY_DOY' LIMIT 1"
+                ).fetchone()
+                if row is not None and row["artifact_sha256"]:
+                    out["BASELINE_CLIMATOLOGY_DOY"] = str(row["artifact_sha256"])
+            finally:
+                demo_conn.close()
     except Exception:
         pass
     return out
@@ -109,99 +185,145 @@ def resolve_canonical_hcmc_location(
     """Validate and normalize incoming location/province to canonical 'HCMC', else raise HTTP 422."""
     if location_id is not None:
         if _normalize_location_token(location_id) not in ALLOWED_HCMC_ALIASES:
-            raise HTTPException(
-                status_code=422,
-                detail=(
+            raise _api_error(
+                422,
+                "UNSUPPORTED_LOCATION",
+                (
                     f"[UNSUPPORTED_LOCATION] location_id={location_id!r} is not supported. "
                     f"This endpoint is locked to Ho Chi Minh City ({CANONICAL_LOCATION_ID})."
                 ),
+                {"location_id": location_id},
             )
     if province is not None:
         if _normalize_location_token(province) not in ALLOWED_HCMC_ALIASES:
-            raise HTTPException(
-                status_code=422,
-                detail=(
+            raise _api_error(
+                422,
+                "UNSUPPORTED_LOCATION",
+                (
                     f"[UNSUPPORTED_LOCATION] province={province!r} is not supported. "
                     f"This endpoint is locked to Ho Chi Minh City ({CANONICAL_LOCATION_ID})."
                 ),
+                {"province": province},
             )
     return CANONICAL_LOCATION_ID
 
 
-predictor: Optional[StandaloneRainfallPredictor] = None
-history_provider: Optional[WeatherHistoryProvider] = None
-
-
 def load_serving_models():
-    global predictor, history_provider
+    global predictor, history_provider, _cached_doy_climatology
     artifact_path = PROJECT_ROOT / "artifacts" / "models"
     model_source = os.environ.get("SERVING_MODEL_SOURCE", "local")
     predictor = StandaloneRainfallPredictor(artifact_dir=artifact_path, mode=model_source)
     history_provider = WeatherHistoryProvider()
+    db_path, _ = _resolve_active_db_info()
+    if db_path is None:
+        fallback_db, _ = resolve_sqlite_db_path_and_role()
+        db_path = fallback_db
+    _cached_doy_climatology = _load_doy_climatology_table(db_path)
     print(
         f"Serving models ({predictor.mode}) and history provider ({history_provider.backend}) "
         "loaded successfully into API memory."
     )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     load_serving_models()
     yield
 
-# Initialize FastAPI App
+
 app = FastAPI(
     title="HCMC Daily Rainfall Forecasting Serving Engine",
-    description="Operational API for 1-7 days daily rainfall forecasting locked to HCMC with dynamic horizon calculation and shadow model governance.",
-    version="1.0.0",
+    description=(
+        "Operational API for 7-day multi-horizon daily rainfall forecasting locked to HCMC "
+        "with locked OpenAPI schemas, Two-DB SQLite DDL V3.2 governance, and shadow model telemetry."
+    ),
+    version="1.2.0",
     lifespan=lifespan,
 )
 
-class DailyWeatherRecord(BaseModel):
-    Ngày: str = Field(..., description="Date of observation in YYYY-MM-DD format")
-    Lượng_mưa: float = Field(..., alias="Lượng mưa", description="Daily precipitation in mm")
-    Nhiệt_độ_2m: float = Field(..., alias="Nhiệt độ 2m", description="Temperature at 2m (C)")
-    Độ_ẩm_tương_đối_2m: float = Field(..., alias="Độ ẩm tương đối 2m", description="Relative humidity at 2m (%)")
-    Tốc_độ_gió_2m: float = Field(..., alias="Tốc độ gió 2m", description="Wind speed at 2m (m/s)")
-    Nhiệt_độ_điểm_sương_2m: Optional[float] = Field(None, alias="Nhiệt độ điểm sương 2m")
-    Áp_suất_bề_mặt: Optional[float] = Field(None, alias="Áp suất bề mặt")
-    Độ_ẩm_đặc_trưng_2m: Optional[float] = Field(None, alias="Độ ẩm đặc trưng 2m")
-    Bức_xạ_mặt_trời: Optional[float] = Field(None, alias="Bức xạ mặt trời")
+_default_cors_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:4173",
+    "http://127.0.0.1:4173",
+]
+_extra_cors = [
+    o.strip() for o in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_default_cors_origins + _extra_cors,
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "Accept"],
+)
 
-    model_config = ConfigDict(populate_by_name=True, extra="allow")
 
-class PredictionRequest(BaseModel):
-    history: Optional[List[Dict[str, Any]]] = Field(
-        None,
-        description="Historical continuous daily records (at least 30 days). If omitted, loads canonical recent data."
-    )
-    run_date: Optional[str] = Field(
-        None,
-        description="Operational run date (YYYY-MM-DD). Defaults to current system date."
-    )
-    anchor_date: Optional[str] = Field(
-        None,
-        description="Optional anchor date (YYYY-MM-DD) in DB. Must satisfy COMPLETE_ALL_35; defaults to latest complete anchor."
-    )
-    location_id: Optional[str] = Field(
-        None,
-        description="Canonical location identifier (locked strictly to HCMC / Ho Chi Minh City aliases)."
-    )
-    province: Optional[str] = Field(
-        CANONICAL_PROVINCE_NAME,
-        description="Backward-compatible location alias (locked strictly to TP. Hồ Chí Minh / HCMC aliases)."
-    )
+@app.exception_handler(StarletteHTTPException)
+async def unified_http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    del request
+    if isinstance(exc.detail, dict) and "code" in exc.detail:
+        payload = {
+            "error": {
+                "code": exc.detail["code"],
+                "message": str(exc.detail.get("message", "")),
+                "details": exc.detail.get("details") or {},
+            }
+        }
+        return JSONResponse(status_code=exc.status_code, content=jsonable_encoder(payload))
 
-@app.get("/health", tags=["Monitoring"])
+    fallback_code: ErrorCode = (
+        "INVALID_QUERY_PARAMETER"
+        if exc.status_code == 422
+        else ("SERVER_DB_DATA_ERROR" if exc.status_code >= 500 else "INVALID_CLIENT_HISTORY")
+    )
+    payload = {
+        "error": {
+            "code": fallback_code,
+            "message": str(exc.detail),
+            "details": {"status_code": exc.status_code},
+        }
+    }
+    return JSONResponse(status_code=exc.status_code, content=jsonable_encoder(payload))
+
+
+@app.exception_handler(RequestValidationError)
+async def unified_validation_exception_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    del request
+    payload = {
+        "error": {
+            "code": "INVALID_QUERY_PARAMETER",
+            "message": "Request validation failed against API contract.",
+            "details": {"errors": jsonable_encoder(exc.errors())},
+        }
+    }
+    return JSONResponse(status_code=422, content=payload)
+
+
+@app.get(
+    "/health",
+    response_model=HealthResponse,
+    responses={503: {"model": ErrorResponse, "description": "Service unavailable"}},
+    tags=["Monitoring"],
+)
 def get_health():
-    """Health check endpoint indicating model readiness, active Two-DB role, anchor date, and governance status."""
+    """Health check endpoint reporting model readiness, active Two-DB role, anchor range, and group latency."""
     db_path, db_role = _resolve_active_db_info()
     default_anchor: Optional[str] = None
+    data_snapshot_date: Optional[str] = None
+    anchor_range: Optional[Dict[str, str]] = None
+    data_latency: Optional[Dict[str, Any]] = None
     journal_mode: Optional[str] = None
     if db_path is not None and db_path.exists():
         try:
             conn = connect_sqlite(db_path, read_only=True)
             try:
                 default_anchor = get_default_complete_anchor_date(conn, location_id=CANONICAL_LOCATION_ID)
+                data_snapshot_date = get_data_snapshot_date(conn, location_id=CANONICAL_LOCATION_ID)
+                anchor_range = get_complete_anchor_range(conn, location_id=CANONICAL_LOCATION_ID, window_days=35)
+                data_latency = get_latest_ingest_latency(conn, location_id=CANONICAL_LOCATION_ID)
                 jm_row = conn.execute("PRAGMA journal_mode;").fetchone()
                 journal_mode = str(jm_row[0]).lower() if jm_row else None
             finally:
@@ -212,19 +334,22 @@ def get_health():
     return {
         "status": "healthy",
         "service": "HCMC Rainfall Forecasting Engine",
-        "version": "1.0.0",
+        "version": "1.2.0",
         "predictor_loaded": predictor is not None,
         "model_source": predictor.mode if predictor is not None else os.environ.get("SERVING_MODEL_SOURCE", "local"),
         "weather_backend": history_provider.backend if history_provider is not None else os.environ.get("WEATHER_DB_BACKEND", "local"),
         "db_role": db_role,
         "default_complete_anchor_date": default_anchor,
+        "data_snapshot_date": data_snapshot_date,
+        "anchor_range": anchor_range,
+        "data_latency": data_latency,
         "journal_mode": journal_mode,
         "serving_model": {
             "scenario_id": "SC-35",
             "model_name": "xgboost_tweedie_F3",
             "governance_role": "test_ranking_winner_as_originally_benchmarked",
             "alias": "serving",
-            "status": "active"
+            "status": "active",
         },
         "shadow_models": [
             {
@@ -232,28 +357,34 @@ def get_health():
                 "model_name": "lightgbm_tweedie_F2",
                 "governance_role": "validation_selected_champion",
                 "alias": "shadow_val_champ",
-                "status": "active_shadow"
+                "status": "active_shadow",
             },
             {
                 "scenario_id": "SC-31",
                 "model_name": "lightgbm_tweedie_F3",
                 "governance_role": "post_audit_test_contender",
                 "alias": "shadow_test_contender",
-                "status": "active_shadow"
-            }
+                "status": "active_shadow",
+            },
         ],
         "baselines": [
-            {"scenario_id": "BASELINE_PERSISTENCE", "model_kind": "BASELINE", "definition": "PRECTOTCORR[data_as_of] for h=1..7"},
-            {"scenario_id": "BASELINE_CLIMATOLOGY_DOY", "model_kind": "BASELINE", "definition": "DevTrain (2001-01-01..2018-04-30) dayofyear mean"},
+            {
+                "scenario_id": "BASELINE_PERSISTENCE",
+                "model_kind": "BASELINE",
+                "definition": "PRECTOTCORR[data_as_of] for h=1..7",
+            },
+            {
+                "scenario_id": "BASELINE_CLIMATOLOGY_DOY",
+                "model_kind": "BASELINE",
+                "definition": "DevTrain (2001-01-01..2018-04-30) dayofyear mean",
+            },
         ],
     }
 
-@app.get("/models", tags=["Governance"])
-@app.get("/models/info", tags=["Governance"])
-def get_model_metadata():
-    """Returns governance metadata, hyperparameters, baselines, and cryptographic SHA-256 hashes."""
+
+def _build_models_payload() -> Dict[str, Any]:
     if predictor is None:
-        raise HTTPException(status_code=503, detail="Predictor not initialized")
+        raise _api_error(503, "PREDICTOR_NOT_READY", "Predictor not initialized")
     db_path, db_role = _resolve_active_db_info()
     baseline_shas = _query_baseline_checksums_from_db(db_path)
 
@@ -284,45 +415,92 @@ def get_model_metadata():
     payload["db_role"] = db_role
     return payload
 
+
+@app.get(
+    "/models",
+    response_model=ModelsResponse,
+    responses={503: {"model": ErrorResponse, "description": "Predictor not initialized"}},
+    tags=["Governance"],
+)
+def get_model_metadata():
+    """Returns governance metadata, hyperparameters, baselines, and cryptographic SHA-256 hashes."""
+    return _build_models_payload()
+
+
+@app.get(
+    "/models/info",
+    response_model=ModelsResponse,
+    include_in_schema=False,
+    tags=["Governance"],
+)
+def get_model_metadata_alias():
+    """Backwards-compatible hidden alias for GET /models."""
+    return _build_models_payload()
+
+
+def _compute_baseline_predictions_for_anchor(
+    df_history: pd.DataFrame,
+    anchor_date_str: str,
+) -> tuple[List[float], List[float]]:
+    ordered = df_history.copy()
+    ordered["Ngày"] = pd.to_datetime(ordered["Ngày"]).dt.normalize()
+    ordered = ordered.sort_values("Ngày").reset_index(drop=True)
+    anchor_rain = round(max(0.0, float(ordered["Lượng mưa"].iloc[-1])), 2)
+    persistence_7d = [anchor_rain] * 7
+
+    doy_table = _cached_doy_climatology
+    if doy_table is None:
+        fallback_db, _ = resolve_sqlite_db_path_and_role()
+        doy_table = _load_doy_climatology_table(fallback_db)
+
+    anchor_dt = pd.to_datetime(anchor_date_str).normalize()
+    if doy_table:
+        fallback_mean = float(np.mean(list(doy_table.values())))
+        clim_7d = [
+            round(max(0.0, float(doy_table.get((anchor_dt + timedelta(days=h)).dayofyear, fallback_mean))), 2)
+            for h in range(1, 8)
+        ]
+    else:
+        hist_mean = round(max(0.0, float(ordered["Lượng mưa"].mean())), 2)
+        clim_7d = [hist_mean] * 7
+    return persistence_7d, clim_7d
+
+
 @app.post(
     "/predict",
+    response_model=PredictResponse,
     tags=["Forecasting"],
     responses={
         400: {
+            "model": ErrorResponse,
             "description": (
                 "Bad Request — Client-supplied `request.history` payload violates business or physical rules "
-                "(<35 continuous days, calendar date gap, NaN/-999.0 sentinel, physical bound violation, or >7d lag)."
-            )
+                "(<30 continuous days, calendar date gap, NaN/-999.0 sentinel, physical bound violation, or invalid/stale run_date)."
+            ),
         },
         422: {
+            "model": ErrorResponse,
             "description": (
                 "Unprocessable Entity — Invalid JSON/Pydantic schema types, unsupported `location_id`/`province` "
-                "outside Ho Chi Minh City, OR requested `anchor_date` violates `COMPLETE_ALL_35` radiation completeness."
-            )
+                "outside Ho Chi Minh City, OR `anchor_date` missing/violating `COMPLETE_ALL_35` radiation completeness."
+            ),
         },
         503: {
+            "model": ErrorResponse,
             "description": (
                 "Service Unavailable — Predictor not initialized, OR server-side DB/history provider failed "
                 "or returned incomplete/NaN meteorological records when `request.history` is omitted."
-            )
+            ),
         },
     },
 )
 def predict_rainfall(request: PredictionRequest):
     """
-    Generate 7-day multi-horizon rainfall forecasts for Ho Chi Minh City (`HCMC`).
-
-    Error status contract:
-    - `422 Unprocessable Entity`: Invalid Pydantic/JSON schema types or `location_id`/`province` outside HCMC.
-    - `400 Bad Request`: Client-supplied `request.history` fails continuity/missingness/physical-bound checks
-      (or caller-specified `run_date` exceeds 7-day lag limit).
-    - `503 Service Unavailable`: Server-side DB/history provider failure or corrupted/incomplete server DB records
-      when `request.history` is omitted (`None`).
+    Generate 7-day multi-horizon rainfall predictions after `anchor_date` for Ho Chi Minh City (`HCMC`).
     """
     if predictor is None:
-        raise HTTPException(status_code=503, detail="Predictor not initialized")
+        raise _api_error(503, "PREDICTOR_NOT_READY", "Predictor not initialized")
 
-    # Strict HCMC location validation -> HTTP 422 for any other province/location
     canonical_loc_id = resolve_canonical_hcmc_location(request.location_id, request.province)
     prov = CANONICAL_PROVINCE_NAME
     lat, lon = CANONICAL_LATITUDE, CANONICAL_LONGITUDE
@@ -332,6 +510,9 @@ def predict_rainfall(request: PredictionRequest):
     observed_precip_by_date: Dict[str, float] = {}
     anchor_completeness_regime: Optional[str] = None
     enforce_lag_limit = True
+    is_db_mode = False
+    _, active_db_role = _resolve_active_db_info()
+    response_db_role = "request_payload" if request.history is not None else active_db_role
 
     if request.history is not None:
         df_history = pd.DataFrame(request.history)
@@ -348,25 +529,53 @@ def predict_rainfall(request: PredictionRequest):
             history_res = active_provider.fetch_recent_history(**fetch_kwargs)
             df_history = history_res.history_df
             history_backend = history_res.backend
+            response_db_role = history_res.db_role
             observed_precip_by_date = dict(getattr(history_res, "observed_precip_by_date", None) or {})
             anchor_completeness_regime = getattr(history_res, "anchor_completeness_regime", None)
+            is_db_mode = not bool(history_res.is_static_sample)
             if effective_run_date is None:
                 if history_res.is_static_sample:
                     effective_run_date = (history_res.data_as_of + timedelta(days=3)).strftime("%Y-%m-%d")
                 else:
-                    effective_run_date = (
-                        pd.Timestamp.now(tz="Asia/Ho_Chi_Minh").tz_localize(None).normalize().strftime("%Y-%m-%d")
-                    )
-            # Operational DB-backed runs anchored at latest COMPLETE_ALL_35 date (~78d CERES lag) allow lag > 7d
-            # and switch to past_observed + future_forecast_notice when effective_future_days == 0.
+                    effective_run_date = today_hcmc().strftime("%Y-%m-%d")
             enforce_lag_limit = bool(history_res.is_static_sample)
         except IncompleteRadiationAtAnchorError as e:
-            raise HTTPException(status_code=422, detail=str(e)) from e
+            if e.completeness_regime is None:
+                raise _api_error(
+                    422,
+                    "ANCHOR_DATE_NOT_FOUND",
+                    f"[ANCHOR_DATE_NOT_FOUND] {e}",
+                    {"anchor_date": e.anchor_date},
+                ) from e
+            raise _api_error(
+                422,
+                "INCOMPLETE_RADIATION_AT_ANCHOR",
+                str(e),
+                {"anchor_date": e.anchor_date, "completeness_regime": e.completeness_regime},
+            ) from e
         except Exception as e:
             detail_str = str(e)
             if "[SERVER_DB_DATA_ERROR]" not in detail_str:
                 detail_str = f"[SERVER_DB_DATA_ERROR] Server history provider failed: {detail_str}"
-            raise HTTPException(status_code=503, detail=detail_str) from e
+            raise _api_error(503, "SERVER_DB_DATA_ERROR", detail_str) from e
+
+    if is_db_mode and request.run_date is not None:
+        current_hcmc = today_hcmc()
+        req_run_dt = pd.to_datetime(effective_run_date).date()
+        if req_run_dt > current_hcmc:
+            raise _api_error(
+                400,
+                "INVALID_CLIENT_HISTORY",
+                (
+                    f"[INVALID_CLIENT_HISTORY] run_date ({effective_run_date}) exceeds "
+                    f"current operational HCMC date ({current_hcmc.strftime('%Y-%m-%d')})."
+                ),
+                {
+                    "validation_code": "RUN_DATE_EXCEEDS_TODAY",
+                    "run_date": effective_run_date,
+                    "today_hcmc": current_hcmc.strftime("%Y-%m-%d"),
+                },
+            )
 
     try:
         prediction_result = predictor.predict(
@@ -376,18 +585,29 @@ def predict_rainfall(request: PredictionRequest):
         )
     except ServingValidationError as e:
         if history_backend != "request_payload":
-            # Missing/NaN/gapped server DB data -> HTTP 503 Service Unavailable.
-            # Keep HTTP 400 when caller explicitly supplied an out-of-range future run_date.
-            if e.code == "STALE_RADIATION_OR_LAG" and request.run_date is not None:
-                raise HTTPException(status_code=400, detail=str(e)) from e
-            raise HTTPException(
-                status_code=503,
-                detail=f"[SERVER_DB_DATA_ERROR] Server observation store failed validation: {e}",
+            if request.run_date is not None and e.code in ("STALE_RADIATION_OR_LAG", "DATE_CONTINUITY_VIOLATION"):
+                raise _api_error(
+                    400,
+                    "INVALID_CLIENT_HISTORY",
+                    str(e),
+                    {"validation_code": e.code, **(e.details or {})},
+                ) from e
+            raise _api_error(
+                503,
+                "SERVER_DB_DATA_ERROR",
+                f"[SERVER_DB_DATA_ERROR] Server observation store failed validation: {e}",
+                {"validation_code": e.code, **(e.details or {})},
             ) from e
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        raise _api_error(
+            400,
+            "INVALID_CLIENT_HISTORY",
+            str(e),
+            {"validation_code": e.code, **(e.details or {})},
+        ) from e
     except Exception as e:
         status_code = 503 if history_backend != "request_payload" else 400
-        raise HTTPException(status_code=status_code, detail=str(e)) from e
+        err_code: ErrorCode = "SERVER_DB_DATA_ERROR" if status_code == 503 else "INVALID_CLIENT_HISTORY"
+        raise _api_error(status_code, err_code, str(e)) from e
 
     if observed_precip_by_date:
         for item in prediction_result.get("serving_model", {}).get("hindcast_and_current", []):
@@ -407,7 +627,46 @@ def predict_rainfall(request: PredictionRequest):
         )
     else:
         prediction_result["forecast_horizon_mode"] = "operational_forecast"
+        prediction_result["future_forecast_notice"] = None
 
+    anchor_date_str = str(prediction_result["data_as_of"])
+    persistence_7d, clim_7d = _compute_baseline_predictions_for_anchor(df_history, anchor_date_str)
+    sc35_preds = prediction_result["serving_model"]["predictions_7d_mm"]
+    sc30_preds = prediction_result["shadow_models"]["shadow_val_champ"]["predictions_7d_mm"]
+    sc31_preds = prediction_result["shadow_models"]["shadow_test_contender"]["predictions_7d_mm"]
+
+    status_by_horizon: Dict[int, tuple[str, Optional[float]]] = {}
+    for item in prediction_result["serving_model"]["hindcast_and_current"]:
+        status_by_horizon[int(item["horizon"])] = (str(item["status"]), item.get("observed_mm"))
+    for item in prediction_result["serving_model"]["forecast_future"]:
+        status_by_horizon[int(item["horizon"])] = (str(item["status"]), item.get("observed_mm"))
+
+    anchor_dt = pd.to_datetime(anchor_date_str).normalize()
+    daily_forecasts: List[Dict[str, Any]] = []
+    for h in range(1, 8):
+        target_str = (anchor_dt + timedelta(days=h)).strftime("%Y-%m-%d")
+        day_status, day_obs = status_by_horizon[h]
+        daily_forecasts.append(
+            {
+                "target_date": target_str,
+                "horizon_day": h,
+                "status": day_status,
+                "observed_mm": day_obs,
+                "predictions": {
+                    "SC-35": float(sc35_preds[h - 1]),
+                    "SC-30": float(sc30_preds[h - 1]),
+                    "SC-31": float(sc31_preds[h - 1]),
+                    "BASELINE_CLIMATOLOGY_DOY": float(clim_7d[h - 1]),
+                    "BASELINE_PERSISTENCE": float(persistence_7d[h - 1]),
+                },
+            }
+        )
+
+    prediction_result["anchor_date"] = anchor_date_str
+    prediction_result["anchor_split_regime"] = derive_eval_split_regime(anchor_date_str)
+    prediction_result["run_timezone"] = HCMC_TIMEZONE_NAME
+    prediction_result["db_role"] = response_db_role
+    prediction_result["daily_forecasts"] = daily_forecasts
     prediction_result["history_backend"] = history_backend
     if anchor_completeness_regime is not None:
         prediction_result["anchor_completeness_regime"] = anchor_completeness_regime
@@ -421,12 +680,14 @@ def predict_rainfall(request: PredictionRequest):
 
     return prediction_result
 
+
 @app.get(
     "/scores",
+    response_model=ScoresResponse,
     tags=["Governance"],
     responses={
-        422: {"description": "Unprocessable Entity — Invalid `eval_split_regime` or `is_prospective` query parameter."},
-        503: {"description": "Service Unavailable — SQLite vintage database unavailable or corrupted."},
+        422: {"model": ErrorResponse, "description": "Unprocessable Entity — Invalid `eval_split_regime` or `is_prospective` query parameter."},
+        503: {"model": ErrorResponse, "description": "Service Unavailable — SQLite vintage database unavailable or corrupted."},
     },
 )
 def get_scores(
@@ -442,27 +703,32 @@ def get_scores(
     """
     Query `v_forecast_scores` from active SQLite Vintage Store and return per-model overall & horizon
     scores (MAE, MSE, RMSE, MASE), Moving Block Bootstrap 95% CIs (`block_length = 7`), sample sizes,
-    and mandatory methodological notes.
+    pairwise ML differences, and mandatory methodological notes.
     """
     if eval_split_regime not in VALID_EVAL_SPLIT_REGIMES:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"[INVALID_EVAL_SPLIT_REGIME] Unsupported eval_split_regime={eval_split_regime!r}. "
+        raise _api_error(
+            422,
+            "INVALID_QUERY_PARAMETER",
+            (
+                f"[INVALID_QUERY_PARAMETER] Unsupported eval_split_regime={eval_split_regime!r}. "
                 f"Expected one of {VALID_EVAL_SPLIT_REGIMES}."
             ),
+            {"eval_split_regime": eval_split_regime, "allowed": list(VALID_EVAL_SPLIT_REGIMES)},
         )
     if is_prospective is not None and is_prospective not in (0, 1):
-        raise HTTPException(
-            status_code=422,
-            detail=f"[INVALID_IS_PROSPECTIVE] is_prospective must be 0 or 1, got {is_prospective!r}.",
+        raise _api_error(
+            422,
+            "INVALID_QUERY_PARAMETER",
+            f"[INVALID_QUERY_PARAMETER] is_prospective must be 0 or 1, got {is_prospective!r}.",
+            {"is_prospective": is_prospective},
         )
 
     db_path, db_role = _resolve_active_db_info()
     if db_path is None or not db_path.exists():
-        raise HTTPException(
-            status_code=503,
-            detail="[SERVER_DB_DATA_ERROR] No SQLite vintage database available to serve /scores.",
+        raise _api_error(
+            503,
+            "SERVER_DB_DATA_ERROR",
+            "[SERVER_DB_DATA_ERROR] No SQLite vintage database available to serve /scores.",
         )
 
     try:
@@ -497,6 +763,8 @@ def get_scores(
                     "block_bootstrap": {
                         "method": "moving_block_bootstrap",
                         "block_length": 7,
+                        "n_blocks": 0,
+                        "candidate_blocks": 0,
                         "n_bootstrap": 2000,
                         "seed": 42,
                         "n_anchor_dates": 0,
@@ -507,22 +775,56 @@ def get_scores(
                 }
         finally:
             conn.close()
+        if (
+            int(eval_res.get("total_scored_rows", 0)) == 0
+            and db_role == "local_or_production_db"
+            and is_prospective != 1
+            and DEFAULT_DEMO_VINTAGE_DB_PATH.exists()
+            and db_path.resolve() != DEFAULT_DEMO_VINTAGE_DB_PATH.resolve()
+        ):
+            # Production DB intentionally omits retrospective POST_TEST rows (Round 8 A4);
+            # serve the bundled demo ledger truthfully under db_role="bundled_demo_db".
+            demo_conn = connect_sqlite(DEFAULT_DEMO_VINTAGE_DB_PATH, read_only=True)
+            try:
+                try:
+                    eval_res = evaluate_post_test_retrospective_scores(
+                        demo_conn,
+                        eval_split_regime=eval_split_regime,
+                        location_id=CANONICAL_LOCATION_ID,
+                        is_prospective_filter=is_prospective,
+                        block_length=7,
+                        n_bootstrap=2000,
+                        seed=42,
+                    )
+                    db_role = "bundled_demo_db"
+                except ValueError:
+                    pass
+            finally:
+                demo_conn.close()
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(
-            status_code=503,
-            detail=f"[SERVER_DB_DATA_ERROR] Failed to evaluate /scores from SQLite store: {exc}",
+        raise _api_error(
+            503,
+            "SERVER_DB_DATA_ERROR",
+            f"[SERVER_DB_DATA_ERROR] Failed to evaluate /scores from SQLite store: {exc}",
         ) from exc
 
     boot = eval_res.get("block_bootstrap", {})
     boot_models = boot.get("models", {})
+    b_len = int(boot.get("block_length", 7))
+    b_n_blocks = int(boot.get("n_blocks", 0))
+
     models_out: Dict[str, Any] = {}
     for m_id, m_entry in eval_res.get("models", {}).items():
         m_boot = boot_models.get(m_id, {})
         models_out[m_id] = {
             **m_entry,
-            "confidence_intervals_95pct": m_boot,
+            "confidence_intervals_95pct": {
+                "block_length": b_len,
+                "n_blocks": b_n_blocks,
+                **m_boot,
+            },
         }
 
     leaderboard_out: List[Dict[str, Any]] = []
@@ -563,26 +865,43 @@ def get_scores(
         "pairwise_delta_mae_ci": boot.get("pairwise_delta_mae", {}),
         "block_bootstrap": {
             "method": boot.get("method", "moving_block_bootstrap"),
-            "block_length": boot.get("block_length", 7),
-            "n_bootstrap": boot.get("n_bootstrap", 2000),
-            "seed": boot.get("seed", 42),
-            "n_anchor_dates": boot.get("n_anchor_dates", n_origins),
+            "block_length": b_len,
+            "n_blocks": b_n_blocks,
+            "candidate_blocks": boot.get("candidate_blocks"),
+            "n_bootstrap": int(boot.get("n_bootstrap", 2000)),
+            "seed": int(boot.get("seed", 42)),
+            "n_anchor_dates": int(boot.get("n_anchor_dates", n_origins)),
         },
         "methodological_notes": eval_res.get("methodological_notes", dict(METHODOLOGICAL_NOTES)),
     }
 
 
-@app.get("/benchmark/leaderboard", tags=["Governance"])
-def get_leaderboard(limit: int = 10):
+@app.get(
+    "/benchmark/leaderboard",
+    response_model=LeaderboardResponse,
+    responses={
+        422: {"model": ErrorResponse, "description": "Invalid limit parameter"},
+        503: {"model": ErrorResponse, "description": "Benchmark leaderboard artifact unavailable"},
+    },
+    tags=["Governance"],
+)
+def get_leaderboard(limit: int = Query(10, ge=1, le=72)):
     """Returns top audited benchmark scenarios from official benchmark test leaderboards."""
     test_csv = PROJECT_ROOT / "reports" / "test_benchmark" / "unified_72_scenarios_test_leaderboard.csv"
     if not test_csv.exists():
-        raise HTTPException(status_code=404, detail="Test leaderboard file not found")
-    
+        raise _api_error(503, "SERVER_DB_DATA_ERROR", "Test leaderboard file not found")
+
     df = pd.read_csv(test_csv)
     top_models = df.head(limit).replace({np.nan: None}).to_dict(orient="records")
     return {
         "benchmark_dataset": "Canonical Out-of-sample Test (2020-05-01 to 2026-04-20, 2,184 origins)",
         "evaluation_rule": "RULE: Model Evaluation Standards (MAE, MSE, RMSE, MASE)",
-        "top_scenarios": top_models
+        "test_set_exposure_note": TEST_SET_EXPOSURE_NOTE,
+        "config_note": CONFIG_NOTE,
+        "top_scenarios": top_models,
     }
+
+
+_FRONTEND_DIST_DIR = PROJECT_ROOT / "frontend" / "dist"
+if (_FRONTEND_DIST_DIR / "index.html").exists():
+    app.mount("/", StaticFiles(directory=str(_FRONTEND_DIST_DIR), html=True), name="frontend-spa")

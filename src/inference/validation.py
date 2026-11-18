@@ -14,6 +14,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from src.config.clock import today_hcmc
 from src.data.dataquality import check_continuity
 
 CANONICAL_DATE_COL = "Ngày"
@@ -292,7 +293,7 @@ def validate_serving_input(
             )
         effective_run_date = pd.Timestamp(effective_run_date).normalize()
     else:
-        effective_run_date = pd.Timestamp.today().normalize() if enforce_lag_limit else data_as_of
+        effective_run_date = pd.Timestamp(today_hcmc()).normalize() if enforce_lag_limit else data_as_of
 
     lag_days = int((effective_run_date - data_as_of).days)
     if lag_days < 0:

@@ -27,6 +27,7 @@ import numpy as np
 import pandas as pd
 import requests
 
+from src.config.clock import now_utc_iso
 from src.config.constants import Config
 
 logger = logging.getLogger(__name__)
@@ -511,7 +512,7 @@ def normalize_utc_iso(ts: Optional[str] = None) -> str:
     or `None` (current UTC time) and return canonical `YYYY-MM-DDTHH:MM:SS.ffffffZ`.
     """
     if ts is None:
-        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        return now_utc_iso()
 
     raw = str(ts).strip()
     if not raw:
@@ -931,6 +932,119 @@ def get_default_complete_anchor_date(
         if stats is not None and int(stats["cnt"] or 0) == 30 and int(stats["complete_cnt"] or 0) == 30:
             return anchor_str
     return None
+
+
+def get_complete_anchor_range(
+    conn: sqlite3.Connection,
+    *,
+    location_id: str = HCMC_LOCATION_ID,
+    window_days: int = 35,
+) -> Optional[Dict[str, str]]:
+    """
+    Return `{"min": earliest_anchor, "max": latest_anchor}` where each anchor satisfies
+    `COMPLETE_ALL_35` and has `window_days` continuous preceding days with `missing_count = 0`.
+    """
+    rows = conn.execute(
+        """
+        SELECT obs_date, missing_count, completeness_regime
+        FROM v_observations_latest
+        WHERE location_id = ?
+        ORDER BY obs_date ASC
+        """,
+        (location_id,),
+    ).fetchall()
+    if not rows:
+        return None
+
+    streak = 0
+    prev_dt: Optional[datetime] = None
+    min_anchor: Optional[str] = None
+    max_anchor: Optional[str] = None
+
+    for row in rows:
+        date_str = str(row["obs_date"])
+        curr_dt = datetime.strptime(date_str, "%Y-%m-%d")
+        is_complete = (
+            str(row["completeness_regime"]) == "COMPLETE_ALL_35" and int(row["missing_count"] or 0) == 0
+        )
+        if not is_complete:
+            streak = 0
+            prev_dt = curr_dt
+            continue
+
+        if prev_dt is not None and (curr_dt - prev_dt).days == 1:
+            streak += 1
+        else:
+            streak = 1
+        prev_dt = curr_dt
+
+        if streak >= window_days:
+            if min_anchor is None:
+                min_anchor = date_str
+            max_anchor = date_str
+
+    if min_anchor is None or max_anchor is None:
+        return None
+    return {"min": min_anchor, "max": max_anchor}
+
+
+def get_data_snapshot_date(
+    conn: sqlite3.Connection,
+    *,
+    location_id: str = HCMC_LOCATION_ID,
+) -> Optional[str]:
+    """Return latest `obs_date` recorded in `v_observations_latest` for `location_id`."""
+    row = conn.execute(
+        "SELECT MAX(obs_date) AS max_obs_date FROM v_observations_latest WHERE location_id = ?",
+        (location_id,),
+    ).fetchone()
+    if row is None or row["max_obs_date"] is None:
+        return None
+    return str(row["max_obs_date"])
+
+
+def get_latest_ingest_latency(
+    conn: sqlite3.Connection,
+    *,
+    location_id: str = HCMC_LOCATION_ID,
+) -> Optional[Dict[str, Any]]:
+    """
+    Return latency metadata from the latest successful `ingestion_runs` entry
+    containing `latest_valid_by_group_json` (falling back to latest `SUCCESS` run).
+    """
+    row = conn.execute(
+        """
+        SELECT run_id, finished_at_utc, scan_window_end, latest_valid_by_group_json
+        FROM ingestion_runs
+        WHERE location_id = ?
+          AND status = 'SUCCESS'
+          AND latest_valid_by_group_json IS NOT NULL
+        ORDER BY julianday(finished_at_utc) DESC, rowid DESC
+        LIMIT 1
+        """,
+        (location_id,),
+    ).fetchone()
+    if row is None:
+        return None
+
+    raw_groups = json.loads(str(row["latest_valid_by_group_json"]))
+    groups: Dict[str, Dict[str, Any]] = {}
+    for g_name in ("METEO_GEOSIT", "RAD_FLASHFLUX", "RAD_CERES_SYN1DEG"):
+        g_info = raw_groups.get(g_name)
+        if not isinstance(g_info, dict):
+            continue
+        groups[g_name] = {
+            "last_valid_date": g_info.get("last_valid_date"),
+            "lag_days_vs_scan_end": g_info.get("lag_days_vs_scan_end"),
+            "valid_days_in_window": g_info.get("valid_days_in_window"),
+        }
+
+    return {
+        "last_ingest_run_id": str(row["run_id"]),
+        "last_ingest_at_utc": str(row["finished_at_utc"]),
+        "scan_window_end": str(row["scan_window_end"]),
+        "groups": groups,
+    }
 
 
 def derive_eval_split_regime(data_as_of: str) -> str:

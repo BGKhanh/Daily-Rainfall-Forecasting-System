@@ -16,6 +16,7 @@ from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Dict, Any, Union, Optional
 
+from src.config.clock import now_utc_iso
 from src.inference.validation import validate_serving_input
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -221,7 +222,7 @@ class StandaloneRainfallPredictor:
                 forecast_future.append(item)
 
         return {
-            "run_timestamp": datetime.now().isoformat() + "Z",
+            "run_timestamp": now_utc_iso(),
             "model_source": self.mode,
             "run_date": run_d.strftime("%Y-%m-%d"),
             "data_as_of": data_as_of.strftime("%Y-%m-%d"),
