@@ -588,6 +588,40 @@ def _summarize_bootstrap_samples(samples: np.ndarray, point_estimate: float) -> 
     }
 
 
+def classify_pairwise_decision_label(pair_key: str, summary: Mapping[str, Any]) -> str:
+    """Return plain-English statistical decision label for a pairwise delta-MAE CI entry."""
+    norm = pair_key.replace("−", "-").strip()
+    is_sig = bool(summary.get("significant_at_95pct"))
+    if norm == "SC-30 - SC-31" and is_sig:
+        return "Borderline, not adjusted for multiple comparisons"
+    if not is_sig:
+        return "Not statistically significant (95% CI includes 0)"
+    return "Statistically significant (95% CI excludes 0)"
+
+
+def _query_forecast_score_rows(
+    conn: sqlite3.Connection,
+    *,
+    location_id: str,
+    eval_split_regime: str,
+    is_prospective_filter: Optional[int] = None,
+) -> List[sqlite3.Row]:
+    where_sql = "location_id = ? AND eval_split_regime = ?"
+    params: List[Any] = [location_id, eval_split_regime]
+    if is_prospective_filter is not None:
+        where_sql += " AND is_prospective = ?"
+        params.append(int(is_prospective_filter))
+    return conn.execute(
+        f"""
+        SELECT *
+        FROM v_forecast_scores
+        WHERE {where_sql}
+        ORDER BY model_id ASC, data_as_of ASC, horizon_day ASC
+        """,
+        tuple(params),
+    ).fetchall()
+
+
 def compute_block_bootstrap_ci(
     df_scores: pd.DataFrame,
     *,
@@ -687,6 +721,7 @@ def compute_block_bootstrap_ci(
             pair_key = f"{model_a} - {model_b}"
             summary = _summarize_bootstrap_samples(delta_b, point_delta)
             summary["significant_at_95pct"] = bool(summary["ci_upper"] < 0.0 or summary["ci_lower"] > 0.0)
+            summary["decision_label"] = classify_pairwise_decision_label(pair_key, summary)
             pairwise_delta_mae[pair_key] = summary
 
     return {
@@ -710,25 +745,30 @@ def compute_block_length_sensitivity(
     block_lengths: Sequence[int] = (7, 14, 21),
     eval_split_regime: str = "POST_TEST",
     location_id: str = HCMC_LOCATION_ID,
+    is_prospective_filter: Optional[int] = None,
     mase_scale: float = OFFICIAL_MASE_SCALE_POST_TEST,
     n_bootstrap: int = 2000,
     seed: int = 42,
 ) -> Dict[str, Any]:
     """
     Evaluate Moving Block Bootstrap 95% CI sensitivity across `block_lengths` (e.g. 7, 14, 21)
-    on `v_forecast_scores` and return MAE, CI bounds, CI width, and effective `n_blocks`.
+    on `v_forecast_scores` (matching `is_prospective_filter`) and return MAE, CI bounds, CI width, and effective `n_blocks`.
     """
-    rows = conn.execute(
-        """
-        SELECT *
-        FROM v_forecast_scores
-        WHERE location_id = ? AND eval_split_regime = ?
-        ORDER BY model_id ASC, data_as_of ASC, horizon_day ASC
-        """,
-        (location_id, eval_split_regime),
-    ).fetchall()
+    rows = _query_forecast_score_rows(
+        conn,
+        location_id=location_id,
+        eval_split_regime=eval_split_regime,
+        is_prospective_filter=is_prospective_filter,
+    )
     if not rows:
-        raise ValueError(f"No rows found in v_forecast_scores for eval_split_regime='{eval_split_regime}'.")
+        return {
+            "eval_split_regime": eval_split_regime,
+            "is_prospective_filter": is_prospective_filter,
+            "n_bootstrap": int(n_bootstrap),
+            "seed": int(seed),
+            "block_lengths": [int(b) for b in block_lengths],
+            "by_block_length": {},
+        }
     df = pd.DataFrame([dict(r) for r in rows])
 
     by_block_length: Dict[str, Any] = {}
@@ -785,21 +825,12 @@ def evaluate_post_test_retrospective_scores(
     `is_prospective`), compute overall + per-horizon (h1..h7) MAE/MSE/RMSE/MASE against both
     `first` and `latest`, attach 95% Moving Block Bootstrap CIs, and include methodological notes.
     """
-    where_sql = "location_id = ? AND eval_split_regime = ?"
-    params: List[Any] = [location_id, eval_split_regime]
-    if is_prospective_filter is not None:
-        where_sql += " AND is_prospective = ?"
-        params.append(int(is_prospective_filter))
-
-    rows = conn.execute(
-        f"""
-        SELECT *
-        FROM v_forecast_scores
-        WHERE {where_sql}
-        ORDER BY model_id ASC, data_as_of ASC, horizon_day ASC
-        """,
-        tuple(params),
-    ).fetchall()
+    rows = _query_forecast_score_rows(
+        conn,
+        location_id=location_id,
+        eval_split_regime=eval_split_regime,
+        is_prospective_filter=is_prospective_filter,
+    )
     if not rows:
         if is_prospective_filter is not None:
             return {

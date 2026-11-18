@@ -83,6 +83,22 @@ class AnchorRange(BaseModel):
     max: str
 
 
+class LocationItem(BaseModel):
+    location_id: str
+    display_name: str
+    latitude: float
+    longitude: float
+    meteo_grid_note: str
+    rad_grid_note: str
+    time_standard: str
+    is_active: bool
+
+
+class LocationsResponse(BaseModel):
+    db_role: str
+    locations: List[LocationItem]
+
+
 class DataGroupLatency(BaseModel):
     last_valid_date: Optional[str] = None
     lag_days_vs_scan_end: Optional[int] = None
@@ -92,7 +108,9 @@ class DataGroupLatency(BaseModel):
 class DataLatencyInfo(BaseModel):
     last_ingest_run_id: Optional[str] = None
     last_ingest_at_utc: Optional[str] = None
+    scan_window_start: Optional[str] = None
     scan_window_end: Optional[str] = None
+    scan_window_total_days: Optional[int] = None
     groups: Dict[str, DataGroupLatency] = Field(default_factory=dict)
 
 
@@ -106,6 +124,11 @@ class HealthResponse(BaseModel):
     db_role: str
     default_complete_anchor_date: Optional[str] = None
     data_snapshot_date: Optional[str] = None
+    scan_window_start: Optional[str] = None
+    scan_window_end: Optional[str] = None
+    scan_window_total_days: Optional[int] = None
+    latest_precip_obs_date: Optional[str] = None
+    latest_partial_obs_explanation: Optional[str] = None
     anchor_range: Optional[AnchorRange] = None
     data_latency: Optional[DataLatencyInfo] = None
     journal_mode: Optional[str] = None
@@ -129,13 +152,11 @@ class ModelsResponse(BaseModel):
 
 
 class PredictionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     history: Optional[List[Dict[str, Any]]] = Field(
         None,
         description="Historical continuous daily records (at least 30 days). If omitted, loads canonical recent data.",
-    )
-    run_date: Optional[str] = Field(
-        None,
-        description="Operational run date (YYYY-MM-DD). Defaults to current HCMC date or anchor date.",
     )
     anchor_date: Optional[str] = Field(
         None,
@@ -146,14 +167,9 @@ class PredictionRequest(BaseModel):
         description="Canonical location identifier (locked strictly to HCMC / Ho Chi Minh City aliases).",
     )
     province: Optional[str] = Field(
-        "TP. Hồ Chí Minh",
-        description="Backward-compatible location alias (locked strictly to TP. Hồ Chí Minh / HCMC aliases).",
+        "Ho Chi Minh City",
+        description="Backward-compatible location alias (locked strictly to Ho Chi Minh City / HCMC aliases).",
     )
-
-    @field_validator("run_date")
-    @classmethod
-    def validate_run_date_format(cls, v: Optional[str]) -> Optional[str]:
-        return _validate_optional_iso_date(v, "run_date")
 
     @field_validator("anchor_date")
     @classmethod
@@ -238,6 +254,7 @@ class BootstrapSummary(BaseModel):
     ci_width: float
     bootstrap_se: float
     significant_at_95pct: Optional[bool] = None
+    decision_label: Optional[str] = None
 
 
 class FourMetricBlock(BaseModel):
@@ -303,6 +320,23 @@ class BlockBootstrapMeta(BaseModel):
     n_anchor_dates: int
 
 
+class BlockSensitivityModelSummary(BaseModel):
+    MAE: float
+    ci_lower: float
+    ci_upper: float
+    ci_width: float
+    bootstrap_se: float
+
+
+class BlockSensitivityEntry(BaseModel):
+    block_length: int
+    n_anchor_dates: int
+    n_blocks: int
+    candidate_blocks: int
+    models: Dict[str, BlockSensitivityModelSummary] = Field(default_factory=dict)
+    pairwise_delta_mae: Dict[str, BootstrapSummary] = Field(default_factory=dict)
+
+
 class ScoresResponse(BaseModel):
     location_id: str
     db_role: str
@@ -322,6 +356,7 @@ class ScoresResponse(BaseModel):
     models: Dict[str, ScoreModelDetail]
     pairwise_delta_mae_ci: Dict[str, BootstrapSummary]
     block_bootstrap: BlockBootstrapMeta
+    block_length_sensitivity: Dict[str, BlockSensitivityEntry] = Field(default_factory=dict)
     methodological_notes: Dict[str, str]
 
 

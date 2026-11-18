@@ -61,7 +61,13 @@ def test_clock_utc_1730_crosses_hcmc_midnight_to_d_plus_1(demo_db_client, monkey
     assert data["lag_days"] == 1
     assert data["effective_future_days"] == 6
     assert data["daily_forecasts"][0]["status"] == "today"
+    assert data["daily_forecasts"][0]["observed_mm"] is None
     assert data["daily_forecasts"][1]["status"] == "future_forecast"
+    assert all(
+        item["observed_mm"] is None
+        for item in data["daily_forecasts"]
+        if item["status"] in ("today", "future_forecast")
+    )
 
 
 def test_clock_utc_1659_stays_on_day_d_in_hcmc(demo_db_client, monkeypatch):
@@ -79,15 +85,16 @@ def test_clock_utc_1659_stays_on_day_d_in_hcmc(demo_db_client, monkeypatch):
     assert data["lag_days"] == 0
     assert data["effective_future_days"] == 7
     assert all(item["status"] == "future_forecast" for item in data["daily_forecasts"])
+    assert all(item["observed_mm"] is None for item in data["daily_forecasts"])
 
 
-def test_db_mode_user_supplied_run_date_cases(demo_db_client, monkeypatch):
-    """Test user-supplied run_date in DB mode: (a) <= anchor, (b) far future > today, (c) malformed -> 422."""
-    fixed_today = datetime(2026, 11, 18, 5, 0, 0, tzinfo=timezone.utc)
-    monkeypatch.setattr(clock_mod, "now_utc", lambda: fixed_today)
+def test_db_mode_clock_injection_and_public_run_date_rejected(demo_db_client, monkeypatch):
+    """Round 9 Task 1.2: Clock injected via src.config.clock selects anchor <= today_hcmc(), guarantees observed_mm=null for today/future, and rejects public run_date."""
+    fixed_aug25 = datetime(2026, 8, 25, 5, 0, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(clock_mod, "now_utc", lambda: fixed_aug25)
 
-    # (a1) Omitted anchor_date with run_date='2026-08-25' -> selects anchor <= run_date ('2026-08-25')
-    resp_auto = demo_db_client.post("/predict", json={"location_id": "HCMC", "run_date": "2026-08-25"})
+    # (a) Omitted anchor_date with clock at 2026-08-25 -> selects anchor <= today_hcmc() ('2026-08-25')
+    resp_auto = demo_db_client.post("/predict", json={"location_id": "HCMC"})
     assert resp_auto.status_code == 200
     d_auto = resp_auto.json()
     PredictResponse.model_validate(d_auto)
@@ -96,30 +103,14 @@ def test_db_mode_user_supplied_run_date_cases(demo_db_client, monkeypatch):
     assert d_auto["lag_days"] == 0
     assert d_auto["effective_future_days"] == 7
     assert [x["status"] for x in d_auto["daily_forecasts"]] == ["future_forecast"] * 7
+    assert all(x["observed_mm"] is None for x in d_auto["daily_forecasts"])
 
-    # (a2) Explicit anchor_date='2026-08-30' with earlier run_date='2026-08-25' -> 400 INVALID_CLIENT_HISTORY
-    resp_earlier = demo_db_client.post(
+    # (b) Deprecated public `run_date` field in PredictionRequest is rejected with 422 INVALID_QUERY_PARAMETER
+    resp_legacy = demo_db_client.post(
         "/predict",
-        json={"location_id": "HCMC", "anchor_date": "2026-08-30", "run_date": "2026-08-25"},
+        json={"location_id": "HCMC", "run_date": "2026-08-25"},
     )
-    assert resp_earlier.status_code == 400
-    err_earlier = resp_earlier.json()
-    ErrorResponse.model_validate(err_earlier)
-    assert err_earlier["error"]["code"] == "INVALID_CLIENT_HISTORY"
-    assert err_earlier["error"]["details"].get("validation_code") == "DATE_CONTINUITY_VIOLATION"
-
-    # (b) Far future run_date beyond operational today ('2099-01-01') -> 400 INVALID_CLIENT_HISTORY
-    resp_future = demo_db_client.post("/predict", json={"location_id": "HCMC", "run_date": "2099-01-01"})
-    assert resp_future.status_code == 400
-    err_future = resp_future.json()
-    ErrorResponse.model_validate(err_future)
-    assert err_future["error"]["code"] == "INVALID_CLIENT_HISTORY"
-    assert err_future["error"]["details"].get("validation_code") == "RUN_DATE_EXCEEDS_TODAY"
-
-    # (c) Invalid format -> 422 INVALID_QUERY_PARAMETER (unified ErrorResponse)
-    for bad_date in ("18-11-2026", "not-a-date", "2026-02-30"):
-        resp_bad = demo_db_client.post("/predict", json={"location_id": "HCMC", "run_date": bad_date})
-        assert resp_bad.status_code == 422
-        err_bad = resp_bad.json()
-        ErrorResponse.model_validate(err_bad)
-        assert err_bad["error"]["code"] == "INVALID_QUERY_PARAMETER"
+    assert resp_legacy.status_code == 422
+    err_legacy = resp_legacy.json()
+    ErrorResponse.model_validate(err_legacy)
+    assert err_legacy["error"]["code"] == "INVALID_QUERY_PARAMETER"

@@ -24,10 +24,13 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.evaluation.protocols import get_global_read_guard
+import src.config.clock as clock_mod
 from src.api.main import app, load_serving_models
 from src.api.schemas import (
+    ErrorResponse,
     HealthResponse,
     LeaderboardResponse,
+    LocationsResponse,
     ModelsResponse,
     PredictResponse,
     ScoresResponse,
@@ -64,6 +67,11 @@ def test_health_endpoint(client):
     if data["db_role"] in ("bundled_demo_db", "local_or_production_db"):
         assert data["default_complete_anchor_date"] == "2026-08-30"
         assert data["data_snapshot_date"] is not None
+        assert data["scan_window_start"] is not None
+        assert data["scan_window_end"] is not None
+        assert isinstance(data["scan_window_total_days"], int) and data["scan_window_total_days"] > 0
+        assert data["latest_precip_obs_date"] is not None
+        assert data["latest_partial_obs_explanation"] is not None
         assert data["anchor_range"] == {"min": "2001-02-04", "max": "2026-08-30"}
         assert set(data["data_latency"]["groups"].keys()) == {
             "METEO_GEOSIT",
@@ -77,6 +85,71 @@ def test_health_endpoint(client):
     assert "shadow_val_champ" in aliases
     assert "shadow_test_contender" in aliases
     assert len(data["baselines"]) == 2
+
+
+def test_locations_endpoint(client, tmp_path: Path, monkeypatch):
+    """Round 9 Task 1.1: GET /locations reads from SQLite `locations` table (sample_csv fallback only in sample_csv mode)."""
+    import src.api.main as api_main
+    from src.data.provider import WeatherHistoryProvider
+
+    resp = client.get("/locations")
+    assert resp.status_code == 200
+    data = resp.json()
+    LocationsResponse.model_validate(data)
+    assert len(data["locations"]) == 1
+    hcmc = data["locations"][0]
+    assert hcmc["location_id"] == "HCMC"
+    assert hcmc["display_name"] == "Ho Chi Minh City"
+    assert hcmc["is_active"] is True
+
+    # In sample_csv mode, falls back to canonical HCMC record
+    monkeypatch.setattr(api_main, "history_provider", WeatherHistoryProvider(backend="sample_csv"))
+    resp_csv = client.get("/locations")
+    assert resp_csv.status_code == 200
+    data_csv = resp_csv.json()
+    LocationsResponse.model_validate(data_csv)
+    assert data_csv["db_role"] == "sample_csv"
+    assert data_csv["locations"][0]["location_id"] == "HCMC"
+
+    # In SQLite mode, returns strictly configured locations rows
+    from src.data.vintage_store import connect_sqlite, finalize_db_for_read_only, init_schema
+
+    db_path = tmp_path / "locations_test.db"
+    conn = connect_sqlite(db_path, read_only=False)
+    try:
+        init_schema(conn)
+        conn.execute(
+            """
+            INSERT INTO locations (
+                location_id, display_name, aliases_json, latitude, longitude,
+                meteo_grid_note, rad_grid_note, time_standard, provisional_window_days,
+                is_active, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "HANOI",
+                "Ha Noi",
+                '["HANOI"]',
+                21.0285,
+                105.8542,
+                "MERRA-2 / GEOS-IT 0.5° x 0.625°",
+                "CERES SYN1deg / FLASHFlux 1.0° x 1.0°",
+                "LST",
+                120,
+                0,
+                "2026-11-18T00:00:00.000000Z",
+            ),
+        )
+        finalize_db_for_read_only(conn)
+    finally:
+        conn.close()
+
+    monkeypatch.setattr(api_main, "history_provider", WeatherHistoryProvider(backend="sqlite", db_path=db_path))
+    resp_sqlite = client.get("/locations")
+    assert resp_sqlite.status_code == 200
+    locs = {item["location_id"]: item for item in resp_sqlite.json()["locations"]}
+    assert set(locs.keys()) == {"HCMC", "HANOI"}
+    assert locs["HANOI"]["is_active"] is False
 
 
 def test_models_endpoint(client):
@@ -117,7 +190,7 @@ def test_benchmark_leaderboard_endpoint(client):
     LeaderboardResponse.model_validate(data)
     assert "test_set_exposure_note" in data
     assert "config_note" in data
-    assert "Tập Test" in data["test_set_exposure_note"]
+    assert "Test set" in data["test_set_exposure_note"]
     assert "Config A" in data["config_note"]
     assert "top_scenarios" in data
     assert len(data["top_scenarios"]) <= 5
@@ -146,22 +219,33 @@ def test_predict_with_default_data(client):
     assert "serving_model" in data
     assert "shadow_models" in data
     assert len(data["serving_model"]["predictions_7d_mm"]) == 7
-    assert data["location"]["province"] == "TP. Hồ Chí Minh"
+    assert data["location"]["province"] == "Ho Chi Minh City"
     assert "effective_future_days" in data
     assert "lag_days" in data
 
-def test_predict_dynamic_horizon_lag4(client):
-    # First get data_as_of from base prediction
+
+def test_predict_dynamic_horizon_lag4(client, monkeypatch):
+    # Inject clock 4 days after latest complete anchor (2026-08-30 -> 2026-09-03) via src.config.clock
+    from datetime import timezone
+
     resp_base = client.post("/predict", json={})
     assert resp_base.status_code == 200
     data_as_of_str = resp_base.json()["data_as_of"]
     d_as_of = datetime.strptime(data_as_of_str, "%Y-%m-%d").date()
 
-    # Set run_date to exactly 4 days after data_as_of (lag = 4)
-    run_date_lag4 = (d_as_of + timedelta(days=4)).strftime("%Y-%m-%d")
-    resp = client.post("/predict", json={
-        "run_date": run_date_lag4
-    })
+    run_date_lag4 = d_as_of + timedelta(days=4)
+    fixed_dt = datetime(run_date_lag4.year, run_date_lag4.month, run_date_lag4.day, 5, 0, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(clock_mod, "now_utc", lambda: fixed_dt)
+
+    if resp_base.json()["db_role"] == "sample_csv":
+        sample_csv = PROJECT_ROOT / "artifacts" / "models" / "sample_recent_history_35d.csv"
+        df_s = pd.read_csv(sample_csv)
+        df_s["Ngày"] = pd.to_datetime(df_s["Ngày"]).dt.strftime("%Y-%m-%d")
+        payload = {"history": df_s.to_dict(orient="records")}
+    else:
+        payload = {"anchor_date": data_as_of_str}
+
+    resp = client.post("/predict", json=payload)
     assert resp.status_code == 200
     data = resp.json()
     assert data["lag_days"] == 4
@@ -169,6 +253,9 @@ def test_predict_dynamic_horizon_lag4(client):
     assert len(data["serving_model"]["hindcast_and_current"]) == 4
     assert len(data["serving_model"]["forecast_future"]) == 3
     assert data["serving_model"]["hindcast_and_current"][-1]["status"] == "today"
+    for item in data["daily_forecasts"]:
+        if item["status"] in ("today", "future_forecast"):
+            assert item["observed_mm"] is None
 
 @pytest.mark.parametrize(
     "payload",
@@ -201,6 +288,7 @@ def test_predict_rejects_non_hcmc_locations_with_422(client, payload):
         "hcmc",
         "HO_CHI_MINH",
         "HOCHIMINH",
+        "Ho Chi Minh City",
         "Saigon",
         "TPHCM",
         "TP.HCM",
@@ -214,7 +302,7 @@ def test_predict_accepts_hcmc_aliases_and_normalizes(client, alias):
     assert resp.status_code == 200
     loc = resp.json()["location"]
     assert loc["location_id"] == "HCMC"
-    assert loc["province"] == "TP. Hồ Chí Minh"
+    assert loc["province"] == "Ho Chi Minh City"
     assert loc["latitude"] == pytest.approx(10.7769)
     assert loc["longitude"] == pytest.approx(106.7009)
 
@@ -222,9 +310,12 @@ def test_predict_accepts_hcmc_aliases_and_normalizes(client, alias):
 def test_predict_server_db_data_error_returns_503(client, monkeypatch):
     """Mục 4.6: Missing/NaN meteo data from server history_provider returns HTTP 503 (not 400)."""
     import pandas as pd
+    from datetime import timezone
     from unittest.mock import MagicMock
     import src.api.main as api_main
     from src.data.provider import WeatherHistoryResult
+
+    monkeypatch.setattr(clock_mod, "now_utc", lambda: datetime(2026, 5, 3, 5, 0, 0, tzinfo=timezone.utc))
 
     sample_csv = PROJECT_ROOT / "artifacts" / "models" / "sample_recent_history_35d.csv"
     corrupt_df = pd.read_csv(sample_csv)
@@ -242,7 +333,7 @@ def test_predict_server_db_data_error_returns_503(client, monkeypatch):
     monkeypatch.setattr(api_main, "history_provider", fake_provider)
 
     # Server-sourced corrupt data (request.history is None) -> HTTP 503 unified ErrorResponse
-    resp_server = client.post("/predict", json={"location_id": "HCMC", "run_date": "2026-05-03"})
+    resp_server = client.post("/predict", json={"location_id": "HCMC"})
     assert resp_server.status_code == 503
     assert resp_server.json()["error"]["code"] == "SERVER_DB_DATA_ERROR"
 
@@ -255,7 +346,6 @@ def test_predict_server_db_data_error_returns_503(client, monkeypatch):
         "/predict",
         json={
             "location_id": "HCMC",
-            "run_date": "2026-05-03",
             "history": corrupt_records,
         },
     )
@@ -339,8 +429,11 @@ def _seed_round6_api_sqlite_db(db_path: Path, *, include_aug31_to_nov13: bool = 
 
 def test_predict_reads_from_sqlite_db_effective_zero_past_observed_and_notice(client, tmp_path: Path, monkeypatch):
     """Step 5: /predict reading SQLite DB defaults to 2026-08-30, sets past_observed & future_forecast_notice."""
+    from datetime import timezone
     import src.api.main as api_main
     from src.data.provider import WeatherHistoryProvider
+
+    monkeypatch.setattr(clock_mod, "now_utc", lambda: datetime(2026, 11, 16, 5, 0, 0, tzinfo=timezone.utc))
 
     db_path = tmp_path / "api_sqlite_fixture.db"
     _seed_round6_api_sqlite_db(db_path)
@@ -348,7 +441,7 @@ def test_predict_reads_from_sqlite_db_effective_zero_past_observed_and_notice(cl
     provider = WeatherHistoryProvider(backend="sqlite", db_path=db_path)
     monkeypatch.setattr(api_main, "history_provider", provider)
 
-    resp = client.post("/predict", json={"location_id": "HCMC", "run_date": "2026-11-16"})
+    resp = client.post("/predict", json={"location_id": "HCMC"})
     assert resp.status_code == 200
     data = resp.json()
     assert data["history_backend"] == "sqlite"
@@ -368,8 +461,11 @@ def test_predict_reads_from_sqlite_db_effective_zero_past_observed_and_notice(cl
 
 def test_predict_rejects_incomplete_ceres_anchor_date(client, tmp_path: Path, monkeypatch):
     """Step 5 / Invariant 5: Explicit anchor_date='2026-10-15' (MISSING_CERES_ONLY) is rejected cleanly."""
+    from datetime import timezone
     import src.api.main as api_main
     from src.data.provider import WeatherHistoryProvider
+
+    monkeypatch.setattr(clock_mod, "now_utc", lambda: datetime(2026, 11, 16, 5, 0, 0, tzinfo=timezone.utc))
 
     db_path = tmp_path / "api_anchor_reject.db"
     _seed_round6_api_sqlite_db(db_path)
@@ -379,7 +475,7 @@ def test_predict_rejects_incomplete_ceres_anchor_date(client, tmp_path: Path, mo
 
     resp = client.post(
         "/predict",
-        json={"location_id": "HCMC", "anchor_date": "2026-10-15", "run_date": "2026-11-16"},
+        json={"location_id": "HCMC", "anchor_date": "2026-10-15"},
     )
     assert resp.status_code == 422
     err = resp.json()["error"]
@@ -388,7 +484,7 @@ def test_predict_rejects_incomplete_ceres_anchor_date(client, tmp_path: Path, mo
 
     resp_missing = client.post(
         "/predict",
-        json={"location_id": "HCMC", "anchor_date": "1999-01-01", "run_date": "2026-11-16"},
+        json={"location_id": "HCMC", "anchor_date": "1999-01-01"},
     )
     assert resp_missing.status_code == 422
     assert resp_missing.json()["error"]["code"] == "ANCHOR_DATE_NOT_FOUND"
@@ -496,7 +592,14 @@ def test_scores_endpoint(client):
         "SC-30 - SC-31",
     ):
         assert pair_key in data["pairwise_delta_mae_ci"], f"Missing pairwise comparison {pair_key}"
+        assert data["pairwise_delta_mae_ci"][pair_key]["decision_label"]
     assert data["pairwise_delta_mae_ci"]["SC-35 - BASELINE_CLIMATOLOGY_DOY"]["significant_at_95pct"] is True
+    assert data["pairwise_delta_mae_ci"]["SC-30 - SC-31"]["decision_label"] == "Borderline, not adjusted for multiple comparisons"
+    assert data["pairwise_delta_mae_ci"]["SC-35 - SC-31"]["decision_label"] == "Not statistically significant (95% CI includes 0)"
+    assert data["pairwise_delta_mae_ci"]["SC-35 - BASELINE_CLIMATOLOGY_DOY"]["decision_label"] == "Statistically significant (95% CI excludes 0)"
+    assert set(data["block_length_sensitivity"].keys()) == {"7", "14", "21"}
+    for blk_key in ("7", "14", "21"):
+        assert "SC-30 - SC-31" in data["block_length_sensitivity"][blk_key]["pairwise_delta_mae"]
     assert set(data["methodological_notes"].keys()) == {
         "effective_sample_size",
         "first_vs_latest_equality",
@@ -517,8 +620,42 @@ def test_scores_endpoint(client):
     assert bad_prosp.json()["error"]["code"] == "INVALID_QUERY_PARAMETER"
 
 
+def test_english_only_api_strings(client):
+    """Round 9 Task 1.3: Every user-facing API string is English (no Vietnamese script characters)."""
+    import re
+
+    vi_re = re.compile(
+        r"[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ"
+        r"ÀÁẠẢÃÂẦẤẬẨẪĂẰẮẶẲẴÈÉẸẺẼÊỀẾỆỂỄÌÍỊỈĨÒÓỌỎÕÔỒỐỘỔỖƠỜỚỢỞỠÙÚỤỦŨƯỪỨỰỬỮỲÝỴỶỸĐ]"
+    )
+
+    h = client.get("/health").json()
+    assert not vi_re.search(h.get("latest_partial_obs_explanation") or "")
+
+    locs = client.get("/locations").json()
+    for item in locs["locations"]:
+        assert not vi_re.search(item["display_name"])
+
+    pred = client.post("/predict", json={"location_id": "HCMC"}).json()
+    assert not vi_re.search(pred.get("future_forecast_notice") or "")
+    assert not vi_re.search(pred["location"]["province"])
+
+    sc = client.get("/scores").json()
+    for note in sc["methodological_notes"].values():
+        assert not vi_re.search(note)
+    for pair_val in sc["pairwise_delta_mae_ci"].values():
+        assert not vi_re.search(pair_val.get("decision_label") or "")
+
+    lb = client.get("/benchmark/leaderboard").json()
+    assert not vi_re.search(lb["test_set_exposure_note"])
+    assert not vi_re.search(lb["config_note"])
+
+    err = client.post("/predict", json={"location_id": "HANOI"}).json()["error"]
+    assert not vi_re.search(err["message"])
+
+
 def test_openapi_snapshot_matches_live_app():
-    """Round 8 A1.7: Locked OpenAPI snapshot matches live FastAPI schema, hides /models/info, covers all 6 schemas."""
+    """Round 8/9: Locked OpenAPI snapshot matches live FastAPI schema, hides /models/info, covers all 7 schemas."""
     import json
 
     snapshot_path = PROJECT_ROOT / "docs" / "openapi_snapshot.json"
@@ -526,13 +663,14 @@ def test_openapi_snapshot_matches_live_app():
     expected_spec = json.loads(snapshot_path.read_text(encoding="utf-8"))
     live_spec = app.openapi()
     assert live_spec == expected_spec
-    assert {"/health", "/models", "/predict", "/scores", "/benchmark/leaderboard"}.issubset(
+    assert {"/locations", "/health", "/models", "/predict", "/scores", "/benchmark/leaderboard"}.issubset(
         live_spec["paths"].keys()
     )
     assert "/models/info" not in live_spec["paths"]
 
     schemas = live_spec.get("components", {}).get("schemas", {})
     for schema_name in (
+        "LocationsResponse",
         "HealthResponse",
         "ModelsResponse",
         "PredictResponse",
@@ -541,6 +679,7 @@ def test_openapi_snapshot_matches_live_app():
         "ErrorResponse",
     ):
         assert schema_name in schemas, f"Missing {schema_name} in OpenAPI components.schemas"
+    assert "run_date" not in schemas["PredictionRequest"].get("properties", {})
 
 
 @pytest.mark.parametrize(

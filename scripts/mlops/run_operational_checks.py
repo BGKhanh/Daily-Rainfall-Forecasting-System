@@ -17,6 +17,7 @@ reports/mlops/operational_verification_report.json:
 
 from __future__ import annotations
 
+from datetime import datetime
 import json
 import logging
 import os
@@ -24,6 +25,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -411,16 +413,21 @@ def run_check_e_rejection_suite(predictor: StandaloneRainfallPredictor) -> Dict[
             except Exception as exc:
                 py_msg = f"Unexpected exception: {exc}"
 
-            # Also verify HTTP /predict rejects with 400
+            # Also verify HTTP /predict rejects with 400 under clock-injected HCMC date
             if name == "empty_df":
-                payload = {"history": [], "run_date": r_date}
+                payload = {"history": []}
             else:
                 # Replace NaN with None and serialize dates as ISO YYYY-MM-DD strings
                 records = json.loads(df_case.to_json(orient="records", date_format="iso"))
-                payload = {"history": records, "run_date": r_date}
+                payload = {"history": records}
 
-            resp = client.post("/predict", json=payload)
-            detail_str = str(resp.json().get("detail", ""))
+            # 05:00 UTC == 12:00 Asia/Ho_Chi_Minh on r_date
+            injected_utc = datetime.fromisoformat(f"{r_date}T05:00:00+00:00")
+            with patch("src.config.clock.now_utc", return_value=injected_utc):
+                resp = client.post("/predict", json=payload)
+            body = resp.json()
+            err_blob = body.get("error") or body.get("detail") or body
+            detail_str = json.dumps(err_blob, ensure_ascii=False)
             api_rejected = resp.status_code == 400 and expected_code in detail_str
 
             ok = py_rejected and api_rejected
@@ -440,22 +447,24 @@ def run_check_e_rejection_suite(predictor: StandaloneRainfallPredictor) -> Dict[
                 }
             )
 
-        # Also test omitted history + explicit stale run_date -> HTTP 400
-        resp_stale_default = client.post("/predict", json={"run_date": stale_run_date})
-        detail_stale = str(resp_stale_default.json().get("detail", ""))
-        stale_default_ok = resp_stale_default.status_code == 400 and "STALE_RADIATION_OR_LAG" in detail_stale
-        if not stale_default_ok:
+        # Verify legacy public `run_date` parameter is rejected with HTTP 422 INVALID_QUERY_PARAMETER
+        resp_legacy_rundate = client.post("/predict", json={"run_date": stale_run_date})
+        detail_legacy = json.dumps(resp_legacy_rundate.json(), ensure_ascii=False)
+        legacy_rundate_ok = (
+            resp_legacy_rundate.status_code == 422 and "INVALID_QUERY_PARAMETER" in detail_legacy
+        )
+        if not legacy_rundate_ok:
             all_passed = False
         cases.append(
             {
-                "case": "omitted_history_explicit_stale_run_date",
-                "expected_code": "STALE_RADIATION_OR_LAG",
+                "case": "legacy_public_run_date_rejected",
+                "expected_code": "INVALID_QUERY_PARAMETER",
                 "python_rejected": True,
-                "python_code": "N/A (API route)",
-                "api_status_code": resp_stale_default.status_code,
-                "api_rejected_with_code": stale_default_ok,
-                "detail": detail_stale[:200],
-                "passed": stale_default_ok,
+                "python_code": "N/A (API schema forbids run_date)",
+                "api_status_code": resp_legacy_rundate.status_code,
+                "api_rejected_with_code": legacy_rundate_ok,
+                "detail": detail_legacy[:200],
+                "passed": legacy_rundate_ok,
             }
         )
 

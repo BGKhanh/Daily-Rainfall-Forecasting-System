@@ -6,6 +6,38 @@
     "version": "1.2.0"
   },
   "paths": {
+    "/locations": {
+      "get": {
+        "tags": [
+          "Monitoring"
+        ],
+        "summary": "Get Configured Locations",
+        "description": "Return configured forecast locations from SQLite `locations` table (sample CSV fallback only in sample_csv mode).",
+        "operationId": "get_configured_locations_locations_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocationsResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "tags": [
@@ -100,7 +132,7 @@
             }
           },
           "400": {
-            "description": "Bad Request — Client-supplied `request.history` payload violates business or physical rules (<30 continuous days, calendar date gap, NaN/-999.0 sentinel, physical bound violation, or invalid/stale run_date).",
+            "description": "Bad Request — Client-supplied `request.history` payload violates business or physical rules (<30 continuous days, calendar date gap, NaN/-999.0 sentinel, physical bound violation, or stale radiation lag).",
             "content": {
               "application/json": {
                 "schema": {
@@ -332,6 +364,81 @@
         ],
         "title": "BlockBootstrapMeta"
       },
+      "BlockSensitivityEntry": {
+        "properties": {
+          "block_length": {
+            "type": "integer",
+            "title": "Block Length"
+          },
+          "n_anchor_dates": {
+            "type": "integer",
+            "title": "N Anchor Dates"
+          },
+          "n_blocks": {
+            "type": "integer",
+            "title": "N Blocks"
+          },
+          "candidate_blocks": {
+            "type": "integer",
+            "title": "Candidate Blocks"
+          },
+          "models": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BlockSensitivityModelSummary"
+            },
+            "type": "object",
+            "title": "Models"
+          },
+          "pairwise_delta_mae": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BootstrapSummary"
+            },
+            "type": "object",
+            "title": "Pairwise Delta Mae"
+          }
+        },
+        "type": "object",
+        "required": [
+          "block_length",
+          "n_anchor_dates",
+          "n_blocks",
+          "candidate_blocks"
+        ],
+        "title": "BlockSensitivityEntry"
+      },
+      "BlockSensitivityModelSummary": {
+        "properties": {
+          "MAE": {
+            "type": "number",
+            "title": "Mae"
+          },
+          "ci_lower": {
+            "type": "number",
+            "title": "Ci Lower"
+          },
+          "ci_upper": {
+            "type": "number",
+            "title": "Ci Upper"
+          },
+          "ci_width": {
+            "type": "number",
+            "title": "Ci Width"
+          },
+          "bootstrap_se": {
+            "type": "number",
+            "title": "Bootstrap Se"
+          }
+        },
+        "type": "object",
+        "required": [
+          "MAE",
+          "ci_lower",
+          "ci_upper",
+          "ci_width",
+          "bootstrap_se"
+        ],
+        "title": "BlockSensitivityModelSummary"
+      },
       "BootstrapSummary": {
         "properties": {
           "point_estimate": {
@@ -364,6 +471,17 @@
               }
             ],
             "title": "Significant At 95Pct"
+          },
+          "decision_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Label"
           }
         },
         "type": "object",
@@ -498,6 +616,17 @@
             ],
             "title": "Last Ingest At Utc"
           },
+          "scan_window_start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scan Window Start"
+          },
           "scan_window_end": {
             "anyOf": [
               {
@@ -508,6 +637,17 @@
               }
             ],
             "title": "Scan Window End"
+          },
+          "scan_window_total_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scan Window Total Days"
           },
           "groups": {
             "additionalProperties": {
@@ -666,6 +806,61 @@
               }
             ],
             "title": "Data Snapshot Date"
+          },
+          "scan_window_start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scan Window Start"
+          },
+          "scan_window_end": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scan Window End"
+          },
+          "scan_window_total_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scan Window Total Days"
+          },
+          "latest_precip_obs_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Precip Obs Date"
+          },
+          "latest_partial_obs_explanation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Partial Obs Explanation"
           },
           "anchor_range": {
             "anyOf": [
@@ -849,6 +1044,75 @@
           "top_scenarios"
         ],
         "title": "LeaderboardResponse"
+      },
+      "LocationItem": {
+        "properties": {
+          "location_id": {
+            "type": "string",
+            "title": "Location Id"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "latitude": {
+            "type": "number",
+            "title": "Latitude"
+          },
+          "longitude": {
+            "type": "number",
+            "title": "Longitude"
+          },
+          "meteo_grid_note": {
+            "type": "string",
+            "title": "Meteo Grid Note"
+          },
+          "rad_grid_note": {
+            "type": "string",
+            "title": "Rad Grid Note"
+          },
+          "time_standard": {
+            "type": "string",
+            "title": "Time Standard"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active"
+          }
+        },
+        "type": "object",
+        "required": [
+          "location_id",
+          "display_name",
+          "latitude",
+          "longitude",
+          "meteo_grid_note",
+          "rad_grid_note",
+          "time_standard",
+          "is_active"
+        ],
+        "title": "LocationItem"
+      },
+      "LocationsResponse": {
+        "properties": {
+          "db_role": {
+            "type": "string",
+            "title": "Db Role"
+          },
+          "locations": {
+            "items": {
+              "$ref": "#/components/schemas/LocationItem"
+            },
+            "type": "array",
+            "title": "Locations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "db_role",
+          "locations"
+        ],
+        "title": "LocationsResponse"
       },
       "ModelConfidenceIntervals": {
         "properties": {
@@ -1286,18 +1550,6 @@
             "title": "History",
             "description": "Historical continuous daily records (at least 30 days). If omitted, loads canonical recent data."
           },
-          "run_date": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Run Date",
-            "description": "Operational run date (YYYY-MM-DD). Defaults to current HCMC date or anchor date."
-          },
           "anchor_date": {
             "anyOf": [
               {
@@ -1332,10 +1584,11 @@
               }
             ],
             "title": "Province",
-            "description": "Backward-compatible location alias (locked strictly to TP. Hồ Chí Minh / HCMC aliases).",
-            "default": "TP. Hồ Chí Minh"
+            "description": "Backward-compatible location alias (locked strictly to Ho Chi Minh City / HCMC aliases).",
+            "default": "Ho Chi Minh City"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "title": "PredictionRequest"
       },
@@ -1611,6 +1864,13 @@
           },
           "block_bootstrap": {
             "$ref": "#/components/schemas/BlockBootstrapMeta"
+          },
+          "block_length_sensitivity": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BlockSensitivityEntry"
+            },
+            "type": "object",
+            "title": "Block Length Sensitivity"
           },
           "methodological_notes": {
             "additionalProperties": {

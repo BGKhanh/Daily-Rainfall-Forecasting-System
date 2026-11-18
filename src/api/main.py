@@ -19,6 +19,7 @@ from copy import deepcopy
 from datetime import timedelta
 import os
 from pathlib import Path
+import sqlite3
 import sys
 from typing import Any, Dict, List, Optional
 
@@ -41,6 +42,7 @@ from src.api.schemas import (
     ErrorResponse,
     HealthResponse,
     LeaderboardResponse,
+    LocationsResponse,
     ModelsResponse,
     PredictionRequest,
     PredictResponse,
@@ -55,7 +57,7 @@ from src.data.provider import (
 )
 from src.data.vintage_store import (
     HCMC_ALIASES,
-    HCMC_DISPLAY_NAME,
+    HCMC_ENGLISH_DISPLAY_NAME,
     HCMC_LATITUDE,
     HCMC_LOCATION_ID,
     HCMC_LONGITUDE,
@@ -65,10 +67,14 @@ from src.data.vintage_store import (
     get_data_snapshot_date,
     get_default_complete_anchor_date,
     get_latest_ingest_latency,
+    get_latest_precip_and_partial_explanation,
+    get_locations,
 )
 from src.inference.forecast_runner import (
     METHODOLOGICAL_NOTES,
     PERSISTENCE_SPEC_SHA256,
+    classify_pairwise_decision_label,
+    compute_block_length_sensitivity,
     compute_dev_train_doy_climatology,
     evaluate_post_test_retrospective_scores,
 )
@@ -76,19 +82,19 @@ from src.inference.predictor import StandaloneRainfallPredictor
 from src.inference.validation import ServingValidationError
 
 CANONICAL_LOCATION_ID = HCMC_LOCATION_ID
-CANONICAL_PROVINCE_NAME = HCMC_DISPLAY_NAME
+CANONICAL_PROVINCE_NAME = HCMC_ENGLISH_DISPLAY_NAME
 CANONICAL_LATITUDE = HCMC_LATITUDE
 CANONICAL_LONGITUDE = HCMC_LONGITUDE
 ALLOWED_HCMC_ALIASES = frozenset(HCMC_ALIASES)
 VALID_EVAL_SPLIT_REGIMES = ("DEV_TRAIN", "VALIDATION", "TEST", "POST_TEST")
 
 TEST_SET_EXPOSURE_NOTE = (
-    "Tập Test (2020-05-01..2026-04-30) đã được xem; chủ dự án chọn @serving (SC-35) "
-    "sau khi xem Test, trong khi mô hình vô địch chọn theo Validation là SC-30 Config A."
+    "The Test set (2020-05-01 to 2026-04-30) has been exposed; the project owner selected @serving (SC-35) "
+    "after inspecting Test metrics, whereas the validation-selected champion is SC-30 Config A."
 )
 CONFIG_NOTE = (
-    "Config A là chuẩn chính thức cho LightGBM (num_leaves=31, max_depth=-1); "
-    "SC-30 Config A và SC-31 Config A đối khớp 0.000000 mm với NPZ chuẩn."
+    "Config A is the official baseline configuration for LightGBM (num_leaves=31, max_depth=-1); "
+    "SC-30 Config A and SC-31 Config A match the canonical NPZ benchmark within 0.000000 mm."
 )
 
 predictor: Optional[StandaloneRainfallPredictor] = None
@@ -303,6 +309,55 @@ async def unified_validation_exception_handler(
 
 
 @app.get(
+    "/locations",
+    response_model=LocationsResponse,
+    responses={503: {"model": ErrorResponse, "description": "Service unavailable"}},
+    tags=["Monitoring"],
+)
+def get_configured_locations():
+    """Return configured forecast locations from SQLite `locations` table (sample CSV fallback only in sample_csv mode)."""
+    db_path, db_role = _resolve_active_db_info()
+    if db_role == "sample_csv" or (db_path is None and history_provider is not None and history_provider.backend == "sample_csv"):
+        return {
+            "db_role": "sample_csv",
+            "locations": [
+                {
+                    "location_id": CANONICAL_LOCATION_ID,
+                    "display_name": HCMC_ENGLISH_DISPLAY_NAME,
+                    "latitude": CANONICAL_LATITUDE,
+                    "longitude": CANONICAL_LONGITUDE,
+                    "meteo_grid_note": "MERRA-2 / GEOS-IT 0.5° x 0.625°",
+                    "rad_grid_note": "CERES SYN1deg / FLASHFlux 1.0° x 1.0°",
+                    "time_standard": "LST",
+                    "is_active": True,
+                }
+            ],
+        }
+
+    if db_path is None or not db_path.exists():
+        raise _api_error(
+            503,
+            "SERVER_DB_DATA_ERROR",
+            "[SERVER_DB_DATA_ERROR] No SQLite vintage database available to serve /locations.",
+        )
+
+    try:
+        conn = connect_sqlite(db_path, read_only=True)
+        try:
+            items = get_locations(conn, active_only=False)
+        finally:
+            conn.close()
+    except Exception as exc:
+        raise _api_error(
+            503,
+            "SERVER_DB_DATA_ERROR",
+            f"[SERVER_DB_DATA_ERROR] Failed to read locations table: {exc}",
+        ) from exc
+
+    return {"db_role": db_role, "locations": items}
+
+
+@app.get(
     "/health",
     response_model=HealthResponse,
     responses={503: {"model": ErrorResponse, "description": "Service unavailable"}},
@@ -313,6 +368,11 @@ def get_health():
     db_path, db_role = _resolve_active_db_info()
     default_anchor: Optional[str] = None
     data_snapshot_date: Optional[str] = None
+    scan_window_start: Optional[str] = None
+    scan_window_end: Optional[str] = None
+    scan_window_total_days: Optional[int] = None
+    latest_precip_obs_date: Optional[str] = None
+    latest_partial_obs_explanation: Optional[str] = None
     anchor_range: Optional[Dict[str, str]] = None
     data_latency: Optional[Dict[str, Any]] = None
     journal_mode: Optional[str] = None
@@ -324,6 +384,18 @@ def get_health():
                 data_snapshot_date = get_data_snapshot_date(conn, location_id=CANONICAL_LOCATION_ID)
                 anchor_range = get_complete_anchor_range(conn, location_id=CANONICAL_LOCATION_ID, window_days=35)
                 data_latency = get_latest_ingest_latency(conn, location_id=CANONICAL_LOCATION_ID)
+                if isinstance(data_latency, dict):
+                    scan_window_start = data_latency.get("scan_window_start")
+                    scan_window_end = data_latency.get("scan_window_end")
+                    scan_window_total_days = data_latency.get("scan_window_total_days")
+                    meteo_last_valid = (data_latency.get("groups") or {}).get("METEO_GEOSIT", {}).get("last_valid_date")
+                else:
+                    meteo_last_valid = None
+                latest_precip_obs_date, latest_partial_obs_explanation = get_latest_precip_and_partial_explanation(
+                    conn,
+                    location_id=CANONICAL_LOCATION_ID,
+                    meteo_last_valid_date=meteo_last_valid,
+                )
                 jm_row = conn.execute("PRAGMA journal_mode;").fetchone()
                 journal_mode = str(jm_row[0]).lower() if jm_row else None
             finally:
@@ -341,6 +413,11 @@ def get_health():
         "db_role": db_role,
         "default_complete_anchor_date": default_anchor,
         "data_snapshot_date": data_snapshot_date,
+        "scan_window_start": scan_window_start,
+        "scan_window_end": scan_window_end,
+        "scan_window_total_days": scan_window_total_days,
+        "latest_precip_obs_date": latest_precip_obs_date,
+        "latest_partial_obs_explanation": latest_partial_obs_explanation,
         "anchor_range": anchor_range,
         "data_latency": data_latency,
         "journal_mode": journal_mode,
@@ -475,7 +552,7 @@ def _compute_baseline_predictions_for_anchor(
             "model": ErrorResponse,
             "description": (
                 "Bad Request — Client-supplied `request.history` payload violates business or physical rules "
-                "(<30 continuous days, calendar date gap, NaN/-999.0 sentinel, physical bound violation, or invalid/stale run_date)."
+                "(<30 continuous days, calendar date gap, NaN/-999.0 sentinel, physical bound violation, or stale radiation lag)."
             ),
         },
         422: {
@@ -506,11 +583,10 @@ def predict_rainfall(request: PredictionRequest):
     lat, lon = CANONICAL_LATITUDE, CANONICAL_LONGITUDE
 
     history_backend = "request_payload"
-    effective_run_date = request.run_date
+    effective_run_date = today_hcmc().strftime("%Y-%m-%d")
     observed_precip_by_date: Dict[str, float] = {}
     anchor_completeness_regime: Optional[str] = None
     enforce_lag_limit = True
-    is_db_mode = False
     _, active_db_role = _resolve_active_db_info()
     response_db_role = "request_payload" if request.history is not None else active_db_role
 
@@ -522,7 +598,7 @@ def predict_rainfall(request: PredictionRequest):
             fetch_kwargs: Dict[str, Any] = {
                 "province": prov,
                 "days": 35,
-                "run_date": request.run_date,
+                "run_date": effective_run_date,
             }
             if request.anchor_date is not None:
                 fetch_kwargs["anchor_date"] = request.anchor_date
@@ -532,12 +608,8 @@ def predict_rainfall(request: PredictionRequest):
             response_db_role = history_res.db_role
             observed_precip_by_date = dict(getattr(history_res, "observed_precip_by_date", None) or {})
             anchor_completeness_regime = getattr(history_res, "anchor_completeness_regime", None)
-            is_db_mode = not bool(history_res.is_static_sample)
-            if effective_run_date is None:
-                if history_res.is_static_sample:
-                    effective_run_date = (history_res.data_as_of + timedelta(days=3)).strftime("%Y-%m-%d")
-                else:
-                    effective_run_date = today_hcmc().strftime("%Y-%m-%d")
+            if history_res.is_static_sample:
+                effective_run_date = (history_res.data_as_of + timedelta(days=3)).strftime("%Y-%m-%d")
             enforce_lag_limit = bool(history_res.is_static_sample)
         except IncompleteRadiationAtAnchorError as e:
             if e.completeness_regime is None:
@@ -559,24 +631,6 @@ def predict_rainfall(request: PredictionRequest):
                 detail_str = f"[SERVER_DB_DATA_ERROR] Server history provider failed: {detail_str}"
             raise _api_error(503, "SERVER_DB_DATA_ERROR", detail_str) from e
 
-    if is_db_mode and request.run_date is not None:
-        current_hcmc = today_hcmc()
-        req_run_dt = pd.to_datetime(effective_run_date).date()
-        if req_run_dt > current_hcmc:
-            raise _api_error(
-                400,
-                "INVALID_CLIENT_HISTORY",
-                (
-                    f"[INVALID_CLIENT_HISTORY] run_date ({effective_run_date}) exceeds "
-                    f"current operational HCMC date ({current_hcmc.strftime('%Y-%m-%d')})."
-                ),
-                {
-                    "validation_code": "RUN_DATE_EXCEEDS_TODAY",
-                    "run_date": effective_run_date,
-                    "today_hcmc": current_hcmc.strftime("%Y-%m-%d"),
-                },
-            )
-
     try:
         prediction_result = predictor.predict(
             raw_history_df=df_history,
@@ -585,13 +639,6 @@ def predict_rainfall(request: PredictionRequest):
         )
     except ServingValidationError as e:
         if history_backend != "request_payload":
-            if request.run_date is not None and e.code in ("STALE_RADIATION_OR_LAG", "DATE_CONTINUITY_VIOLATION"):
-                raise _api_error(
-                    400,
-                    "INVALID_CLIENT_HISTORY",
-                    str(e),
-                    {"validation_code": e.code, **(e.details or {})},
-                ) from e
             raise _api_error(
                 503,
                 "SERVER_DB_DATA_ERROR",
@@ -619,11 +666,16 @@ def predict_rainfall(request: PredictionRequest):
                 item["abs_error_mm"] = round(abs(float(item["pred_mm"]) - obs_mm), 4)
                 item["note"] = "Day has passed and precipitation observation is recorded in SQLite vintage store."
 
+    for section_key in ("hindcast_and_current", "forecast_future"):
+        for item in prediction_result.get("serving_model", {}).get(section_key, []):
+            if item.get("status") in ("today", "future_forecast"):
+                item["observed_mm"] = None
+
     if prediction_result.get("effective_future_days") == 0:
         prediction_result["forecast_horizon_mode"] = "retrospective_hindcast_only"
         prediction_result["future_forecast_notice"] = (
-            "Không có ngày tương lai (effective_future_days = 0): "
-            "ngày neo dữ liệu đầy đủ (COMPLETE_ALL_35) cách ngày chạy hơn 7 ngày."
+            "This is a retrospective replay (effective_future_days = 0): the latest complete anchor date "
+            "(COMPLETE_ALL_35) is more than 7 days before the current Ho Chi Minh City operational date."
         )
     else:
         prediction_result["forecast_horizon_mode"] = "operational_forecast"
@@ -637,9 +689,12 @@ def predict_rainfall(request: PredictionRequest):
 
     status_by_horizon: Dict[int, tuple[str, Optional[float]]] = {}
     for item in prediction_result["serving_model"]["hindcast_and_current"]:
-        status_by_horizon[int(item["horizon"])] = (str(item["status"]), item.get("observed_mm"))
+        status_by_horizon[int(item["horizon"])] = (
+            str(item["status"]),
+            None if item.get("status") in ("today", "future_forecast") else item.get("observed_mm"),
+        )
     for item in prediction_result["serving_model"]["forecast_future"]:
-        status_by_horizon[int(item["horizon"])] = (str(item["status"]), item.get("observed_mm"))
+        status_by_horizon[int(item["horizon"])] = (str(item["status"]), None)
 
     anchor_dt = pd.to_datetime(anchor_date_str).normalize()
     daily_forecasts: List[Dict[str, Any]] = []
@@ -679,6 +734,68 @@ def predict_rainfall(request: PredictionRequest):
     }
 
     return prediction_result
+
+
+def _evaluate_scores_with_sensitivity(
+    conn: sqlite3.Connection,
+    *,
+    eval_split_regime: str,
+    is_prospective: Optional[int],
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    """Run primary `/scores` evaluation and matched 7/14/21-day block-length sensitivity."""
+    eval_res = evaluate_post_test_retrospective_scores(
+        conn,
+        eval_split_regime=eval_split_regime,
+        location_id=CANONICAL_LOCATION_ID,
+        is_prospective_filter=is_prospective,
+        block_length=7,
+        n_bootstrap=2000,
+        seed=42,
+    )
+    sensitivity_out: Dict[str, Any] = {}
+    if int(eval_res.get("total_scored_rows", 0)) > 0:
+        sens_res = compute_block_length_sensitivity(
+            conn,
+            block_lengths=(7, 14, 21),
+            eval_split_regime=eval_split_regime,
+            location_id=CANONICAL_LOCATION_ID,
+            is_prospective_filter=is_prospective,
+            n_bootstrap=2000,
+            seed=42,
+        )
+        sensitivity_out = sens_res.get("by_block_length", {})
+    return eval_res, sensitivity_out
+
+
+def _empty_scores_payload(eval_split_regime: str, is_prospective: Optional[int]) -> Dict[str, Any]:
+    return {
+        "eval_split_regime": eval_split_regime,
+        "is_prospective_filter": is_prospective,
+        "mase_scale": 3.7015424361567635,
+        "origin_min": None,
+        "origin_max": None,
+        "target_date_min": None,
+        "target_date_max": None,
+        "unique_origins": 0,
+        "total_scored_rows": 0,
+        "is_prospective_counts": {},
+        "temporal_status_at_issue_counts": {},
+        "obs_revision_delta_nonzero_count": 0,
+        "leaderboard_vs_latest": [],
+        "models": {},
+        "block_bootstrap": {
+            "method": "moving_block_bootstrap",
+            "block_length": 7,
+            "n_blocks": 0,
+            "candidate_blocks": 0,
+            "n_bootstrap": 2000,
+            "seed": 42,
+            "n_anchor_dates": 0,
+            "models": {},
+            "pairwise_delta_mae": {},
+        },
+        "methodological_notes": dict(METHODOLOGICAL_NOTES),
+    }
 
 
 @app.get(
@@ -731,48 +848,18 @@ def get_scores(
             "[SERVER_DB_DATA_ERROR] No SQLite vintage database available to serve /scores.",
         )
 
+    sensitivity_out: Dict[str, Any] = {}
     try:
         conn = connect_sqlite(db_path, read_only=True)
         try:
             try:
-                eval_res = evaluate_post_test_retrospective_scores(
+                eval_res, sensitivity_out = _evaluate_scores_with_sensitivity(
                     conn,
                     eval_split_regime=eval_split_regime,
-                    location_id=CANONICAL_LOCATION_ID,
-                    is_prospective_filter=is_prospective,
-                    block_length=7,
-                    n_bootstrap=2000,
-                    seed=42,
+                    is_prospective=is_prospective,
                 )
             except ValueError:
-                eval_res = {
-                    "eval_split_regime": eval_split_regime,
-                    "is_prospective_filter": is_prospective,
-                    "mase_scale": 3.7015424361567635,
-                    "origin_min": None,
-                    "origin_max": None,
-                    "target_date_min": None,
-                    "target_date_max": None,
-                    "unique_origins": 0,
-                    "total_scored_rows": 0,
-                    "is_prospective_counts": {},
-                    "temporal_status_at_issue_counts": {},
-                    "obs_revision_delta_nonzero_count": 0,
-                    "leaderboard_vs_latest": [],
-                    "models": {},
-                    "block_bootstrap": {
-                        "method": "moving_block_bootstrap",
-                        "block_length": 7,
-                        "n_blocks": 0,
-                        "candidate_blocks": 0,
-                        "n_bootstrap": 2000,
-                        "seed": 42,
-                        "n_anchor_dates": 0,
-                        "models": {},
-                        "pairwise_delta_mae": {},
-                    },
-                    "methodological_notes": dict(METHODOLOGICAL_NOTES),
-                }
+                eval_res = _empty_scores_payload(eval_split_regime, is_prospective)
         finally:
             conn.close()
         if (
@@ -787,14 +874,10 @@ def get_scores(
             demo_conn = connect_sqlite(DEFAULT_DEMO_VINTAGE_DB_PATH, read_only=True)
             try:
                 try:
-                    eval_res = evaluate_post_test_retrospective_scores(
+                    eval_res, sensitivity_out = _evaluate_scores_with_sensitivity(
                         demo_conn,
                         eval_split_regime=eval_split_regime,
-                        location_id=CANONICAL_LOCATION_ID,
-                        is_prospective_filter=is_prospective,
-                        block_length=7,
-                        n_bootstrap=2000,
-                        seed=42,
+                        is_prospective=is_prospective,
                     )
                     db_role = "bundled_demo_db"
                 except ValueError:
@@ -814,6 +897,12 @@ def get_scores(
     boot_models = boot.get("models", {})
     b_len = int(boot.get("block_length", 7))
     b_n_blocks = int(boot.get("n_blocks", 0))
+
+    pairwise_out: Dict[str, Any] = {}
+    for pair_key, pair_summary in (boot.get("pairwise_delta_mae") or {}).items():
+        enriched = dict(pair_summary)
+        enriched.setdefault("decision_label", classify_pairwise_decision_label(pair_key, enriched))
+        pairwise_out[pair_key] = enriched
 
     models_out: Dict[str, Any] = {}
     for m_id, m_entry in eval_res.get("models", {}).items():
@@ -862,7 +951,7 @@ def get_scores(
         "temporal_status_at_issue_counts": eval_res.get("temporal_status_at_issue_counts", {}),
         "leaderboard": leaderboard_out,
         "models": models_out,
-        "pairwise_delta_mae_ci": boot.get("pairwise_delta_mae", {}),
+        "pairwise_delta_mae_ci": pairwise_out,
         "block_bootstrap": {
             "method": boot.get("method", "moving_block_bootstrap"),
             "block_length": b_len,
@@ -872,6 +961,7 @@ def get_scores(
             "seed": int(boot.get("seed", 42)),
             "n_anchor_dates": int(boot.get("n_anchor_dates", n_origins)),
         },
+        "block_length_sensitivity": sensitivity_out,
         "methodological_notes": eval_res.get("methodological_notes", dict(METHODOLOGICAL_NOTES)),
     }
 

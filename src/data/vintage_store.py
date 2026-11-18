@@ -36,6 +36,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 HCMC_LOCATION_ID = "HCMC"
 HCMC_DISPLAY_NAME = "TP. Hồ Chí Minh"
+HCMC_ENGLISH_DISPLAY_NAME = "Ho Chi Minh City"
 HCMC_LATITUDE = 10.7769
 HCMC_LONGITUDE = 106.7009
 DEFAULT_PROVISIONAL_WINDOW_DAYS = 120
@@ -43,6 +44,8 @@ HCMC_ALIASES: Tuple[str, ...] = (
     "HCMC",
     "HO_CHI_MINH",
     "HOCHIMINH",
+    "HO CHI MINH",
+    "HO CHI MINH CITY",
     "SAIGON",
     "TPHCM",
     "TP.HCM",
@@ -1003,6 +1006,127 @@ def get_data_snapshot_date(
     return str(row["max_obs_date"])
 
 
+def get_latest_precip_obs_date(
+    conn: sqlite3.Connection,
+    *,
+    location_id: str = HCMC_LOCATION_ID,
+) -> Optional[str]:
+    """Return latest `obs_date` with non-null `PRECTOTCORR` in `v_observations_latest`."""
+    row = conn.execute(
+        """
+        SELECT MAX(obs_date) AS max_precip_date
+        FROM v_observations_latest
+        WHERE location_id = ? AND PRECTOTCORR IS NOT NULL
+        """,
+        (location_id,),
+    ).fetchone()
+    if row is None or row["max_precip_date"] is None:
+        return None
+    return str(row["max_precip_date"])
+
+
+def get_locations(
+    conn: sqlite3.Connection,
+    *,
+    active_only: bool = False,
+) -> List[Dict[str, Any]]:
+    """Read configured locations from `locations` table with English display names."""
+    sql = """
+        SELECT location_id, display_name, latitude, longitude,
+               meteo_grid_note, rad_grid_note, time_standard, is_active
+        FROM locations
+    """
+    if active_only:
+        sql += " WHERE is_active = 1"
+    sql += " ORDER BY location_id ASC"
+    rows = conn.execute(sql).fetchall()
+
+    results: List[Dict[str, Any]] = []
+    for row in rows:
+        loc_id = str(row["location_id"])
+        raw_name = str(row["display_name"])
+        english_name = (
+            HCMC_ENGLISH_DISPLAY_NAME
+            if loc_id == HCMC_LOCATION_ID and raw_name == HCMC_DISPLAY_NAME
+            else raw_name
+        )
+        results.append(
+            {
+                "location_id": loc_id,
+                "display_name": english_name,
+                "latitude": float(row["latitude"]),
+                "longitude": float(row["longitude"]),
+                "meteo_grid_note": str(row["meteo_grid_note"]),
+                "rad_grid_note": str(row["rad_grid_note"]),
+                "time_standard": str(row["time_standard"]),
+                "is_active": bool(int(row["is_active"])),
+            }
+        )
+    return results
+
+
+def get_latest_precip_and_partial_explanation(
+    conn: sqlite3.Connection,
+    *,
+    location_id: str = HCMC_LOCATION_ID,
+    meteo_last_valid_date: Optional[str] = None,
+) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Return `(latest_precip_obs_date, latest_partial_obs_explanation)` derived directly
+    from `v_observations_latest` using the unified 'all variables present' group rule.
+    """
+    latest_precip_date = get_latest_precip_obs_date(conn, location_id=location_id)
+    if latest_precip_date is None:
+        return None, None
+
+    row = conn.execute(
+        """
+        SELECT obs_date, PRECTOTCORR, missing_count, missing_meteo_count,
+               missing_flashflux_count, missing_ceres_count, missing_vars_json
+        FROM v_observations_latest
+        WHERE location_id = ? AND obs_date = ?
+        LIMIT 1
+        """,
+        (location_id, latest_precip_date),
+    ).fetchone()
+    if row is None:
+        return latest_precip_date, None
+
+    precip_val = float(row["PRECTOTCORR"])
+    missing_meteo = int(row["missing_meteo_count"] or 0)
+    missing_ff = int(row["missing_flashflux_count"] or 0)
+    missing_ceres = int(row["missing_ceres_count"] or 0)
+    total_meteo = len(METEO_24_VARS)
+    present_meteo = total_meteo - missing_meteo
+
+    try:
+        missing_vars = json.loads(str(row["missing_vars_json"] or "[]"))
+    except Exception:
+        missing_vars = []
+    missing_meteo_vars = [str(v) for v in missing_vars if str(v) in METEO_24_VARS]
+
+    if missing_meteo > 0:
+        missing_list = ", ".join(missing_meteo_vars) if missing_meteo_vars else f"{missing_meteo} variable(s)"
+        meteo_note = meteo_last_valid_date or "the preceding day"
+        explanation = (
+            f"On {latest_precip_date}, precipitation ({precip_val:.2f} mm) and {present_meteo} of "
+            f"{total_meteo} meteorology variables are present, while {missing_meteo} remain missing "
+            f"({missing_list}), so METEO_GEOSIT latest valid day (all {total_meteo} variables present) "
+            f"is {meteo_note}."
+        )
+    elif missing_ff > 0 or missing_ceres > 0:
+        explanation = (
+            f"On {latest_precip_date}, all {total_meteo} meteorology variables (precipitation={precip_val:.2f} mm) "
+            f"are present; pending radiation variables: FlashFlux missing={missing_ff}, CERES missing={missing_ceres}."
+        )
+    else:
+        explanation = (
+            f"On {latest_precip_date}, all 35 meteorological and radiation variables "
+            f"(precipitation={precip_val:.2f} mm) are present."
+        )
+    return latest_precip_date, explanation
+
+
 def get_latest_ingest_latency(
     conn: sqlite3.Connection,
     *,
@@ -1014,7 +1138,7 @@ def get_latest_ingest_latency(
     """
     row = conn.execute(
         """
-        SELECT run_id, finished_at_utc, scan_window_end, latest_valid_by_group_json
+        SELECT run_id, finished_at_utc, scan_window_start, scan_window_end, latest_valid_by_group_json
         FROM ingestion_runs
         WHERE location_id = ?
           AND status = 'SUCCESS'
@@ -1039,10 +1163,16 @@ def get_latest_ingest_latency(
             "valid_days_in_window": g_info.get("valid_days_in_window"),
         }
 
+    scan_start = str(row["scan_window_start"])
+    scan_end = str(row["scan_window_end"])
+    total_days = int((pd.to_datetime(scan_end) - pd.to_datetime(scan_start)).days) + 1
+
     return {
         "last_ingest_run_id": str(row["run_id"]),
         "last_ingest_at_utc": str(row["finished_at_utc"]),
-        "scan_window_end": str(row["scan_window_end"]),
+        "scan_window_start": scan_start,
+        "scan_window_end": scan_end,
+        "scan_window_total_days": total_days,
         "groups": groups,
     }
 

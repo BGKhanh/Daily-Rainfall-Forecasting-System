@@ -51,10 +51,16 @@ def _to_api_records(df: pd.DataFrame) -> list[dict]:
     return json.loads(df.to_json(orient="records", date_format="iso"))
 
 
-def test_small_sample_parity_without_npz(sample_35d_df: pd.DataFrame, local_predictor: StandaloneRainfallPredictor):
+def test_small_sample_parity_without_npz(sample_35d_df: pd.DataFrame, local_predictor: StandaloneRainfallPredictor, monkeypatch):
     """Verify StandaloneRainfallPredictor, direct FeatureBuilder+joblib, and API /predict parity (< 1e-5)."""
+    from datetime import datetime, timezone
+    import src.config.clock as clock_mod
+
     df_sample = sample_35d_df.copy()
-    run_date = pd.to_datetime(df_sample["Ngày"]).max().strftime("%Y-%m-%d")
+    max_dt = pd.to_datetime(df_sample["Ngày"]).max()
+    run_date = max_dt.strftime("%Y-%m-%d")
+    fixed_dt = datetime(max_dt.year, max_dt.month, max_dt.day, 5, 0, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(clock_mod, "now_utc", lambda: fixed_dt)
 
     pred_out = local_predictor.predict(df_sample, run_date=run_date)
 
@@ -79,7 +85,7 @@ def test_small_sample_parity_without_npz(sample_35d_df: pd.DataFrame, local_pred
     with TestClient(app) as client:
         resp = client.post(
             "/predict",
-            json={"history": _to_api_records(df_sample), "run_date": run_date},
+            json={"history": _to_api_records(df_sample)},
         )
         assert resp.status_code == 200
         api_json = resp.json()
@@ -151,24 +157,33 @@ def test_validation_rejection_matrix_python_and_api(
     ]
 
     with TestClient(app) as client:
+        from datetime import datetime, timezone
+        import src.config.clock as clock_mod
+
         for bad_df, r_date, expected_code in cases:
             with pytest.raises(ServingValidationError) as exc_info:
                 local_predictor.predict(bad_df, run_date=r_date)
             assert exc_info.value.code == expected_code
 
+            r_dt = pd.to_datetime(r_date)
+            fixed_dt = datetime(r_dt.year, r_dt.month, r_dt.day, 5, 0, 0, tzinfo=timezone.utc)
+            monkeypatch.setattr(clock_mod, "now_utc", lambda dt=fixed_dt: dt)
+
             records = [] if bad_df.empty else _to_api_records(bad_df)
-            resp = client.post("/predict", json={"history": records, "run_date": r_date})
+            resp = client.post("/predict", json={"history": records})
             assert resp.status_code == 400
             err = resp.json()["error"]
             assert err["code"] == "INVALID_CLIENT_HISTORY"
             assert expected_code in err["message"] or err["details"].get("validation_code") == expected_code
 
-        # Omitted history + explicit stale run_date against static sample CSV -> HTTP 400
+        # Stale history payload against injected clock -> HTTP 400 STALE_RADIATION_OR_LAG
+        stale_dt = pd.to_datetime(stale_run_date)
         monkeypatch.setattr(
-            "src.api.main.history_provider",
-            WeatherHistoryProvider(backend="sample_csv", sample_csv_path=SAMPLE_CSV),
+            clock_mod,
+            "now_utc",
+            lambda: datetime(stale_dt.year, stale_dt.month, stale_dt.day, 5, 0, 0, tzinfo=timezone.utc),
         )
-        resp_stale_omitted = client.post("/predict", json={"run_date": stale_run_date})
+        resp_stale_omitted = client.post("/predict", json={"history": _to_api_records(sample_35d_df)})
         assert resp_stale_omitted.status_code == 400
         err_stale = resp_stale_omitted.json()["error"]
         assert err_stale["code"] == "INVALID_CLIENT_HISTORY"
