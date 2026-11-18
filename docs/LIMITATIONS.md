@@ -43,6 +43,7 @@ Even though `FeatureBuilder` (`artifacts/models/feature_builder_f3.joblib`) carr
 
 ## 4. Container Runtime Scope (Pure CPU Inference)
 
-- The production container (`Dockerfile`, `requirements-serving.txt`) installs `xgboost-cpu==3.4.1`, `lightgbm==4.7.0`, `scikit-learn==1.9.1`, `numpy==2.5.2`, `pandas==2.3.3`, `joblib==1.6.0`, `fastapi==0.162.4`, `uvicorn==0.54.0`, `pydantic==2.13.5`, and `requests==2.34.2`.
+- **The production container (`Dockerfile`, `requirements-serving.txt`)** uses a multi-stage build (Stage 1: `node:20-alpine` compiles `frontend/dist` SPA static assets; Stage 2: `python:3.12-slim` runtime with **no Node.js binary**), installing `xgboost-cpu==3.4.1`, `lightgbm==4.7.0`, `scikit-learn==1.9.1`, `numpy==2.5.2`, `pandas==2.3.3`, `joblib==1.6.0`, `fastapi==0.162.4`, `uvicorn==0.54.0`, `pydantic==2.13.5`, `requests==2.34.2`, and `tzdata==2026.4`.
+- **Two-DB Snapshot & `ANCHOR_DATE` Note**: Container runtime defaults to `bundled_demo_db` (`artifacts/models/demo_rainfall_vintage.db`, snapshot observation max `2026-11-15`, captured `2026-11-18`) carrying `4,270` retrospective `POST_TEST` rows, while `data/vintage/rainfall_vintage.db` stays clean with observations only (`forecasts_ledger = 0`) until prospective deployment. `/health` exposes `data_snapshot_date`, `anchor_range`, and `data_latency` per feed group (`METEO_GEOSIT`, `RAD_FLASHFLUX`, `RAD_CERES_SYN1DEG`).
 - CUDA/NVIDIA packages and `mlflow` are excluded from the runtime container image. `src/api/main.py` and `src/inference/predictor.py` (`StandaloneRainfallPredictor`) run with zero MLflow dependency.
 - `src/inference/pyfunc.py` and `src/evaluation/protocols.py` are used only in offline dev/CI parity and benchmark pipelines, not inside the runtime serving container.

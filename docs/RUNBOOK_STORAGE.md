@@ -12,10 +12,10 @@ Hệ thống tách biệt tuyệt đối **DB Demo đóng gói sẵn** (cho CI, 
 | Thuộc tính | **1. Bundled Demo DB** (`artifacts/models/demo_rainfall_vintage.db`) | **2. Production / Live DB** (`data/vintage/rainfall_vintage.db` hoặc `$VINTAGE_DB_PATH`) |
 | :--- | :--- | :--- |
 | **Vị trí lưu trữ** | Tracked trong Git & đóng gói sẵn vào Docker image (`/app/artifacts/models/demo_rainfall_vintage.db`) | Bên ngoài container (volume mount hoặc đường dẫn local gitignored) |
-| **Chức năng** | Demo API `/predict`, `/scores`, `/models`, `/health`, và kiểm thử Tier 1/Tier 2 CI không cần kết nối NASA POWER | Lưu chuỗi quan sát NRT tự thu thập từ ngày go-live & sổ dự báo forward (`is_prospective = 1`) |
-| **Nội dung đóng gói** | `9,449` dòng quan sát (`2001-01-01..2026-11-14`) + `4,270` dòng dự báo hồi cứu `POST_TEST` (`2026-05-01..2026-08-30`) | Khởi tạo sạch đến ngày go-live qua `--seed-csv-if-empty` + nạp hàng ngày `ingest_nasa_vintage.py` |
-| **Chế độ mở & Journal** | Xuất bản bằng `VACUUM INTO` + `PRAGMA journal_mode = DELETE`; mở bằng `?mode=ro` + `query_only = ON` | Ghi qua `WAL` → cuối mỗi giao dịch tự động chạy `finalize_db_for_read_only()` (`wal_checkpoint(TRUNCATE)` + `journal_mode = DELETE`) |
-| **Giá trị chứng cứ** | Dữ liệu **hồi cứu** (`is_prospective = 0`) — chỉ phục vụ kiểm chứng & demo | Chỉ các dự báo `forecasts_ledger` với `julianday(obs_first_ingested_at_utc) > julianday(issued_at_utc)` (`is_prospective = 1`) mới được tính là **forward prospective evidence** |
+| **Chức năng** | Demo API (`/` SPA UI, `/predict`, `/scores`, `/models`, `/health`), parity 2.184 Test origins & CI không cần NASA POWER | Lưu chuỗi quan sát NRT tự thu thập từ ngày go-live (chỉ chứa `observations_vintage`, `forecasts_ledger = 0` cho đến khi phát dự báo forward thực tế) |
+| **Nội dung đóng gói** | Bản chụp ngày **2026-11-15** (capture **2026-11-18**): `9,450` dòng quan sát (`2001-01-01..2026-11-15`) + **`4,270` dòng dự báo hồi cứu `POST_TEST`** (`2026-05-01..2026-08-30`) | `9,450` dòng quan sát (`2001-01-01..2026-11-15`), **`0` dòng hồi cứu trong `forecasts_ledger`**; chỉ chạy lệnh `ingest_nasa_vintage.py` để tích lũy quan sát mới |
+| **Chế độ mở & Journal** | Nhân bản từ Production DB qua `VACUUM INTO`, chạy `run_forecast_ledger.py` trên bản Demo rồi chốt `finalize_db_for_read_only()` (`journal_mode = DELETE`); mở `?mode=ro` | Ghi qua `WAL` → cuối mỗi giao dịch tự động chạy `finalize_db_for_read_only()` (`wal_checkpoint(TRUNCATE)` + `journal_mode = DELETE`) |
+| **Giá trị chứng cứ** | Dữ liệu **hồi cứu** (`is_prospective = 0`) — **chỉ DB Demo mới chứa 4.270 dòng hồi cứu** | Chỉ các dự báo tương lai trên Production DB với `julianday(obs_first_ingested_at_utc) > julianday(issued_at_utc)` (`is_prospective = 1`) mới được tính là **forward prospective evidence** |
 
 Thứ tự phân giải tự động trong `src/data/provider.py::resolve_sqlite_db_path_and_role()`:
 1. Tham số tường minh `db_path` (nếu truyền) $\rightarrow$ `db_role = "local_or_production_db"`
@@ -26,19 +26,23 @@ Thứ tự phân giải tự động trong `src/data/provider.py::resolve_sqlite
 
 ---
 
-## 2. Quy trình Khởi tạo & Vận hành DB Mới cho Production
+## 2. Quy trình Khởi tạo & Vận hành Hai DB Đúng Thứ Tự (Round 8)
 
 ```bash
-# 1. Tạo DB Production sạch từ Historical CSV Seed (9,251 dòng 2001-01-01..2026-04-30) + Quét NASA POWER 210 ngày
+# 1. Dựng DB Production sạch (CHỈ chứa quan sát, forecasts_ledger = 0):
+#    Historical CSV Seed (9,251 dòng 2001-01-01..2026-04-30) + Quét NASA POWER 210 ngày
 python scripts/data/ingest_nasa_vintage.py \
   --db-path data/vintage/rainfall_vintage.db \
   --seed-csv-if-empty \
   --lookback-days 210 \
   --report-json reports/storage_audit/nasa_first_live_ingest.json
 
-# 2. Chạy Kiểm định Parity (2,184 Test origins DB vs NPZ < 1e-5 mm) & Đánh giá Hậu-Test Hồi cứu
+# 2. Tạo DB Demo từ Production DB qua VACUUM INTO (lấy phần quan sát sạch)
+python -c "from src.data.vintage_store import connect_sqlite, finalize_db_for_read_only; c = connect_sqlite('data/vintage/rainfall_vintage.db', read_only=False); c.execute('VACUUM INTO ?', ('artifacts/models/demo_rainfall_vintage.db',)); finalize_db_for_read_only(c); c.close()"
+
+# 3. Chèn 4.270 dòng hồi cứu POST_TEST vào RIÊNG DB Demo + Chạy kiểm định Parity & Độ nhạy Block (7/14/21)
 python scripts/mlops/run_forecast_ledger.py \
-  --db-path data/vintage/rainfall_vintage.db \
+  --db-path artifacts/models/demo_rainfall_vintage.db \
   --verify-test-parity \
   --issue-post-test \
   --report-json reports/storage_audit/post_test_retrospective_scores.json

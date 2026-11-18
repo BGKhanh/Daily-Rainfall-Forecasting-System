@@ -32,14 +32,29 @@ jobs:
 
       - name: Run Ruff lint on serving backend & storage DDL V3
         run: |
-          ruff check src/api src/inference src/data/provider.py src/data/vintage_store.py src/featurengineering/builder.py scripts/mlops/export_from_registry.py scripts/mlops/run_operational_checks.py scripts/mlops/run_forecast_ledger.py tests/serving tests/storage
+          ruff check src/api src/config/clock.py src/inference src/data/provider.py src/data/vintage_store.py src/featurengineering/builder.py scripts/mlops/export_from_registry.py scripts/mlops/run_operational_checks.py scripts/mlops/run_forecast_ledger.py tests/serving tests/storage
 
-      - name: Run Tier 1 suite (API OpenAPI/Scores Contract, Column Guard, Timestamp Formats, DDL V3.2)
+      - name: Run Tier 1 suite (API OpenAPI/Scores Contract, Clock, Column Guard, 2184-Origin Parity, DDL V3.2)
         env:
           SERVING_MODEL_SOURCE: local
           WEATHER_DB_BACKEND: local
+          CI_REQUIRE_PARITY: "1"
         run: |
-          python -m pytest tests/serving/ tests/storage/ -v
+          python -m pytest tests/serving/ tests/storage/ -v -rs
+
+      - name: Set up Node.js 20 & verify frontend SPA tests + production build
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: "frontend/package-lock.json"
+
+      - name: Run frontend Vitest suite & Vite build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm test
+          npm run build
 
   # Tier 2 CI: Builds the production Linux container (bundling demo_rainfall_vintage.db), verifies cold-start
   # Uvicorn boot, /health, /models, /predict (demo DB + lag=3 parity), /scores (122 anchors + Block Bootstrap CI),
@@ -70,8 +85,10 @@ jobs:
           done
 
           cat /tmp/health.json
+          curl -sf http://localhost:8000/ > /tmp/index.html
           curl -sf http://localhost:8000/models > /tmp/models.json
           curl -sf "http://localhost:8000/scores?eval_split_regime=POST_TEST" > /tmp/scores.json
+          curl -sf "http://localhost:8000/benchmark/leaderboard?limit=3" > /tmp/leaderboard.json
 
           curl -sf -X POST http://localhost:8000/predict \
             -H "Content-Type: application/json" \
@@ -83,11 +100,18 @@ jobs:
 
           python3 - <<'EOF'
           import json
+          with open("/tmp/index.html", "r", encoding="utf-8") as f:
+              html = f.read()
+          assert "<div id=\"root\"></div>" in html, "SPA index.html not served at /"
+
           with open("/tmp/health.json", "r", encoding="utf-8") as f:
               health = json.load(f)
           assert health["status"] == "healthy", health
           assert health["db_role"] == "bundled_demo_db", health
           assert health["default_complete_anchor_date"] == "2026-08-30", health
+          assert health["data_snapshot_date"] is not None, health
+          assert health["anchor_range"] == {"min": "2001-02-04", "max": "2026-08-30"}, health
+          assert set(health["data_latency"]["groups"].keys()) == {"METEO_GEOSIT", "RAD_FLASHFLUX", "RAD_CERES_SYN1DEG"}
           assert health["journal_mode"] == "delete", health
 
           with open("/tmp/models.json", "r", encoding="utf-8") as f:
@@ -100,23 +124,38 @@ jobs:
           assert scores["n_origins"] == 122, scores
           assert scores["n_forecasts_per_model"] == 854, scores
           assert scores["block_bootstrap"]["block_length"] == 7, scores["block_bootstrap"]
+          assert scores["block_bootstrap"]["n_blocks"] == 18, scores["block_bootstrap"]
+          assert {"SC-35 - SC-31", "SC-35 - SC-30", "SC-30 - SC-31"}.issubset(scores["pairwise_delta_mae_ci"].keys())
           assert len(scores["methodological_notes"]) == 3
+
+          with open("/tmp/leaderboard.json", "r", encoding="utf-8") as f:
+              lb = json.load(f)
+          assert "test_set_exposure_note" in lb and "config_note" in lb
 
           with open("/tmp/predict_demo.json", "r", encoding="utf-8") as f:
               pdemo = json.load(f)
           assert pdemo["history_backend"] == "sqlite", pdemo
-          assert pdemo["data_as_of"] == "2026-08-30", pdemo
+          assert pdemo["anchor_date"] == "2026-08-30", pdemo
+          assert pdemo["anchor_split_regime"] == "POST_TEST", pdemo
+          assert pdemo["run_timezone"] == "Asia/Ho_Chi_Minh", pdemo
           assert pdemo["effective_future_days"] == 0, pdemo
-          assert "future_forecast_notice" in pdemo
+          assert pdemo["future_forecast_notice"] is not None
+          assert len(pdemo["daily_forecasts"]) == 7
 
           with open("/tmp/predict_lag3.json", "r", encoding="utf-8") as f:
               plag3 = json.load(f)
           assert plag3["lag_days"] == 3, plag3
           assert plag3["effective_future_days"] == 4, plag3
+          assert plag3["future_forecast_notice"] is None, plag3
           preds = plag3["serving_model"]["predictions_7d_mm"]
           assert len(preds) == 7 and all(p >= 0.0 for p in preds), preds
-          print("Docker smoke verified (/health, /models, /scores, /predict):", preds)
+          print("Docker smoke verified (/, /health, /models, /scores, /benchmark/leaderboard, /predict):", preds)
           EOF
+
+          if docker exec ds108-smoke sh -c "command -v node >/dev/null 2>&1"; then
+            echo "ERROR: node binary leaked into runtime image!"
+            exit 1
+          fi
 
           RSS_KB=$(docker exec ds108-smoke python3 -c "import os; print(sum(int(line.split()[1]) for line in open('/proc/1/status') if line.startswith('VmRSS:')))")
           RSS_MB=$(python3 -c "print(round(${RSS_KB} / 1024.0, 2))")

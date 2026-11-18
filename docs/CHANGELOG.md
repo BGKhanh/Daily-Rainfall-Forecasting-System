@@ -2,6 +2,25 @@
 
 All notable canonical reconciliation, MLOps tracking, runtime optimization, and operational limitation updates are recorded in this file.
 
+## [1.2.2-round8-locked-contract-ui-v1] - 2026-11-18
+
+### Locked API Contract & Added SPA UI v1
+- **Hợp đồng API đã khóa (`src/api/schemas.py`, `src/api/main.py`, `docs/openapi_snapshot.json`)**:
+  - Added explicit Pydantic v2 request/response models (`HealthResponse`, `ModelsResponse`, `PredictResponse`, `ScoresResponse`, `LeaderboardResponse`) and unified `ErrorResponse` (`{"error": {"code", "message", "details"}}`) covering all `4xx/5xx` responses (including Pydantic `RequestValidationError` 422) across `UNSUPPORTED_LOCATION`, `INCOMPLETE_RADIATION_AT_ANCHOR`, `ANCHOR_DATE_NOT_FOUND`, `INVALID_CLIENT_HISTORY`, `SERVER_DB_DATA_ERROR`, `PREDICTOR_NOT_READY`, and `INVALID_QUERY_PARAMETER`.
+  - Extended `/predict` (`PredictResponse`) with `anchor_date`, `anchor_split_regime`, `run_date`, `run_timezone`, `effective_future_days`, nullable `future_forecast_notice`, `db_role`, and 7-day `daily_forecasts` covering all 5 models (`SC-35`, `SC-30`, `SC-31`, `BASELINE_CLIMATOLOGY_DOY`, `BASELINE_PERSISTENCE`).
+  - Removed `/models/info` from OpenAPI schema (`include_in_schema=False`, preserving route as backwards-compatible alias for `/models`).
+  - Extended `/scores` with all 3 ML pairwise comparisons (`SC-35 - SC-31`, `SC-35 - SC-30`, `SC-30 - SC-31`) plus `n_blocks` & `block_length`, and `/benchmark/leaderboard` with `test_set_exposure_note` and `config_note`.
+  - Extended `/health` with `data_snapshot_date`, `anchor_range` (`min`/`max`), and `data_latency` (`METEO_GEOSIT`, `RAD_FLASHFLUX`, `RAD_CERES_SYN1DEG` from latest successful `ingestion_runs`).
+  - Exported updated `docs/openapi_snapshot.json` verified against `app.openapi()` and validated all 5 live response schemas + `ErrorResponse`.
+- **Canonical Clock (`src/config/clock.py`)**:
+  - Unified operational clock around `today_hcmc()` (`ZoneInfo("Asia/Ho_Chi_Minh")`) and mockable `now_utc()` (`tzdata==2026.4` pinned in `requirements-serving.txt`), replacing `pd.Timestamp.today()` and naive `datetime.now()` across `validation.py`, `predictor.py`, `main.py`, `forecast_runner.py`, and `vintage_store.py`. Added 17:30 UTC / 16:59 UTC boundary tests and DB-mode `run_date` tests in `tests/serving/test_clock_and_rundate.py`.
+- **CI 2,184-Origin Parity Enforcement & Two-DB Order Reversal**:
+  - Whitelisted and tracked `data/processed/results/ml_tweedie_test_forecasts.npz` for CI Tier 1 parity (`CI_REQUIRE_PARITY=1` fails instead of skipping).
+  - Rebuilt `data/vintage/rainfall_vintage.db` cleanly with observations only (`9,450` obs `2001-01-01..2026-11-15`, `forecasts_ledger = 0`), cloned `artifacts/models/demo_rainfall_vintage.db` via `VACUUM INTO` (snapshot `2026-11-15`, captured `2026-11-18`), and issued `4,270` `POST_TEST` rows strictly in Demo DB.
+  - Added Moving Block Bootstrap sensitivity (`block_length ∈ {7, 14, 21}`) in `reports/storage_audit/post_test_retrospective_scores.json`.
+- **Frontend SPA v1 (`frontend/`, Multi-Stage `Dockerfile`)**:
+  - Implemented responsive Vietnamese React + Vite + TypeScript dashboard (`Theo ngày neo`, `Bảng điểm`, `Tình trạng dữ liệu`, `Giới thiệu & Giới hạn`) mounted at `/` by FastAPI (`StaticFiles`) inside multi-stage Docker build (zero Node.js in final Python runtime image), plus Vitest UI verification suite.
+
 ## [1.2.1-round7-guardrails-openapi-demo-db] - 2026-11-17
 
 ### Added & Changed — Entry Guards, UTC Normalization, Block Bootstrap CIs, Two-DB & OpenAPI Lock
