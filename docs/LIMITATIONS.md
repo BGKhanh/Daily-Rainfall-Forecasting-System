@@ -2,7 +2,7 @@
 
 This document records verified operational constraints, canonical split boundaries, data-latency risks, and runtime boundaries for the HCMC 7-day rainfall forecasting service (`SC-35` serving `XGBRegressor`, `SC-30` shadow validation champion `LGBMRegressor`, `SC-31` shadow post-audit test contender `LGBMRegressor`; all using `tweedie_variance_power = 1.5`).
 
-> **Scope Statement**: *"Kết quả đánh giá được tính trên chuỗi dữ liệu NASA POWER đã hoàn chỉnh (MERRA-2 + CERES SYN1deg); dự báo thời gian thực (live NRT) chưa được hỗ trợ trong phiên bản này."*
+> **Scope Statement**: Evaluation metrics are computed strictly on completed NASA POWER series (MERRA-2 + CERES SYN1deg); autonomous live real-time (NRT) forecasting is not supported in this release.
 >
 > **Canonical Dev Train Boundary**: `2001-01-01` to `2018-04-30` (**6,329 days**, **6,293** valid origins; year 2000 excluded). Location is strictly locked to **HCMC** (`10.7769°N, 106.7009°E`); non-HCMC locations receive **HTTP 422**, malformed user `history` payloads receive **HTTP 400**, and server DB observation errors receive **HTTP 503**.
 
@@ -20,7 +20,7 @@ All 8 CERES-only radiation variables contribute `5.382651%` normalized XGBoost g
 
 Because NASA POWER returns `-999.0` for unavailable CERES days in real time, **near-real-time (NRT) inference on recent calendar dates cannot obtain all 8 CERES columns directly from NASA POWER without an explicit fallback strategy**.
 
-- **Historical Vintage Availability Citation**: API NASA POWER (`https://power.larc.nasa.gov/docs/services/api/temporal/daily/`) chỉ cung cấp chuỗi giá trị hiện hành tại thời điểm truy vấn và không có tham số truy vấn theo phiên bản lịch sử (as-of/vintage), do đó chỉ có các bản ghi được hệ thống tự thu thập từ thời điểm vận hành trở đi mới có lịch sử phiên bản NRT thực (*Verified from NASA POWER Daily API v2.10.3 schema/behavior: no as-of vintage parameter exists*).
+- **Historical Vintage Availability Citation**: The NASA POWER API (`https://power.larc.nasa.gov/docs/services/api/temporal/daily/`) only serves the latest values available at query time and provides no historical "as-of" or vintage query parameter; consequently, only records captured prospectively by the ingestion pipeline have true NRT revision history (*verified from NASA POWER Daily API v2.10.3 schema/behavior: no as-of vintage parameter exists*).
 
 ## 2. Near-Real-Time (NRT) Fallback Policy Status
 

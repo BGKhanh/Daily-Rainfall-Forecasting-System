@@ -65,12 +65,11 @@ Rainfall predictability naturally decreases with longer lead times:
 - **Two-DB Convention & Locked API Contract (`/`, `/health`, `/models`, `/predict`, `/scores`, `/benchmark/leaderboard`)**:
   - **Bundled Demo DB** (`artifacts/models/demo_rainfall_vintage.db`): Tracked and baked into the Docker image (`journal_mode=DELETE` via `VACUUM INTO`, snapshot `2026-11-15` captured `2026-11-18`, `9,450` observations, `4,270` retrospective `POST_TEST` forecasts) for reproducible CI, 2,184-origin Test parity (`CI_REQUIRE_PARITY=1`), `/scores`, and SPA UI v1 (`frontend/`).
   - **Production / Live DB** (`data/vintage/rainfall_vintage.db` or `$VINTAGE_DB_PATH`): Kept outside the container cleanly with **observations only (`forecasts_ledger = 0`)** for incremental NASA POWER ingestion and future prospective (`is_prospective = 1`) operations. See [`docs/RUNBOOK_STORAGE.md`](docs/RUNBOOK_STORAGE.md) and [`docs/openapi_snapshot.json`](docs/openapi_snapshot.json).
-- **Web Dashboard UI v1 (`frontend/`, Vite + React + TypeScript)**:
-  - Multi-stage Docker builds the SPA static bundle (`frontend/dist`) and FastAPI mounts it at `/` while keeping all API routes at root (runtime container has **zero Node.js**).
-  - **Deployment / Free-Tier Latency & Cold-Start Metrics**: *Chưa kiểm tra* (chưa deploy lên cloud hosting free-tier; số liệu cold-start thực đo và tài liệu free-tier chỉ được bổ sung sau khi deploy thật).
+- **Web Dashboard UI (`frontend/`, Vite + React + TypeScript)**:
+  - Multi-stage Docker builds the SPA static bundle (`frontend/dist`) and FastAPI mounts it at `/` while keeping all API routes at root (runtime container has **zero Node.js**). Includes an offline bundled 65-feature pre-merger Vietnam boundary map (`Hoang Sa Island` and `Truong Sa Island` included), dynamic `GET /locations` readiness, and English-only telemetry.
+  - **Cloud Deployment Note**: Cloud hosting deployment (e.g., AWS) is deferred; no cloud hosting latency or platform sizing claims are published until benchmarked live.
 - **Evaluation Scope & Live NRT Disclaimer**:
-  - *"Kết quả đánh giá được tính trên chuỗi dữ liệu NASA POWER đã hoàn chỉnh (MERRA-2 + CERES SYN1deg); dự báo thời gian thực (live NRT) chưa được hỗ trợ trong phiên bản này."*
-  - (Evaluation metrics are computed strictly on finalized historical NASA POWER MERRA-2 + CERES SYN1deg observations; live autonomous NRT forecasting is not supported in this release due to ~78-day CERES latency and observed interior radiation dropouts such as `2026-11-06` in FLASHFlux.)
+  - Evaluation metrics are computed strictly on completed NASA POWER MERRA-2 and CERES SYN1deg observations; autonomous real-time (live NRT) forecasting is not supported in this release due to ~78-day CERES latency and observed interior radiation dropouts such as `2026-11-06` in FLASHFlux.
 
 ### Dynamic Operational Lag & Forecast Horizons
 - **Data Latency**: NASA POWER daily meteorological updates typically feature a **3 to 4-day publication latency** from real-time.

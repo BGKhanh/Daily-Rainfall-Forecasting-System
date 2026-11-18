@@ -69,12 +69,12 @@ jobs:
 
       - name: Build serving Docker image
         run: |
-          docker build -t kgb0630/ds_108:1.3.0-serving .
+          docker build -t kgb0630/ds_108:1.3.1-serving .
 
       - name: Run container & verify /health, /models, /predict, /scores, and RSS <= 350 MB
         run: |
           set -e
-          docker run -d --name ds108-smoke -p 8000:8000 kgb0630/ds_108:1.3.0-serving
+          docker run -d --name ds108-smoke -p 8000:8000 kgb0630/ds_108:1.3.1-serving
           trap "docker rm -f ds108-smoke || true" EXIT
 
           for i in $(seq 1 30); do
@@ -86,6 +86,7 @@ jobs:
 
           cat /tmp/health.json
           curl -sf http://localhost:8000/ > /tmp/index.html
+          curl -sf http://localhost:8000/locations > /tmp/locations.json
           curl -sf http://localhost:8000/models > /tmp/models.json
           curl -sf "http://localhost:8000/scores?eval_split_regime=POST_TEST" > /tmp/scores.json
           curl -sf "http://localhost:8000/benchmark/leaderboard?limit=3" > /tmp/leaderboard.json
@@ -96,7 +97,7 @@ jobs:
 
           curl -sf -X POST http://localhost:8000/predict \
             -H "Content-Type: application/json" \
-            -d '{"province": "TP. Hồ Chí Minh", "anchor_date": "2026-08-30", "run_date": "2026-09-02"}' > /tmp/predict_lag3.json
+            -d '{"location_id": "HCMC", "anchor_date": "2026-08-30"}' > /tmp/predict_anchor.json
 
           python3 - <<'EOF'
           import json
@@ -104,12 +105,21 @@ jobs:
               html = f.read()
           assert "<div id=\"root\"></div>" in html, "SPA index.html not served at /"
 
+          with open("/tmp/locations.json", "r", encoding="utf-8") as f:
+              locs = json.load(f)
+          assert locs["db_role"] == "bundled_demo_db", locs
+          assert len(locs["locations"]) == 1 and locs["locations"][0]["location_id"] == "HCMC", locs
+          assert locs["locations"][0]["display_name"] == "Ho Chi Minh City", locs
+
           with open("/tmp/health.json", "r", encoding="utf-8") as f:
               health = json.load(f)
           assert health["status"] == "healthy", health
           assert health["db_role"] == "bundled_demo_db", health
           assert health["default_complete_anchor_date"] == "2026-08-30", health
           assert health["data_snapshot_date"] is not None, health
+          assert health["scan_window_start"] is not None and health["scan_window_total_days"] > 0, health
+          assert health["latest_precip_obs_date"] is not None, health
+          assert health["latest_partial_obs_explanation"], health
           assert health["anchor_range"] == {"min": "2001-02-04", "max": "2026-08-30"}, health
           assert set(health["data_latency"]["groups"].keys()) == {"METEO_GEOSIT", "RAD_FLASHFLUX", "RAD_CERES_SYN1DEG"}
           assert health["journal_mode"] == "delete", health
@@ -126,6 +136,8 @@ jobs:
           assert scores["block_bootstrap"]["block_length"] == 7, scores["block_bootstrap"]
           assert scores["block_bootstrap"]["n_blocks"] == 18, scores["block_bootstrap"]
           assert {"SC-35 - SC-31", "SC-35 - SC-30", "SC-30 - SC-31"}.issubset(scores["pairwise_delta_mae_ci"].keys())
+          assert scores["pairwise_delta_mae_ci"]["SC-30 - SC-31"]["decision_label"] == "Borderline, not adjusted for multiple comparisons"
+          assert set(scores["block_length_sensitivity"].keys()) == {"7", "14", "21"}
           assert len(scores["methodological_notes"]) == 3
 
           with open("/tmp/leaderboard.json", "r", encoding="utf-8") as f:
@@ -142,14 +154,11 @@ jobs:
           assert pdemo["future_forecast_notice"] is not None
           assert len(pdemo["daily_forecasts"]) == 7
 
-          with open("/tmp/predict_lag3.json", "r", encoding="utf-8") as f:
-              plag3 = json.load(f)
-          assert plag3["lag_days"] == 3, plag3
-          assert plag3["effective_future_days"] == 4, plag3
-          assert plag3["future_forecast_notice"] is None, plag3
-          preds = plag3["serving_model"]["predictions_7d_mm"]
+          with open("/tmp/predict_anchor.json", "r", encoding="utf-8") as f:
+              panchor = json.load(f)
+          preds = panchor["serving_model"]["predictions_7d_mm"]
           assert len(preds) == 7 and all(p >= 0.0 for p in preds), preds
-          print("Docker smoke verified (/, /health, /models, /scores, /benchmark/leaderboard, /predict):", preds)
+          print("Docker smoke verified (/, /locations, /health, /models, /scores, /benchmark/leaderboard, /predict):", preds)
           EOF
 
           if docker exec ds108-smoke sh -c "command -v node >/dev/null 2>&1"; then

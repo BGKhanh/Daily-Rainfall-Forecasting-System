@@ -246,3 +246,4 @@ archive/
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+docker_reports/

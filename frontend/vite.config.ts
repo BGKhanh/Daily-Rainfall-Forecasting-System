@@ -7,6 +7,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/health": "http://127.0.0.1:8000",
+      "/locations": "http://127.0.0.1:8000",
       "/models": "http://127.0.0.1:8000",
       "/predict": "http://127.0.0.1:8000",
       "/scores": "http://127.0.0.1:8000",

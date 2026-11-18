@@ -2,6 +2,18 @@
 
 All notable canonical reconciliation, MLOps tracking, runtime optimization, and operational limitation updates are recorded in this file.
 
+## [1.3.1-serving / Round 9b English Shell & Pre-Merger Map] - 2026-11-18
+
+### Added & Changed
+- **API & Schema (`src/api/schemas.py`, `src/api/main.py`, `src/data/vintage_store.py`, `docs/openapi_snapshot.json`)**:
+  - Added `GET /locations` (`LocationsResponse`) backed by SQLite `locations` table (falling back to HCMC only in `sample_csv` mode).
+  - Removed `run_date` from public `PredictionRequest` (server clock via `src.config.clock.today_hcmc()`), enforced `observed_mm = null` on `today` and `future_forecast` horizons, and converted all user-facing API strings (`future_forecast_notice`, notes, `error.message`, `decision_label`, `test_set_exposure_note`, `config_note`) to English.
+  - Extended `/health` with `scan_window_start`, `scan_window_end`, `scan_window_total_days`, `latest_precip_obs_date`, and dynamic plain-English `latest_partial_obs_explanation`, and extended `/scores` with `decision_label` and `block_length_sensitivity` (`7/14/21` days).
+- **English UI Shell & Multi-Province Map (`frontend/`)**:
+  - Added single i18n resource file `frontend/src/i18n/en.ts`, sidebar/375px drawer, 4 tabs, persistent summary strip, interactive 7-day chart (`0/5/10/15` mm ticks + hover/tap readout), 375px vertical day cards, and error state hiding prior outputs.
+  - Bundled offline pre-merger 63-province boundary GeoJSON + `Hoang Sa Island` & `Truong Sa Island` (`frontend/public/map/vietnam_63_provinces.geojson`, `polygon_to_location.json`, `ATTRIBUTION.md`) with `geoBoundaries` (`CC BY 4.0 / Public Domain`) & `Free-GIS-Data` attribution and empirically verified NASA POWER MERRA-2/CERES grid cell bounds (`reports/storage_audit/grid_cell_verification.json`).
+  - Converted `README.md` and `docs/LIMITATIONS.md` to English and bumped Docker serving tag to `kgb0630/ds_108:1.3.1-serving`.
+
 ## [1.3.0-serving / Node 24 LTS Frontend Builder] - 2026-11-18
 
 ### Changed

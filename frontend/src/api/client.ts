@@ -1,4 +1,12 @@
-import type { ErrorPayload, HealthResponse, PredictResponse, ScoresResponse } from "../types/api";
+import { EN } from "../i18n/en";
+import type {
+  HealthResponse,
+  LocationsResponse,
+  PolygonMappingFile,
+  PredictResponse,
+  ProvinceGeoJson,
+  ScoresResponse,
+} from "../types/api";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "");
 
@@ -29,30 +37,6 @@ export class ApiClientError extends Error {
   }
 }
 
-export function mapApiErrorToVietnamese(err: unknown): string {
-  if (err instanceof ApiClientError) {
-    switch (err.code) {
-      case "INCOMPLETE_RADIATION_AT_ANCHOR":
-      case "ANCHOR_DATE_NOT_FOUND":
-        return `Ngày neo không hợp lệ: ${err.message}`;
-      case "UNSUPPORTED_LOCATION":
-        return `Địa điểm không được hỗ trợ (hệ thống khóa cứng TP.HCM): ${err.message}`;
-      case "INVALID_CLIENT_HISTORY":
-      case "INVALID_QUERY_PARAMETER":
-        return `Tham số hoặc chuỗi đầu vào không hợp lệ: ${err.message}`;
-      case "SERVER_DB_DATA_ERROR":
-      case "PREDICTOR_NOT_READY":
-        return "Lỗi máy chủ dữ liệu, thử lại sau";
-      default:
-        if (err.status >= 500) {
-          return "Lỗi máy chủ dữ liệu, thử lại sau";
-        }
-        return `Ngày neo không hợp lệ: ${err.message}`;
-    }
-  }
-  return "Lỗi máy chủ dữ liệu, thử lại sau";
-}
-
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(`${API_BASE}${path}`, {
     ...init,
@@ -74,7 +58,8 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!resp.ok) {
-    const errObj = (parsed as ErrorPayload | null)?.error;
+    const errObj = (parsed as { error?: { code?: string; message?: string; details?: Record<string, unknown> } } | null)
+      ?.error;
     if (errObj && errObj.code) {
       throw new ApiClientError(
         resp.status,
@@ -86,7 +71,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiClientError(
       resp.status,
       resp.status >= 500 ? "SERVER_DB_DATA_ERROR" : "INVALID_QUERY_PARAMETER",
-      resp.statusText || "Yêu cầu thất bại"
+      resp.statusText || EN.errors.requestFailedFallback
     );
   }
 
@@ -97,9 +82,13 @@ export function fetchHealth(): Promise<HealthResponse> {
   return requestJson<HealthResponse>("/health");
 }
 
-export function fetchPredictByAnchor(anchorDate?: string): Promise<PredictResponse> {
+export function fetchLocations(): Promise<LocationsResponse> {
+  return requestJson<LocationsResponse>("/locations");
+}
+
+export function fetchPredictByAnchor(locationId: string, anchorDate?: string): Promise<PredictResponse> {
   const payload: Record<string, string> = {
-    location_id: "HCMC",
+    location_id: locationId,
   };
   if (anchorDate) {
     payload.anchor_date = anchorDate;
@@ -113,4 +102,22 @@ export function fetchPredictByAnchor(anchorDate?: string): Promise<PredictRespon
 export function fetchScores(evalSplitRegime = "POST_TEST"): Promise<ScoresResponse> {
   const q = encodeURIComponent(evalSplitRegime);
   return requestJson<ScoresResponse>(`/scores?eval_split_regime=${q}`);
+}
+
+export async function fetchSameOriginJson<T>(relativePath: string): Promise<T> {
+  const resp = await fetch(relativePath, {
+    headers: { Accept: "application/json" },
+  });
+  if (!resp.ok) {
+    throw new ApiClientError(resp.status, "SERVER_DB_DATA_ERROR", `${EN.errors.requestFailedFallback}: ${relativePath}`);
+  }
+  return (await resp.json()) as T;
+}
+
+export function fetchVietnamGeoJson(): Promise<ProvinceGeoJson> {
+  return fetchSameOriginJson<ProvinceGeoJson>("/map/vietnam_63_provinces.geojson");
+}
+
+export function fetchPolygonMapping(): Promise<PolygonMappingFile> {
+  return fetchSameOriginJson<PolygonMappingFile>("/map/polygon_to_location.json");
 }

@@ -30,6 +30,22 @@ export interface ErrorPayload {
   };
 }
 
+export interface LocationItem {
+  location_id: string;
+  display_name: string;
+  latitude: number;
+  longitude: number;
+  meteo_grid_note: string;
+  rad_grid_note: string;
+  time_standard: string;
+  is_active: boolean;
+}
+
+export interface LocationsResponse {
+  db_role: string;
+  locations: LocationItem[];
+}
+
 export interface DataGroupLatency {
   last_valid_date: string | null;
   lag_days_vs_scan_end: number | null;
@@ -39,7 +55,9 @@ export interface DataGroupLatency {
 export interface DataLatencyInfo {
   last_ingest_run_id: string | null;
   last_ingest_at_utc: string | null;
+  scan_window_start?: string | null;
   scan_window_end: string | null;
+  scan_window_total_days?: number | null;
   groups: Record<string, DataGroupLatency>;
 }
 
@@ -53,6 +71,11 @@ export interface HealthResponse {
   db_role: string;
   default_complete_anchor_date: string | null;
   data_snapshot_date: string | null;
+  scan_window_start?: string | null;
+  scan_window_end?: string | null;
+  scan_window_total_days?: number | null;
+  latest_precip_obs_date?: string | null;
+  latest_partial_obs_explanation?: string | null;
   anchor_range: { min: string; max: string } | null;
   data_latency: DataLatencyInfo | null;
   journal_mode: string | null;
@@ -91,6 +114,7 @@ export interface BootstrapSummary {
   ci_width: number;
   bootstrap_se: number;
   significant_at_95pct: boolean | null;
+  decision_label?: string | null;
 }
 
 export interface FourMetricBlock {
@@ -127,6 +151,23 @@ export interface ScoreModelDetail {
   };
 }
 
+export interface BlockSensitivityModelSummary {
+  MAE: number;
+  ci_lower: number;
+  ci_upper: number;
+  ci_width: number;
+  bootstrap_se: number;
+}
+
+export interface BlockSensitivityEntry {
+  block_length: number;
+  n_anchor_dates: number;
+  n_blocks: number;
+  candidate_blocks: number;
+  models: Record<string, BlockSensitivityModelSummary>;
+  pairwise_delta_mae: Record<string, BootstrapSummary>;
+}
+
 export interface ScoresResponse {
   location_id: string;
   db_role: string;
@@ -151,5 +192,50 @@ export interface ScoresResponse {
     seed: number;
     n_anchor_dates: number;
   };
+  block_length_sensitivity?: Record<string, BlockSensitivityEntry>;
   methodological_notes: Record<string, string>;
 }
+
+export interface ProvinceFeatureProperties {
+  polygon_code: string;
+  location_id: string;
+  display_name: string;
+  source_iso: string;
+  source: string;
+  centroid_lat: number;
+  centroid_lon: number;
+}
+
+export interface ProvinceFeature {
+  type: "Feature";
+  properties: ProvinceFeatureProperties;
+  geometry: {
+    type: "Polygon" | "MultiPolygon";
+    coordinates: number[][][] | number[][][][];
+  };
+}
+
+export interface ProvinceGeoJson {
+  type: "FeatureCollection";
+  metadata?: {
+    version?: string;
+    feature_count?: number;
+  };
+  features: ProvinceFeature[];
+}
+
+export interface PolygonMappingFile {
+  administrative_version: string;
+  polygons: Record<
+    string,
+    {
+      location_id: string;
+      display_name: string;
+      source: string;
+      centroid_lat: number;
+      centroid_lon: number;
+    }
+  >;
+}
+
+export type NavTabId = "forecast" | "data" | "scores" | "governance";

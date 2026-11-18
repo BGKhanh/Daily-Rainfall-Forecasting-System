@@ -1,122 +1,133 @@
 import React from "react";
+import { EN, formatReadableDate, mapApiErrorToFriendly } from "../i18n/en";
+import type { ApiClientError } from "../api/client";
 import type { ScoresResponse } from "../types/api";
 
-interface Props {
+interface ScoresSectionProps {
   scores: ScoresResponse | null;
   loading: boolean;
-  errorBanner: string | null;
+  errorValue: unknown;
 }
 
-const FIXED_MODEL_ORDER = [
-  "SC-35",
-  "SC-30",
+const MODEL_ORDER = [
   "SC-31",
+  "SC-30",
+  "SC-35",
   "BASELINE_CLIMATOLOGY_DOY",
   "BASELINE_PERSISTENCE",
-];
+] as const;
 
-const MODEL_LABELS: Record<string, string> = {
-  "SC-35": "SC-35 — XGBoost Tweedie F3 (@serving)",
-  "SC-30": "SC-30 — LightGBM Tweedie F2 (@shadow_val_champ)",
-  "SC-31": "SC-31 — LightGBM Tweedie F3 (@shadow_test_contender)",
-  BASELINE_CLIMATOLOGY_DOY: "BASELINE_CLIMATOLOGY_DOY (Trung bình DOY DevTrain)",
-  BASELINE_PERSISTENCE: "BASELINE_PERSISTENCE (Mưa ngày neo)",
-};
+const PAIR_ORDER = [
+  "SC-35 - BASELINE_CLIMATOLOGY_DOY",
+  "SC-31 - BASELINE_CLIMATOLOGY_DOY",
+  "SC-30 - BASELINE_CLIMATOLOGY_DOY",
+  "SC-35 - SC-31",
+  "SC-35 - SC-30",
+  "SC-30 - SC-31",
+] as const;
 
-export const ScoresSection: React.FC<Props> = ({ scores, loading, errorBanner }) => {
-  if (errorBanner) {
+const SENSITIVITY_BLOCKS = ["7", "14", "21"] as const;
+
+export const ScoresSection: React.FC<ScoresSectionProps> = ({ scores, loading, errorValue }) => {
+  if (errorValue) {
+    const errObj = errorValue as Partial<ApiClientError>;
+    const friendly = mapApiErrorToFriendly({
+      code: errObj.code,
+      message: errObj.message,
+      details: errObj.details,
+      status: errObj.status,
+    });
     return (
-      <section id="bang-diem" className="panel" aria-labelledby="heading-scores">
-        <h2 id="heading-scores">2. Bảng điểm Hậu-Test (`POST_TEST`)</h2>
-        <div className="alert alert-error" role="alert">
-          {errorBanner}
+      <section className="panel" aria-label={EN.scores.heading}>
+        <h2>{EN.scores.heading}</h2>
+        <div className="error-state-panel" role="alert">
+          <p className="error-summary">{friendly.summary}</p>
+          <details className="technical-details">
+            <summary>{EN.errors.technicalDetailsTitle}</summary>
+            <div className="technical-details-body">
+              <div>{friendly.code}</div>
+              <div>{friendly.message}</div>
+            </div>
+          </details>
         </div>
       </section>
     );
   }
 
-  if (loading && !scores) {
+  if (loading || !scores) {
     return (
-      <section id="bang-diem" className="panel" aria-labelledby="heading-scores">
-        <h2 id="heading-scores">2. Bảng điểm Hậu-Test (`POST_TEST`)</h2>
-        <div className="skeleton-box" aria-busy="true">
-          Đang tải bảng điểm & khoảng tin cậy Moving Block Bootstrap...
-        </div>
+      <section className="panel" aria-label={EN.scores.heading}>
+        <h2>{EN.scores.heading}</h2>
+        <div className="empty-box">{EN.scores.loadingText}</div>
       </section>
     );
   }
 
-  if (!scores) return null;
-
-  const modelKeys = FIXED_MODEL_ORDER.filter((m) => m in scores.models);
-  const mlPairs = Object.entries(scores.pairwise_delta_mae_ci).filter(
-    ([pair]) => !pair.includes("BASELINE_")
-  );
-  const baselinePairs = Object.entries(scores.pairwise_delta_mae_ci).filter(([pair]) =>
-    pair.includes("BASELINE_")
-  );
-  const hasAnyNonSignificantMlPair = mlPairs.some(([, ci]) => ci.significant_at_95pct === false);
+  const sensitivity = scores.block_length_sensitivity ?? {};
 
   return (
-    <section id="bang-diem" className="panel" aria-labelledby="heading-scores">
-      <div className="panel-header">
-        <div>
-          <h2 id="heading-scores">2. Bảng điểm Hậu-Test ({scores.eval_split_regime})</h2>
-          <p className="panel-subtitle">
-            Khoảng tin cậy bootstrap khối {scores.block_bootstrap.block_length} ngày (
-            {scores.block_bootstrap.n_blocks} khối/lần lấy mẫu, B={scores.block_bootstrap.n_bootstrap},
-            N={scores.n_origins} ngày neo từ {scores.origin_min} đến {scores.origin_max}).
-          </p>
+    <section className="panel" aria-label={EN.scores.heading}>
+      <h2>{EN.scores.heading}</h2>
+      <p className="panel-subtitle">{EN.scores.subtitle}</p>
+
+      <div className="metric-grid">
+        <div className="metric-card">
+          <div className="metric-label">{EN.scores.metaOrigins}</div>
+          <div className="metric-value">{scores.n_origins}</div>
         </div>
-        <span className="badge badge-neutral">
-          Cỡ mẫu hiệu dụng: {scores.n_origins} ngày neo (không xếp hạng 3 mô hình ML)
-        </span>
+        <div className="metric-card">
+          <div className="metric-label">{EN.scores.metaForecasts}</div>
+          <div className="metric-value">{scores.n_forecasts_per_model}</div>
+        </div>
+        <div className="metric-card">
+          <div className="metric-label">{EN.scores.metaWindow}</div>
+          <div className="metric-value">
+            {`${formatReadableDate(scores.origin_min)} — ${formatReadableDate(scores.origin_max)}`}
+          </div>
+        </div>
+        <div className="metric-card">
+          <div className="metric-label">{EN.scores.metaMaseScale}</div>
+          <div className="metric-value">{`${scores.mase_scale.toFixed(4)} ${EN.forecast.millimeterUnit}`}</div>
+        </div>
       </div>
 
-      <h3>2.1. MAE, RMSE, MASE tổng hợp theo thứ tự cố định</h3>
-      <p className="helper-note">
-        Ba mô hình ML hiển thị theo thứ tự cố định (không gắn thứ hạng 1/2/3).
-      </p>
+      <h3>{EN.scores.modelsHeading}</h3>
       <div className="table-scroll">
         <table className="data-table">
+          <caption>{EN.scores.modelsCaption}</caption>
           <thead>
             <tr>
-              <th>Mô hình</th>
-              <th className="num">MAE (mm) [95% CI]</th>
-              <th className="num">RMSE (mm) [95% CI]</th>
-              <th className="num">MASE [95% CI]</th>
+              <th>{EN.scores.modelHeaders.model}</th>
+              <th>{EN.scores.modelHeaders.role}</th>
+              <th>{EN.scores.modelHeaders.mae}</th>
+              <th>{EN.scores.modelHeaders.maeCi}</th>
+              <th>{EN.scores.modelHeaders.rmse}</th>
+              <th>{EN.scores.modelHeaders.mase}</th>
+              <th>{EN.scores.modelHeaders.maseCi}</th>
             </tr>
           </thead>
           <tbody>
-            {modelKeys.map((mId) => {
-              const entry = scores.models[mId];
-              const ov = entry.confidence_intervals_95pct.overall;
+            {MODEL_ORDER.filter((m) => scores.models[m]).map((modelId) => {
+              const entry = scores.models[modelId];
+              const ciOverall = entry.confidence_intervals_95pct?.overall;
               return (
-                <tr key={mId}>
-                  <td>{MODEL_LABELS[mId] ?? mId}</td>
-                  <td className="num mono">
-                    <strong>{entry.overall_vs_latest.MAE.toFixed(4)}</strong>{" "}
-                    {ov && (
-                      <span className="ci-range">
-                        [{ov.MAE.ci_lower.toFixed(3)}, {ov.MAE.ci_upper.toFixed(3)}]
-                      </span>
-                    )}
+                <tr key={modelId}>
+                  <td>
+                    <strong>{modelId}</strong>
                   </td>
-                  <td className="num mono">
-                    {entry.overall_vs_latest.RMSE.toFixed(4)}{" "}
-                    {ov && (
-                      <span className="ci-range">
-                        [{ov.RMSE.ci_lower.toFixed(3)}, {ov.RMSE.ci_upper.toFixed(3)}]
-                      </span>
-                    )}
+                  <td>{entry.model_kind}</td>
+                  <td className="num">{entry.overall_vs_latest.MAE.toFixed(3)}</td>
+                  <td className="num">
+                    {ciOverall
+                      ? `[${ciOverall.MAE.ci_lower.toFixed(3)}, ${ciOverall.MAE.ci_upper.toFixed(3)}]`
+                      : EN.forecast.nullValue}
                   </td>
-                  <td className="num mono">
-                    {entry.overall_vs_latest.MASE.toFixed(4)}{" "}
-                    {ov && (
-                      <span className="ci-range">
-                        [{ov.MASE.ci_lower.toFixed(3)}, {ov.MASE.ci_upper.toFixed(3)}]
-                      </span>
-                    )}
+                  <td className="num">{entry.overall_vs_latest.RMSE.toFixed(3)}</td>
+                  <td className="num">{entry.overall_vs_latest.MASE.toFixed(3)}</td>
+                  <td className="num">
+                    {ciOverall
+                      ? `[${ciOverall.MASE.ci_lower.toFixed(3)}, ${ciOverall.MASE.ci_upper.toFixed(3)}]`
+                      : EN.forecast.nullValue}
                   </td>
                 </tr>
               );
@@ -125,30 +136,28 @@ export const ScoresSection: React.FC<Props> = ({ scores, loading, errorBanner })
         </table>
       </div>
 
-      <h3>2.2. MAE theo từng bước horizon (h1..h7, mm)</h3>
+      <h3>{EN.scores.pairwiseHeading}</h3>
       <div className="table-scroll">
         <table className="data-table">
           <thead>
             <tr>
-              <th>Mô hình</th>
-              {["h1", "h2", "h3", "h4", "h5", "h6", "h7"].map((h) => (
-                <th key={h} className="num">
-                  {h}
-                </th>
-              ))}
+              <th>{EN.scores.pairwiseHeaders.pair}</th>
+              <th>{EN.scores.pairwiseHeaders.delta}</th>
+              <th>{EN.scores.pairwiseHeaders.ci}</th>
+              <th>{EN.scores.pairwiseHeaders.width}</th>
+              <th>{EN.scores.pairwiseHeaders.decision}</th>
             </tr>
           </thead>
           <tbody>
-            {modelKeys.map((mId) => {
-              const byH = scores.models[mId].by_horizon_vs_latest;
+            {PAIR_ORDER.filter((p) => scores.pairwise_delta_mae_ci[p]).map((pairKey) => {
+              const ci = scores.pairwise_delta_mae_ci[pairKey];
               return (
-                <tr key={mId}>
-                  <td className="mono">{mId}</td>
-                  {["h1", "h2", "h3", "h4", "h5", "h6", "h7"].map((h) => (
-                    <td key={h} className="num mono">
-                      {byH[h]?.MAE?.toFixed(3) ?? "—"}
-                    </td>
-                  ))}
+                <tr key={pairKey}>
+                  <td>{pairKey}</td>
+                  <td className="num">{ci.point_estimate.toFixed(3)}</td>
+                  <td className="num">{`[${ci.ci_lower.toFixed(3)}, ${ci.ci_upper.toFixed(3)}]`}</td>
+                  <td className="num">{ci.ci_width.toFixed(3)}</td>
+                  <td>{ci.decision_label ?? EN.forecast.nullValue}</td>
                 </tr>
               );
             })}
@@ -156,53 +165,71 @@ export const ScoresSection: React.FC<Props> = ({ scores, loading, errorBanner })
         </table>
       </div>
 
-      <h3>2.3. Hiệu số cặp ΔMAE & Kiểm định khác biệt (95% CI)</h3>
-      {hasAnyNonSignificantMlPair && (
-        <div className="alert alert-warn" role="note">
-          <strong>Khác biệt giữa các mô hình ML không có ý nghĩa thống kê</strong> ở các cặp có
-          khoảng tin cậy 95% chứa 0 (cần đọc đủ từng cặp bên dưới; không dựa vào chênh lệch điểm để
-          xếp hạng 3 mô hình ML).
-        </div>
+      {Object.keys(sensitivity).length > 0 && (
+        <>
+          <h3>{EN.scores.sensitivityHeading}</h3>
+          <p className="panel-subtitle">{EN.scores.sensitivitySubtitle}</p>
+          <div className="table-scroll">
+            <table className="data-table" data-testid="sensitivity-table">
+              <thead>
+                <tr>
+                  <th>{EN.scores.sensitivityHeaders.blockLength}</th>
+                  <th>{EN.scores.sensitivityHeaders.blocks}</th>
+                  <th>{EN.scores.sensitivityHeaders.sc35Mae}</th>
+                  <th>{EN.scores.sensitivityHeaders.sc31Mae}</th>
+                  <th>{EN.scores.sensitivityHeaders.sc30Mae}</th>
+                  <th>{EN.scores.sensitivityHeaders.sc30vs31}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {SENSITIVITY_BLOCKS.filter((b) => sensitivity[b]).map((blkKey) => {
+                  const row = sensitivity[blkKey];
+                  const sc35 = row.models["SC-35"];
+                  const sc31 = row.models["SC-31"];
+                  const sc30 = row.models["SC-30"];
+                  const pair3031 = row.pairwise_delta_mae["SC-30 - SC-31"];
+                  return (
+                    <tr key={blkKey}>
+                      <td className="num">{`${row.block_length} ${EN.dataStatus.daysUnit}`}</td>
+                      <td className="num">{row.n_blocks}</td>
+                      <td className="num">
+                        {sc35
+                          ? `${sc35.MAE.toFixed(3)} [${sc35.ci_lower.toFixed(3)}, ${sc35.ci_upper.toFixed(3)}]`
+                          : EN.forecast.nullValue}
+                      </td>
+                      <td className="num">
+                        {sc31
+                          ? `${sc31.MAE.toFixed(3)} [${sc31.ci_lower.toFixed(3)}, ${sc31.ci_upper.toFixed(3)}]`
+                          : EN.forecast.nullValue}
+                      </td>
+                      <td className="num">
+                        {sc30
+                          ? `${sc30.MAE.toFixed(3)} [${sc30.ci_lower.toFixed(3)}, ${sc30.ci_upper.toFixed(3)}]`
+                          : EN.forecast.nullValue}
+                      </td>
+                      <td className="num">
+                        {pair3031
+                          ? `${pair3031.point_estimate.toFixed(3)} [${pair3031.ci_lower.toFixed(3)}, ${pair3031.ci_upper.toFixed(3)}] (${pair3031.ci_width.toFixed(3)})`
+                          : EN.forecast.nullValue}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
-      <div className="table-scroll">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Cặp so sánh (A − B)</th>
-              <th className="num">ΔMAE (mm)</th>
-              <th className="num">95% CI</th>
-              <th>Kết luận thống kê (95%)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {[...baselinePairs, ...mlPairs].map(([pair, ci]) => (
-              <tr key={pair}>
-                <td className="mono">{pair}</td>
-                <td className="num mono">
-                  {ci.point_estimate >= 0 ? `+${ci.point_estimate.toFixed(4)}` : ci.point_estimate.toFixed(4)}
-                </td>
-                <td className="num mono">
-                  [{ci.ci_lower.toFixed(4)}, {ci.ci_upper.toFixed(4)}]
-                </td>
-                <td>
-                  {ci.significant_at_95pct
-                    ? "Khác biệt có ý nghĩa thống kê (CI không chứa 0)"
-                    : "Không có ý nghĩa thống kê (CI chứa 0)"}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
 
-      <h3>2.4. Ghi chú phương pháp luận bắt buộc</h3>
-      <ul className="notes-list">
-        {Object.entries(scores.methodological_notes).map(([key, text]) => (
-          <li key={key}>
-            <code className="note-key">{key}</code>: {text}
-          </li>
+      <h3>{EN.scores.notesHeading}</h3>
+      <div className="notes-grid" data-testid="methodological-notes">
+        {Object.entries(scores.methodological_notes).map(([noteKey, noteText]) => (
+          <div key={noteKey} className="note-card">
+            <h4>{EN.scores.noteTitles[noteKey] ?? noteKey}</h4>
+            <p>{noteText}</p>
+          </div>
         ))}
-      </ul>
+      </div>
     </section>
   );
 };
