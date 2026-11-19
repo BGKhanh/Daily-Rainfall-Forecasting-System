@@ -19,7 +19,7 @@ import os
 import sqlite3
 import subprocess
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
@@ -1795,3 +1795,325 @@ def query_observations_as_of(
         (location_id, input_window_start, input_window_end, issued_norm),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def binary_search_source_transition(
+    sparse_entries: List[Dict[str, Any]],
+    fetch_fn: Callable[[str], Dict[str, Any]],
+    *,
+    classifier: Callable[[Dict[str, Any]], str],
+    from_label: Optional[str] = None,
+    to_label: Optional[str] = None,
+) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
+    """
+    Locate the exact adjacent calendar-day transition between two consecutive sparse points
+    where `classifier(entry)` changes (optionally constrained to `from_label -> to_label`).
+    """
+    ordered = sorted(sparse_entries, key=lambda r: r["date"])
+    bracket: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None
+    for idx in range(len(ordered) - 1):
+        a, b = ordered[idx], ordered[idx + 1]
+        ca, cb = classifier(a), classifier(b)
+        if ca == cb:
+            continue
+        if from_label is not None and ca != from_label:
+            continue
+        if to_label is not None and cb != to_label:
+            continue
+        bracket = (a, b)
+        break
+
+    if bracket is None:
+        return None, []
+
+    left_entry, right_entry = bracket
+    left_d = date.fromisoformat(left_entry["date"])
+    right_d = date.fromisoformat(right_entry["date"])
+    target_from = classifier(left_entry)
+    extra_probes: List[Dict[str, Any]] = []
+    cache: Dict[str, Dict[str, Any]] = {
+        left_entry["date"]: left_entry,
+        right_entry["date"]: right_entry,
+    }
+
+    while (right_d - left_d).days > 1:
+        mid_d = left_d + timedelta(days=(right_d - left_d).days // 2)
+        mid_iso = mid_d.isoformat()
+        if mid_iso not in cache:
+            mid_entry = fetch_fn(mid_iso)
+            cache[mid_iso] = mid_entry
+            extra_probes.append(mid_entry)
+        else:
+            mid_entry = cache[mid_iso]
+        if classifier(mid_entry) == target_from:
+            left_d = mid_d
+            left_entry = mid_entry
+        else:
+            right_d = mid_d
+            right_entry = mid_entry
+
+    return (
+        {
+            "from_class": classifier(left_entry),
+            "to_class": classifier(right_entry),
+            "last_from_date": left_entry["date"],
+            "first_to_date": right_entry["date"],
+            "last_from_sources": left_entry.get("sources"),
+            "first_to_sources": right_entry.get("sources"),
+        },
+        extra_probes,
+    )
+
+
+def get_source_transition_cutoffs(
+    conn: sqlite3.Connection,
+    *,
+    location_id: str = HCMC_LOCATION_ID,
+    reference_date_iso: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Read persisted `source_transition_cutoffs` from `ingestion_runs.latest_valid_by_group_json`
+    and fall back cleanly to `COMPLETE_ALL_35` + `provisional_window_days = 120` when absent.
+    """
+    rows = conn.execute(
+        """
+        SELECT latest_valid_by_group_json, scan_window_end
+        FROM ingestion_runs
+        WHERE location_id = ?
+          AND status = 'SUCCESS'
+          AND latest_valid_by_group_json IS NOT NULL
+        ORDER BY julianday(finished_at_utc) DESC, rowid DESC
+        """,
+        (location_id,),
+    ).fetchall()
+
+    scan_end: Optional[str] = None
+    for row in rows:
+        if scan_end is None and row["scan_window_end"]:
+            scan_end = str(row["scan_window_end"])
+        try:
+            payload = json.loads(str(row["latest_valid_by_group_json"]))
+        except Exception:
+            continue
+        cutoffs = payload.get("source_transition_cutoffs")
+        if isinstance(cutoffs, dict) and cutoffs.get("finality_cutoff_date"):
+            return cutoffs
+
+    ref_str = reference_date_iso or scan_end or date.today().isoformat()
+    loc_row = conn.execute(
+        "SELECT provisional_window_days FROM locations WHERE location_id = ? LIMIT 1",
+        (location_id,),
+    ).fetchone()
+    win_days = int(loc_row["provisional_window_days"]) if loc_row else DEFAULT_PROVISIONAL_WINDOW_DAYS
+    cutoff_d = (date.fromisoformat(ref_str) - timedelta(days=win_days)).isoformat()
+    return {
+        "finality_mode": "provisional_window_fallback",
+        "finality_cutoff_date": cutoff_d,
+        "provisional_window_days": win_days,
+        "finality_rule": (
+            f"FINALIZED when completeness_regime == 'COMPLETE_ALL_35' and age > {win_days} days "
+            f"(obs_date < {cutoff_d}); otherwise PROVISIONAL."
+        ),
+    }
+
+
+def get_observations_bounds(
+    conn: sqlite3.Connection,
+    *,
+    location_id: str = HCMC_LOCATION_ID,
+) -> Tuple[Optional[str], Optional[str], int]:
+    """Return `(min_obs_date, max_obs_date, total_rows)` in `v_observations_latest` for `location_id`."""
+    row = conn.execute(
+        """
+        SELECT MIN(obs_date) AS min_d, MAX(obs_date) AS max_d, COUNT(*) AS cnt
+        FROM v_observations_latest
+        WHERE location_id = ?
+        """,
+        (location_id,),
+    ).fetchone()
+    if row is None or int(row["cnt"] or 0) == 0:
+        return None, None, 0
+    return str(row["min_d"]), str(row["max_d"]), int(row["cnt"])
+
+
+def _aggregate_daily_bucket(bucket_rows: List[Dict[str, Any]], p_start: str, p_end: str) -> Dict[str, Any]:
+    cal_days = len(bucket_rows)
+    pub_vals = [float(r["precip_mm"]) for r in bucket_rows if r["precip_mm"] is not None]
+    pub_cnt = len(pub_vals)
+    if pub_cnt == 0:
+        return {
+            "date": p_start,
+            "period_end": p_end,
+            "precip_mm": None,
+            "precip_total_mm": None,
+            "precip_daily_mean_mm": None,
+            "published_days_count": 0,
+            "calendar_days_count": cal_days,
+            "status": "NOT_PUBLISHED",
+        }
+    total_mm = round(sum(pub_vals), 4)
+    mean_mm = round(total_mm / pub_cnt, 4)
+    all_finalized = (pub_cnt == cal_days) and all(r["status"] == "FINALIZED" for r in bucket_rows)
+    status = "FINALIZED" if all_finalized else "PROVISIONAL"
+    return {
+        "date": p_start,
+        "period_end": p_end,
+        "precip_mm": None,
+        "precip_total_mm": total_mm,
+        "precip_daily_mean_mm": mean_mm,
+        "published_days_count": pub_cnt,
+        "calendar_days_count": cal_days,
+        "status": status,
+    }
+
+
+def get_observations_series(
+    conn: sqlite3.Connection,
+    *,
+    location_id: str,
+    start_date: str,
+    end_date: str,
+    granularity: str = "daily",
+    reference_date_iso: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Build continuous daily / weekly (ISO Monday-Sunday) / monthly precipitation series from
+    `v_observations_latest` preserving NOT_PUBLISHED gaps and verified FINALIZED vs PROVISIONAL cutoffs.
+    """
+    cutoffs = get_source_transition_cutoffs(conn, location_id=location_id, reference_date_iso=reference_date_iso)
+    finality_mode = str(cutoffs.get("finality_mode") or "provisional_window_fallback")
+    cutoff_date = cutoffs.get("finality_cutoff_date")
+    win_days = int(cutoffs.get("provisional_window_days") or DEFAULT_PROVISIONAL_WINDOW_DAYS)
+    ref_d = date.fromisoformat(reference_date_iso or end_date)
+
+    rows = conn.execute(
+        """
+        SELECT obs_date, PRECTOTCORR, completeness_regime
+        FROM v_observations_latest
+        WHERE location_id = ? AND obs_date BETWEEN ? AND ?
+        ORDER BY obs_date ASC
+        """,
+        (location_id, start_date, end_date),
+    ).fetchall()
+    row_by_date: Dict[str, sqlite3.Row] = {str(r["obs_date"]): r for r in rows}
+
+    start_dt = date.fromisoformat(start_date)
+    end_dt = date.fromisoformat(end_date)
+
+    daily_points: List[Dict[str, Any]] = []
+    total_precip = 0.0
+    rain_days_ge_1mm = 0
+    fin_days = 0
+    prov_days = 0
+    not_pub_days = 0
+
+    cur = start_dt
+    while cur <= end_dt:
+        cur_iso = cur.isoformat()
+        rec = row_by_date.get(cur_iso)
+        raw_precip = rec["PRECTOTCORR"] if rec is not None else None
+        if raw_precip is None or not np.isfinite(float(raw_precip)):
+            daily_points.append(
+                {
+                    "date": cur_iso,
+                    "period_end": cur_iso,
+                    "precip_mm": None,
+                    "precip_total_mm": None,
+                    "precip_daily_mean_mm": None,
+                    "published_days_count": 0,
+                    "calendar_days_count": 1,
+                    "status": "NOT_PUBLISHED",
+                }
+            )
+            not_pub_days += 1
+        else:
+            precip_val = round(float(raw_precip), 4)
+            if finality_mode == "source_header_transition" and cutoff_date:
+                day_status = "FINALIZED" if cur_iso <= str(cutoff_date) else "PROVISIONAL"
+            else:
+                comp = str(rec["completeness_regime"]) if rec is not None else ""
+                is_old_enough = (ref_d - cur).days > win_days
+                day_status = "FINALIZED" if (comp == "COMPLETE_ALL_35" and is_old_enough) else "PROVISIONAL"
+
+            if day_status == "FINALIZED":
+                fin_days += 1
+            else:
+                prov_days += 1
+            total_precip += precip_val
+            if precip_val >= 1.0:
+                rain_days_ge_1mm += 1
+
+            daily_points.append(
+                {
+                    "date": cur_iso,
+                    "period_end": cur_iso,
+                    "precip_mm": precip_val,
+                    "precip_total_mm": precip_val,
+                    "precip_daily_mean_mm": precip_val,
+                    "published_days_count": 1,
+                    "calendar_days_count": 1,
+                    "status": day_status,
+                }
+            )
+        cur += timedelta(days=1)
+
+    if granularity == "daily":
+        series = daily_points
+    else:
+        buckets: Dict[str, List[Dict[str, Any]]] = {}
+        for pt in daily_points:
+            d_obj = date.fromisoformat(pt["date"])
+            if granularity == "weekly":
+                monday = d_obj - timedelta(days=d_obj.weekday())
+                b_key = max(start_dt, monday).isoformat()
+            else:
+                b_key = f"{d_obj.year:04d}-{d_obj.month:02d}"
+            buckets.setdefault(b_key, []).append(pt)
+        series = [
+            _aggregate_daily_bucket(b_rows, b_rows[0]["date"], b_rows[-1]["date"])
+            for b_rows in buckets.values()
+        ]
+
+    return {
+        "finality_mode": finality_mode,
+        "finality_cutoff_date": str(cutoff_date) if cutoff_date else None,
+        "finality_rule": str(cutoffs.get("finality_rule") or ""),
+        "series": series,
+        "summary": {
+            "total_precip_mm": round(total_precip, 4),
+            "rain_days_ge_1mm": int(rain_days_ge_1mm),
+            "finalized_days": int(fin_days),
+            "provisional_days": int(prov_days),
+            "not_published_days": int(not_pub_days),
+            "published_days": int(fin_days + prov_days),
+            "calendar_days": int(fin_days + prov_days + not_pub_days),
+        },
+    }
+
+
+def get_serving_forecast_overlay_from_ledger(
+    conn: sqlite3.Connection,
+    *,
+    location_id: str,
+    anchor_date: str,
+) -> List[Dict[str, Any]]:
+    """Read @serving (SC-35) 7-day forecast points for `anchor_date` from `forecasts_ledger`."""
+    rows = conn.execute(
+        """
+        SELECT target_date, horizon_day, pred_mm
+        FROM forecasts_ledger
+        WHERE location_id = ?
+          AND model_id = 'SC-35'
+          AND data_as_of = ?
+        ORDER BY horizon_day ASC
+        """,
+        (location_id, anchor_date),
+    ).fetchall()
+    return [
+        {
+            "date": str(r["target_date"]),
+            "horizon_day": int(r["horizon_day"]),
+            "pred_mm": round(float(r["pred_mm"]), 2),
+        }
+        for r in rows
+    ]
