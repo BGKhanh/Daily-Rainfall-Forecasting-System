@@ -2,6 +2,20 @@
 
 All notable canonical reconciliation, MLOps tracking, runtime optimization, and operational limitation updates are recorded in this file.
 
+## [1.4.0-serving / Round 10 Source Cutoffs, GET /observations, Single-Model UI & Dual-Layer Map] - 2026-11-19
+
+### Added & Changed
+- **NASA POWER Source Finality Experiment & Storage (`scripts/audit/probe_nasa_header_sources.py`, `src/data/vintage_store.py`)**:
+  - Verified via 1-day sparse + binary-search queries (`v2.10.4`) that `header.sources` switches cleanly per day: `MERRA2 -> GEOSIT` after `2026-09-30` (50-day lag vs `2026-11-19`) and `SYN1DEG -> FLASHFLUX` after `2026-08-30` (81-day lag). Persisted `source_transition_cutoffs` via DDL V3.2 append-only `audit_probe` row in both DBs and updated `demo_rainfall_vintage.db` SHA-256 in `artifacts/models/metadata.json`.
+- **Read-Only Observations Explorer Endpoint (`GET /observations`, `src/api/main.py`, `src/api/schemas.py`, `docs/openapi_snapshot.json`)**:
+  - Added `GET /observations` supporting `daily` (<=366d), `weekly` (ISO Mon-Sun <=2,555d), and `monthly` (<=10,000d), continuous `NOT_PUBLISHED` gap detection (`precip_mm = null`), verified `FINALIZED`/`PROVISIONAL` labels, exact daily-to-period sums, empty 200 status for un-ingested map provinces (`HANOI`), and `@serving` forecast overlay. Moved `/scores` & `/benchmark/leaderboard` OpenAPI tags to `["Developer & Evaluation"]`.
+- **Frontend Single-Model Main Screen, Dual-Layer Map & Data Retrieval (`frontend/`)**:
+  - Simplified shell to 3 tabs (`Forecast by location`, `Data retrieval`, `System limitations`), removed `Comparison & scores`, anchor date picker, presets, CERES error state, model-selection prose, and all occurrences of `"normalized"`.
+  - Replaced bar chart with `@serving` dashed + `Observed` solid line chart (`31 Aug 2026`.. dates, optional 14-day prior observations switch), independent `Province boundaries` + `Grid cells` MERRA-2 toggles, multi-province selection with `Selected locations` table, and `"Forecast not available yet"` panel for unsupported provinces.
+  - Built real `Data retrieval` archive explorer (3 colored segments + `NOT_PUBLISHED` gap bands, auto `Weekly`/`Monthly` switch, pagination, CSV download) and `Spatial representativeness` documentation with 3 NASA POWER citations.
+- **Git LFS, Container & Docs (`.gitattributes`, `scripts/mlops/ensure_demo_db.py`, `Dockerfile`, `.github/workflows/ci.yml`, `README.md`, `docs/LIMITATIONS.md`, `docs/RUNBOOK_STORAGE.md`)**:
+  - Managed `artifacts/models/demo_rainfall_vintage.db` via Git LFS with automated LFS-pointer rebuild fallback and bumped serving image tag to `kgb0630/ds_108:1.4.0-serving`.
+
 ## [1.3.1-serving / Round 9b English Shell & Pre-Merger Map] - 2026-11-18
 
 ### Added & Changed
