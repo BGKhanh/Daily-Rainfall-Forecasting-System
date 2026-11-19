@@ -200,10 +200,10 @@ export interface ProvinceFeatureProperties {
   polygon_code: string;
   location_id: string;
   display_name: string;
-  source_iso: string;
+  source_iso?: string;
   source: string;
-  centroid_lat: number;
-  centroid_lon: number;
+  centroid_lat?: number;
+  centroid_lon?: number;
 }
 
 export interface ProvinceFeature {
@@ -224,18 +224,54 @@ export interface ProvinceGeoJson {
   features: ProvinceFeature[];
 }
 
-export interface PolygonMappingFile {
-  administrative_version: string;
-  polygons: Record<
-    string,
-    {
-      location_id: string;
-      display_name: string;
-      source: string;
-      centroid_lat: number;
-      centroid_lon: number;
-    }
-  >;
+export type ObservationGranularity = "daily" | "weekly" | "monthly";
+export type ObservationStatus = "FINALIZED" | "PROVISIONAL" | "NOT_PUBLISHED";
+
+export interface ObservationSeriesPoint {
+  date: string;
+  period_end: string;
+  precip_mm: number | null;
+  precip_total_mm: number | null;
+  precip_daily_mean_mm: number | null;
+  published_days_count: number;
+  calendar_days_count: number;
+  status: ObservationStatus;
 }
 
-export type NavTabId = "forecast" | "data" | "scores" | "governance";
+export interface ForecastOverlayPoint {
+  date: string;
+  horizon_day: number;
+  pred_mm: number;
+}
+
+export interface ObservationsQueryResponse {
+  location_id: string;
+  display_name: string;
+  db_role: string;
+  has_data: boolean;
+  empty_reason: string | null;
+  granularity: ObservationGranularity;
+  start_date: string;
+  end_date: string;
+  valid_range: {
+    min_date: string;
+    max_date: string;
+  };
+  finality_mode: string;
+  finality_cutoff_date: string | null;
+  finality_rule: string;
+  series: ObservationSeriesPoint[];
+  forecast_overlay: ForecastOverlayPoint[];
+  forecast_overlay_anchor_date?: string | null;
+  summary: {
+    total_precip_mm: number;
+    rain_days_ge_1mm: number;
+    finalized_days: number;
+    provisional_days: number;
+    not_published_days: number;
+    published_days: number;
+    calendar_days: number;
+  };
+}
+
+export type NavTabId = "forecast" | "data" | "governance";

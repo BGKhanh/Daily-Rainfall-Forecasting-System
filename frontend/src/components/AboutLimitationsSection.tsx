@@ -11,6 +11,17 @@ export const AboutLimitationsSection: React.FC = () => {
           <article key={card.title} className="governance-card">
             <h3>{card.title}</h3>
             <p>{card.body}</p>
+            {"links" in card && Array.isArray(card.links) && card.links.length > 0 && (
+              <ul className="citation-list">
+                {card.links.map((lnk) => (
+                  <li key={lnk.url}>
+                    <a href={lnk.url} target="_blank" rel="noopener noreferrer">
+                      {lnk.label}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            )}
           </article>
         ))}
       </div>

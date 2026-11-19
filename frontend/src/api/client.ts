@@ -2,10 +2,10 @@ import { EN } from "../i18n/en";
 import type {
   HealthResponse,
   LocationsResponse,
-  PolygonMappingFile,
+  ObservationGranularity,
+  ObservationsQueryResponse,
   PredictResponse,
   ProvinceGeoJson,
-  ScoresResponse,
 } from "../types/api";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "");
@@ -99,9 +99,18 @@ export function fetchPredictByAnchor(locationId: string, anchorDate?: string): P
   });
 }
 
-export function fetchScores(evalSplitRegime = "POST_TEST"): Promise<ScoresResponse> {
-  const q = encodeURIComponent(evalSplitRegime);
-  return requestJson<ScoresResponse>(`/scores?eval_split_regime=${q}`);
+export function fetchObservations(params: {
+  locationId: string;
+  startDate?: string;
+  endDate?: string;
+  granularity: ObservationGranularity;
+}): Promise<ObservationsQueryResponse> {
+  const search = new URLSearchParams();
+  search.set("location_id", params.locationId);
+  search.set("granularity", params.granularity);
+  if (params.startDate) search.set("start_date", params.startDate);
+  if (params.endDate) search.set("end_date", params.endDate);
+  return requestJson<ObservationsQueryResponse>(`/observations?${search.toString()}`);
 }
 
 export async function fetchSameOriginJson<T>(relativePath: string): Promise<T> {
@@ -116,8 +125,4 @@ export async function fetchSameOriginJson<T>(relativePath: string): Promise<T> {
 
 export function fetchVietnamGeoJson(): Promise<ProvinceGeoJson> {
   return fetchSameOriginJson<ProvinceGeoJson>("/map/vietnam_63_provinces.geojson");
-}
-
-export function fetchPolygonMapping(): Promise<PolygonMappingFile> {
-  return fetchSameOriginJson<PolygonMappingFile>("/map/polygon_to_location.json");
 }

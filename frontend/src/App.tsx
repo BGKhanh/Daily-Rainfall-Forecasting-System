@@ -4,29 +4,34 @@ import {
   COLD_START_THRESHOLD_MS,
   fetchHealth,
   fetchLocations,
+  fetchObservations,
   fetchPredictByAnchor,
-  fetchScores,
   fetchVietnamGeoJson,
 } from "./api/client";
 import { AboutLimitationsSection } from "./components/AboutLimitationsSection";
 import { AnchorForecastSection } from "./components/AnchorForecastSection";
 import { DataStatusSection } from "./components/DataStatusSection";
-import { ScoresSection } from "./components/ScoresSection";
 import { EN } from "./i18n/en";
 import type {
   HealthResponse,
   LocationItem,
   NavTabId,
+  ObservationSeriesPoint,
   PredictResponse,
   ProvinceGeoJson,
-  ScoresResponse,
 } from "./types/api";
 
 interface AppProps {
   initialGeoJson?: ProvinceGeoJson;
 }
 
-const NAV_ORDER: NavTabId[] = ["forecast", "data", "scores", "governance"];
+const NAV_ORDER: NavTabId[] = ["forecast", "data", "governance"];
+
+function isoMinusDays(iso: string, days: number): string {
+  const dt = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(dt.getTime())) return iso;
+  return new Date(dt.getTime() - days * 86400000).toISOString().slice(0, 10);
+}
 
 export const App: React.FC<AppProps> = ({ initialGeoJson }) => {
   const [activeTab, setActiveTab] = useState<NavTabId>("forecast");
@@ -34,22 +39,20 @@ export const App: React.FC<AppProps> = ({ initialGeoJson }) => {
 
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [locations, setLocations] = useState<LocationItem[]>([]);
-  const [selectedLocationId, setSelectedLocationId] = useState<string>("HCMC");
+  const [selectedLocationIds, setSelectedLocationIds] = useState<string[]>(["HCMC"]);
+  const [focusedLocationId, setFocusedLocationId] = useState<string>("HCMC");
   const [geoJson, setGeoJson] = useState<ProvinceGeoJson | null>(initialGeoJson ?? null);
   const [mapError, setMapError] = useState<string | null>(null);
 
   const [prediction, setPrediction] = useState<PredictResponse | null>(null);
-  const [scores, setScores] = useState<ScoresResponse | null>(null);
-
-  const [selectedAnchor, setSelectedAnchor] = useState<string>("");
   const [coldStartSlow, setColdStartSlow] = useState<boolean>(false);
-
   const [healthError, setHealthError] = useState<unknown>(null);
   const [predictError, setPredictError] = useState<unknown>(null);
-  const [scoresError, setScoresError] = useState<unknown>(null);
-
   const [predictLoading, setPredictLoading] = useState<boolean>(true);
-  const [scoresLoading, setScoresLoading] = useState<boolean>(true);
+
+  const [showPrior14d, setShowPrior14d] = useState<boolean>(false);
+  const [priorObservations, setPriorObservations] = useState<ObservationSeriesPoint[]>([]);
+
   const predictSeqRef = useRef<number>(0);
 
   const loadPrediction = async (locationId: string, anchorDate?: string) => {
@@ -60,9 +63,6 @@ export const App: React.FC<AppProps> = ({ initialGeoJson }) => {
       const predRes = await fetchPredictByAnchor(locationId, anchorDate);
       if (seq !== predictSeqRef.current) return;
       setPrediction(predRes);
-      if (predRes.anchor_date) {
-        setSelectedAnchor(predRes.anchor_date);
-      }
     } catch (err) {
       if (seq !== predictSeqRef.current) return;
       setPrediction(null);
@@ -103,11 +103,10 @@ export const App: React.FC<AppProps> = ({ initialGeoJson }) => {
 
         const defaultLoc =
           locsData.locations.find((l) => l.is_active)?.location_id ?? "HCMC";
-        setSelectedLocationId(defaultLoc);
+        setSelectedLocationIds([defaultLoc]);
+        setFocusedLocationId(defaultLoc);
 
         const initialAnchor = healthData.default_complete_anchor_date ?? "";
-        setSelectedAnchor(initialAnchor);
-
         void loadPrediction(defaultLoc, initialAnchor || undefined);
       } catch (err) {
         if (!active) return;
@@ -117,21 +116,6 @@ export const App: React.FC<AppProps> = ({ initialGeoJson }) => {
         setPredictError(err);
         setPredictLoading(false);
       }
-
-      setScoresLoading(true);
-      setScoresError(null);
-      fetchScores("POST_TEST")
-        .then((scoresData) => {
-          if (!active) return;
-          setScores(scoresData);
-        })
-        .catch((err) => {
-          if (!active) return;
-          setScoresError(err);
-        })
-        .finally(() => {
-          if (active) setScoresLoading(false);
-        });
     }
 
     void bootstrap();
@@ -142,14 +126,41 @@ export const App: React.FC<AppProps> = ({ initialGeoJson }) => {
     };
   }, [initialGeoJson]);
 
-  const handleSelectAnchor = async (anchorDate: string) => {
-    setSelectedAnchor(anchorDate);
-    await loadPrediction(selectedLocationId, anchorDate);
+  const handleToggleLocation = (locationId: string) => {
+    setFocusedLocationId(locationId);
+    setSelectedLocationIds((prev) =>
+      prev.includes(locationId) ? prev : [...prev, locationId]
+    );
+    const activeLoc = locations.find((l) => l.location_id === locationId && l.is_active);
+    if (activeLoc) {
+      void loadPrediction(locationId, health?.default_complete_anchor_date ?? undefined);
+    }
   };
 
-  const handleSelectLocation = async (locationId: string) => {
-    setSelectedLocationId(locationId);
-    await loadPrediction(locationId, selectedAnchor || undefined);
+  const handleResetSelection = () => {
+    const defaultLoc = locations.find((l) => l.is_active)?.location_id ?? "HCMC";
+    setSelectedLocationIds([defaultLoc]);
+    setFocusedLocationId(defaultLoc);
+    void loadPrediction(defaultLoc, health?.default_complete_anchor_date ?? undefined);
+  };
+
+  const handleTogglePrior14d = async (enabled: boolean) => {
+    setShowPrior14d(enabled);
+    if (!enabled) return;
+    const anchorIso = prediction?.anchor_date ?? health?.default_complete_anchor_date;
+    if (!anchorIso) return;
+    try {
+      const startIso = isoMinusDays(anchorIso, 13);
+      const res = await fetchObservations({
+        locationId: focusedLocationId,
+        startDate: startIso,
+        endDate: anchorIso,
+        granularity: "daily",
+      });
+      setPriorObservations(res.series);
+    } catch {
+      setPriorObservations([]);
+    }
   };
 
   const switchTab = (tabId: NavTabId) => {
@@ -157,8 +168,8 @@ export const App: React.FC<AppProps> = ({ initialGeoJson }) => {
     setMobileMenuOpen(false);
   };
 
-  const dbLabel =
-    EN.app.dbRoles[health?.db_role ?? "connecting"] ?? health?.db_role ?? EN.app.footerConnecting;
+  const dbRoleKey = health?.db_role ?? "connecting";
+  const dbLabel = EN.app.dbRoles[dbRoleKey] ?? dbRoleKey;
 
   return (
     <div className="shell-root">
@@ -166,7 +177,7 @@ export const App: React.FC<AppProps> = ({ initialGeoJson }) => {
         <button
           type="button"
           className="menu-toggle-btn"
-          aria-label={mobileMenuOpen ? EN.app.closeMenuLabel : EN.app.openMenuLabel}
+          aria-label={EN.app.menuButtonLabel}
           aria-expanded={mobileMenuOpen}
           onClick={() => setMobileMenuOpen((v) => !v)}
         >
@@ -214,13 +225,13 @@ export const App: React.FC<AppProps> = ({ initialGeoJson }) => {
             <span>{`${EN.app.footerDbLabel}: ${dbLabel}`}</span>
           </div>
           <div className="footer-links" aria-label={EN.app.footerLinksAria}>
-            <a href={APP_CONFIG.repoUrl} target="_blank" rel="noreferrer">
+            <a href={APP_CONFIG.repoUrl} target="_blank" rel="noopener noreferrer">
               {EN.app.linkGithub}
             </a>
-            <a href={APP_CONFIG.ciUrl} target="_blank" rel="noreferrer">
+            <a href={APP_CONFIG.ciUrl} target="_blank" rel="noopener noreferrer">
               {EN.app.linkCi}
             </a>
-            <a href={APP_CONFIG.mlflowUrl} target="_blank" rel="noreferrer">
+            <a href={APP_CONFIG.mlflowUrl} target="_blank" rel="noopener noreferrer">
               {EN.app.linkMlflow}
             </a>
           </div>
@@ -256,22 +267,23 @@ export const App: React.FC<AppProps> = ({ initialGeoJson }) => {
             <AnchorForecastSection
               health={health}
               locations={locations}
-              selectedLocationId={selectedLocationId}
-              onSelectLocation={handleSelectLocation}
+              selectedLocationIds={selectedLocationIds}
+              focusedLocationId={focusedLocationId}
+              onToggleLocation={handleToggleLocation}
+              onResetSelection={handleResetSelection}
               geoJson={geoJson}
               mapError={mapError}
               prediction={prediction}
               loading={predictLoading}
               errorValue={predictError}
-              selectedAnchor={selectedAnchor}
-              onSelectAnchor={handleSelectAnchor}
+              priorObservations={priorObservations}
+              showPrior14d={showPrior14d}
+              onTogglePrior14d={handleTogglePrior14d}
             />
           )}
 
-          {activeTab === "data" && <DataStatusSection health={health} />}
-
-          {activeTab === "scores" && (
-            <ScoresSection scores={scores} loading={scoresLoading} errorValue={scoresError} />
+          {activeTab === "data" && (
+            <DataStatusSection health={health} locations={locations} geoJson={geoJson} />
           )}
 
           {activeTab === "governance" && <AboutLimitationsSection />}
