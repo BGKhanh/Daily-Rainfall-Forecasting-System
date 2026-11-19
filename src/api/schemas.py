@@ -366,3 +366,58 @@ class LeaderboardResponse(BaseModel):
     test_set_exposure_note: str
     config_note: str
     top_scenarios: List[Dict[str, Any]]
+
+
+ObservationGranularity = Literal["daily", "weekly", "monthly"]
+ObservationStatus = Literal["FINALIZED", "PROVISIONAL", "NOT_PUBLISHED"]
+
+
+class ObservationsValidRange(BaseModel):
+    min_date: str
+    max_date: str
+
+
+class ObservationSeriesPoint(BaseModel):
+    date: str
+    period_end: str
+    precip_mm: Optional[float] = None
+    precip_total_mm: Optional[float] = None
+    precip_daily_mean_mm: Optional[float] = None
+    published_days_count: int
+    calendar_days_count: int
+    status: ObservationStatus
+
+
+class ForecastOverlayPoint(BaseModel):
+    date: str
+    horizon_day: int
+    pred_mm: float
+
+
+class ObservationsSummary(BaseModel):
+    total_precip_mm: float
+    rain_days_ge_1mm: int
+    finalized_days: int
+    provisional_days: int
+    not_published_days: int
+    published_days: int
+    calendar_days: int
+
+
+class ObservationsQueryResponse(BaseModel):
+    location_id: str
+    display_name: str
+    db_role: str
+    has_data: bool
+    empty_reason: Optional[str] = None
+    granularity: ObservationGranularity
+    start_date: str
+    end_date: str
+    valid_range: ObservationsValidRange
+    finality_mode: str
+    finality_cutoff_date: Optional[str] = None
+    finality_rule: str
+    series: List[ObservationSeriesPoint]
+    forecast_overlay: List[ForecastOverlayPoint] = Field(default_factory=list)
+    forecast_overlay_anchor_date: Optional[str] = None
+    summary: ObservationsSummary

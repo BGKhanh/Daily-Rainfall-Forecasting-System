@@ -16,9 +16,11 @@ Features:
 
 from contextlib import asynccontextmanager
 from copy import deepcopy
-from datetime import timedelta
+from datetime import date, timedelta
+import json
 import os
 from pathlib import Path
+import re
 import sqlite3
 import sys
 from typing import Any, Dict, List, Optional
@@ -44,6 +46,7 @@ from src.api.schemas import (
     LeaderboardResponse,
     LocationsResponse,
     ModelsResponse,
+    ObservationsQueryResponse,
     PredictionRequest,
     PredictResponse,
     ScoresResponse,
@@ -69,6 +72,10 @@ from src.data.vintage_store import (
     get_latest_ingest_latency,
     get_latest_precip_and_partial_explanation,
     get_locations,
+    get_observations_bounds,
+    get_observations_series,
+    get_serving_forecast_overlay_from_ledger,
+    get_source_transition_cutoffs,
 )
 from src.inference.forecast_runner import (
     METHODOLOGICAL_NOTES,
@@ -87,6 +94,13 @@ CANONICAL_LATITUDE = HCMC_LATITUDE
 CANONICAL_LONGITUDE = HCMC_LONGITUDE
 ALLOWED_HCMC_ALIASES = frozenset(HCMC_ALIASES)
 VALID_EVAL_SPLIT_REGIMES = ("DEV_TRAIN", "VALIDATION", "TEST", "POST_TEST")
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_OBS_MAX_DAYS_BY_GRANULARITY = {
+    "daily": 366,
+    "weekly": 2555,
+    "monthly": 10000,
+}
+_cached_map_catalog: Optional[Dict[str, str]] = None
 
 TEST_SET_EXPOSURE_NOTE = (
     "The Test set (2020-05-01 to 2026-04-30) has been exposed; the project owner selected @serving (SC-35) "
@@ -355,6 +369,273 @@ def get_configured_locations():
         ) from exc
 
     return {"db_role": db_role, "locations": items}
+
+
+def _load_map_location_catalog() -> Dict[str, str]:
+    """Load canonical 65-unit `location_id -> display_name` map cleanly from bundled map metadata."""
+    global _cached_map_catalog
+    if _cached_map_catalog is not None:
+        return _cached_map_catalog
+
+    catalog: Dict[str, str] = {CANONICAL_LOCATION_ID: CANONICAL_PROVINCE_NAME}
+    for candidate in (
+        PROJECT_ROOT / "frontend" / "public" / "map" / "polygon_to_location.json",
+        PROJECT_ROOT / "frontend" / "dist" / "map" / "polygon_to_location.json",
+    ):
+        if candidate.exists():
+            try:
+                raw = json.loads(candidate.read_text(encoding="utf-8"))
+                polygons = raw.get("polygons") or {}
+                for entry in polygons.values():
+                    loc_id = str(entry.get("location_id") or "").strip().upper()
+                    disp = str(entry.get("display_name") or "").strip()
+                    if loc_id and disp:
+                        catalog[loc_id] = disp
+                break
+            except Exception:
+                continue
+    catalog[CANONICAL_LOCATION_ID] = CANONICAL_PROVINCE_NAME
+    _cached_map_catalog = catalog
+    return catalog
+
+
+def _resolve_map_location(raw_location_id: str) -> tuple[str, str]:
+    catalog = _load_map_location_catalog()
+    key = (raw_location_id or "").strip().upper()
+    if key in ALLOWED_HCMC_ALIASES or key == CANONICAL_LOCATION_ID:
+        return CANONICAL_LOCATION_ID, catalog.get(CANONICAL_LOCATION_ID, CANONICAL_PROVINCE_NAME)
+    if key in catalog:
+        return key, catalog[key]
+    for loc_id, disp in catalog.items():
+        if disp.upper() == key:
+            return loc_id, disp
+    raise _api_error(
+        422,
+        "UNSUPPORTED_LOCATION",
+        f"[UNSUPPORTED_LOCATION] Unknown location_id={raw_location_id!r}; expected one of the 65 configured Vietnam map units.",
+        {"location_id": raw_location_id},
+    )
+
+
+def _parse_iso_date_param(raw_val: str, field_name: str) -> date:
+    cleaned = str(raw_val).strip()
+    if not _ISO_DATE_RE.match(cleaned):
+        raise _api_error(
+            422,
+            "INVALID_QUERY_PARAMETER",
+            f"[INVALID_QUERY_PARAMETER] {field_name} must use YYYY-MM-DD format, got {raw_val!r}.",
+            {"field": field_name, "value": raw_val},
+        )
+    try:
+        return date.fromisoformat(cleaned)
+    except ValueError as exc:
+        raise _api_error(
+            422,
+            "INVALID_QUERY_PARAMETER",
+            f"[INVALID_QUERY_PARAMETER] Invalid calendar date for {field_name}: {raw_val!r}.",
+            {"field": field_name, "value": raw_val},
+        ) from exc
+
+
+@app.get(
+    "/observations",
+    response_model=ObservationsQueryResponse,
+    responses={
+        422: {"model": ErrorResponse, "description": "Invalid query parameter or unsupported location"},
+        503: {"model": ErrorResponse, "description": "SQLite vintage database unavailable"},
+    },
+    tags=["Data Retrieval"],
+)
+def get_observations(
+    location_id: str = Query(CANONICAL_LOCATION_ID, description="Canonical location ID from the 65-unit Vietnam map."),
+    start_date: Optional[str] = Query(None, description="Start date YYYY-MM-DD (defaults to 90 days ending on end_date)."),
+    end_date: Optional[str] = Query(None, description="End date YYYY-MM-DD (defaults to valid_range.max_date)."),
+    granularity: str = Query("daily", description="Temporal aggregation: 'daily', 'weekly', or 'monthly'."),
+):
+    """Read-only precipitation archive query with verified source finality cutoffs and @serving overlay."""
+    gran = (granularity or "daily").strip().lower()
+    if gran not in _OBS_MAX_DAYS_BY_GRANULARITY:
+        raise _api_error(
+            422,
+            "INVALID_QUERY_PARAMETER",
+            f"[INVALID_QUERY_PARAMETER] granularity must be 'daily', 'weekly', or 'monthly', got {granularity!r}.",
+            {"granularity": granularity, "allowed": list(_OBS_MAX_DAYS_BY_GRANULARITY.keys())},
+        )
+
+    loc_id, display_name = _resolve_map_location(location_id)
+
+    db_path, db_role = _resolve_active_db_info()
+    if (db_path is None or not db_path.exists()) and db_role == "sample_csv" and DEFAULT_DEMO_VINTAGE_DB_PATH.exists():
+        db_path = DEFAULT_DEMO_VINTAGE_DB_PATH
+        db_role = "bundled_demo_db"
+    if db_path is None or not db_path.exists():
+        raise _api_error(
+            503,
+            "SERVER_DB_DATA_ERROR",
+            "[SERVER_DB_DATA_ERROR] No SQLite vintage database available to serve /observations.",
+        )
+
+    today_dt = today_hcmc()
+    today_iso = today_dt.isoformat()
+
+    conn = None
+    try:
+        conn = connect_sqlite(db_path, read_only=True)
+        ref_complete_anchor = get_default_complete_anchor_date(conn, location_id=CANONICAL_LOCATION_ID)
+        min_obs_d, _, row_cnt = get_observations_bounds(conn, location_id=loc_id)
+        valid_min_iso = min_obs_d or "2001-01-01"
+        if ref_complete_anchor:
+            anchor_plus_7 = (date.fromisoformat(ref_complete_anchor) + timedelta(days=7)).isoformat()
+            valid_max_iso = max(today_iso, anchor_plus_7)
+        else:
+            valid_max_iso = today_iso
+
+        valid_min_dt = date.fromisoformat(valid_min_iso)
+        valid_max_dt = date.fromisoformat(valid_max_iso)
+
+        end_dt = _parse_iso_date_param(end_date, "end_date") if end_date is not None else valid_max_dt
+        if start_date is not None:
+            start_dt = _parse_iso_date_param(start_date, "start_date")
+        else:
+            start_dt = max(valid_min_dt, end_dt - timedelta(days=89))
+
+        if start_dt > end_dt:
+            raise _api_error(
+                422,
+                "INVALID_QUERY_PARAMETER",
+                f"[INVALID_QUERY_PARAMETER] start_date ({start_dt.isoformat()}) must be <= end_date ({end_dt.isoformat()}).",
+                {"start_date": start_dt.isoformat(), "end_date": end_dt.isoformat()},
+            )
+
+        if start_dt < valid_min_dt or end_dt > valid_max_dt:
+            raise _api_error(
+                422,
+                "INVALID_QUERY_PARAMETER",
+                (
+                    f"[INVALID_QUERY_PARAMETER] Requested range [{start_dt.isoformat()}, {end_dt.isoformat()}] "
+                    f"falls outside valid_range [{valid_min_iso}, {valid_max_iso}]."
+                ),
+                {
+                    "start_date": start_dt.isoformat(),
+                    "end_date": end_dt.isoformat(),
+                    "valid_range": {"min_date": valid_min_iso, "max_date": valid_max_iso},
+                },
+            )
+
+        span_days = (end_dt - start_dt).days + 1
+        max_days = _OBS_MAX_DAYS_BY_GRANULARITY[gran]
+        if span_days > max_days:
+            raise _api_error(
+                422,
+                "INVALID_QUERY_PARAMETER",
+                (
+                    f"[INVALID_QUERY_PARAMETER] Range of {span_days} days exceeds maximum {max_days} days for "
+                    f"granularity='{gran}'. Switch to 'weekly' or 'monthly' aggregation."
+                ),
+                {"granularity": gran, "span_days": span_days, "max_days": max_days},
+            )
+
+        if row_cnt == 0:
+            cutoffs = get_source_transition_cutoffs(conn, location_id=CANONICAL_LOCATION_ID, reference_date_iso=today_iso)
+            return {
+                "location_id": loc_id,
+                "display_name": display_name,
+                "db_role": db_role,
+                "has_data": False,
+                "empty_reason": "No observations have been ingested for this location yet.",
+                "granularity": gran,
+                "start_date": start_dt.isoformat(),
+                "end_date": end_dt.isoformat(),
+                "valid_range": {"min_date": valid_min_iso, "max_date": valid_max_iso},
+                "finality_mode": str(cutoffs.get("finality_mode") or "provisional_window_fallback"),
+                "finality_cutoff_date": cutoffs.get("finality_cutoff_date"),
+                "finality_rule": str(cutoffs.get("finality_rule") or ""),
+                "series": [],
+                "forecast_overlay": [],
+                "forecast_overlay_anchor_date": ref_complete_anchor,
+                "summary": {
+                    "total_precip_mm": 0.0,
+                    "rain_days_ge_1mm": 0,
+                    "finalized_days": 0,
+                    "provisional_days": 0,
+                    "not_published_days": 0,
+                    "published_days": 0,
+                    "calendar_days": 0,
+                },
+            }
+
+        series_res = get_observations_series(
+            conn,
+            location_id=loc_id,
+            start_date=start_dt.isoformat(),
+            end_date=end_dt.isoformat(),
+            granularity=gran,
+            reference_date_iso=today_iso,
+        )
+
+        overlay: List[Dict[str, Any]] = []
+        if ref_complete_anchor:
+            overlay = get_serving_forecast_overlay_from_ledger(
+                conn,
+                location_id=loc_id,
+                anchor_date=ref_complete_anchor,
+            )
+            if not overlay and predictor is not None and loc_id == CANONICAL_LOCATION_ID:
+                try:
+                    active_provider = history_provider or WeatherHistoryProvider()
+                    hist_res = active_provider.fetch_recent_history(
+                        province=CANONICAL_PROVINCE_NAME,
+                        days=35,
+                        run_date=today_iso,
+                        anchor_date=ref_complete_anchor,
+                    )
+                    anchor_dt = date.fromisoformat(ref_complete_anchor)
+                    pred_out = predictor.predict(
+                        raw_history_df=hist_res.history_df,
+                        run_date=today_iso,
+                        enforce_lag_limit=False,
+                    )
+                    preds_7d = (pred_out.get("serving_model") or {}).get("predictions_7d_mm") or []
+                    for h_idx, p_val in enumerate(preds_7d, start=1):
+                        overlay.append(
+                            {
+                                "date": (anchor_dt + timedelta(days=h_idx)).isoformat(),
+                                "horizon_day": h_idx,
+                                "pred_mm": round(float(p_val), 2),
+                            }
+                        )
+                except Exception:
+                    overlay = []
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _api_error(
+            503,
+            "SERVER_DB_DATA_ERROR",
+            f"[SERVER_DB_DATA_ERROR] Failed reading observations archive: {exc}",
+        ) from exc
+    finally:
+        if conn is not None:
+            conn.close()
+
+    return {
+        "location_id": loc_id,
+        "display_name": display_name,
+        "db_role": db_role,
+        "has_data": True,
+        "empty_reason": None,
+        "granularity": gran,
+        "start_date": start_dt.isoformat(),
+        "end_date": end_dt.isoformat(),
+        "valid_range": {"min_date": valid_min_iso, "max_date": valid_max_iso},
+        "finality_mode": series_res["finality_mode"],
+        "finality_cutoff_date": series_res["finality_cutoff_date"],
+        "finality_rule": series_res["finality_rule"],
+        "series": series_res["series"],
+        "forecast_overlay": overlay,
+        "forecast_overlay_anchor_date": ref_complete_anchor,
+        "summary": series_res["summary"],
+    }
 
 
 @app.get(
@@ -801,7 +1082,7 @@ def _empty_scores_payload(eval_split_regime: str, is_prospective: Optional[int])
 @app.get(
     "/scores",
     response_model=ScoresResponse,
-    tags=["Governance"],
+    tags=["Developer & Evaluation"],
     responses={
         422: {"model": ErrorResponse, "description": "Unprocessable Entity — Invalid `eval_split_regime` or `is_prospective` query parameter."},
         503: {"model": ErrorResponse, "description": "Service Unavailable — SQLite vintage database unavailable or corrupted."},
@@ -973,7 +1254,7 @@ def get_scores(
         422: {"model": ErrorResponse, "description": "Invalid limit parameter"},
         503: {"model": ErrorResponse, "description": "Benchmark leaderboard artifact unavailable"},
     },
-    tags=["Governance"],
+    tags=["Developer & Evaluation"],
 )
 def get_leaderboard(limit: int = Query(10, ge=1, le=72)):
     """Returns top audited benchmark scenarios from official benchmark test leaderboards."""
