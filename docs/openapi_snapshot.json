@@ -38,6 +38,110 @@
         }
       }
     },
+    "/observations": {
+      "get": {
+        "tags": [
+          "Data Retrieval"
+        ],
+        "summary": "Get Observations",
+        "description": "Read-only precipitation archive query with verified source finality cutoffs and @serving overlay.",
+        "operationId": "get_observations_observations_get",
+        "parameters": [
+          {
+            "name": "location_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Canonical location ID from the 65-unit Vietnam map.",
+              "default": "HCMC",
+              "title": "Location Id"
+            },
+            "description": "Canonical location ID from the 65-unit Vietnam map."
+          },
+          {
+            "name": "start_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Start date YYYY-MM-DD (defaults to 90 days ending on end_date).",
+              "title": "Start Date"
+            },
+            "description": "Start date YYYY-MM-DD (defaults to 90 days ending on end_date)."
+          },
+          {
+            "name": "end_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "End date YYYY-MM-DD (defaults to valid_range.max_date).",
+              "title": "End Date"
+            },
+            "description": "End date YYYY-MM-DD (defaults to valid_range.max_date)."
+          },
+          {
+            "name": "granularity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Temporal aggregation: 'daily', 'weekly', or 'monthly'.",
+              "default": "daily",
+              "title": "Granularity"
+            },
+            "description": "Temporal aggregation: 'daily', 'weekly', or 'monthly'."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObservationsQueryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid query parameter or unsupported location",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SQLite vintage database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "tags": [
@@ -167,7 +271,7 @@
     "/scores": {
       "get": {
         "tags": [
-          "Governance"
+          "Developer & Evaluation"
         ],
         "summary": "Get Scores",
         "description": "Query `v_forecast_scores` from active SQLite Vintage Store and return per-model overall & horizon\nscores (MAE, MSE, RMSE, MASE), Moving Block Bootstrap 95% CIs (`block_length = 7`), sample sizes,\npairwise ML differences, and mandatory methodological notes.",
@@ -241,7 +345,7 @@
     "/benchmark/leaderboard": {
       "get": {
         "tags": [
-          "Governance"
+          "Developer & Evaluation"
         ],
         "summary": "Get Leaderboard",
         "description": "Returns top audited benchmark scenarios from official benchmark test leaderboards.",
@@ -703,6 +807,29 @@
           "error"
         ],
         "title": "ErrorResponse"
+      },
+      "ForecastOverlayPoint": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "horizon_day": {
+            "type": "integer",
+            "title": "Horizon Day"
+          },
+          "pred_mm": {
+            "type": "number",
+            "title": "Pred Mm"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "horizon_day",
+          "pred_mm"
+        ],
+        "title": "ForecastOverlayPoint"
       },
       "FourMetricBlock": {
         "properties": {
@@ -1238,6 +1365,252 @@
           "models"
         ],
         "title": "ModelsResponse"
+      },
+      "ObservationSeriesPoint": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "period_end": {
+            "type": "string",
+            "title": "Period End"
+          },
+          "precip_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Precip Mm"
+          },
+          "precip_total_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Precip Total Mm"
+          },
+          "precip_daily_mean_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Precip Daily Mean Mm"
+          },
+          "published_days_count": {
+            "type": "integer",
+            "title": "Published Days Count"
+          },
+          "calendar_days_count": {
+            "type": "integer",
+            "title": "Calendar Days Count"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "FINALIZED",
+              "PROVISIONAL",
+              "NOT_PUBLISHED"
+            ],
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "period_end",
+          "published_days_count",
+          "calendar_days_count",
+          "status"
+        ],
+        "title": "ObservationSeriesPoint"
+      },
+      "ObservationsQueryResponse": {
+        "properties": {
+          "location_id": {
+            "type": "string",
+            "title": "Location Id"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "db_role": {
+            "type": "string",
+            "title": "Db Role"
+          },
+          "has_data": {
+            "type": "boolean",
+            "title": "Has Data"
+          },
+          "empty_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Empty Reason"
+          },
+          "granularity": {
+            "type": "string",
+            "enum": [
+              "daily",
+              "weekly",
+              "monthly"
+            ],
+            "title": "Granularity"
+          },
+          "start_date": {
+            "type": "string",
+            "title": "Start Date"
+          },
+          "end_date": {
+            "type": "string",
+            "title": "End Date"
+          },
+          "valid_range": {
+            "$ref": "#/components/schemas/ObservationsValidRange"
+          },
+          "finality_mode": {
+            "type": "string",
+            "title": "Finality Mode"
+          },
+          "finality_cutoff_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finality Cutoff Date"
+          },
+          "finality_rule": {
+            "type": "string",
+            "title": "Finality Rule"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/ObservationSeriesPoint"
+            },
+            "type": "array",
+            "title": "Series"
+          },
+          "forecast_overlay": {
+            "items": {
+              "$ref": "#/components/schemas/ForecastOverlayPoint"
+            },
+            "type": "array",
+            "title": "Forecast Overlay"
+          },
+          "forecast_overlay_anchor_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Forecast Overlay Anchor Date"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/ObservationsSummary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "location_id",
+          "display_name",
+          "db_role",
+          "has_data",
+          "granularity",
+          "start_date",
+          "end_date",
+          "valid_range",
+          "finality_mode",
+          "finality_rule",
+          "series",
+          "summary"
+        ],
+        "title": "ObservationsQueryResponse"
+      },
+      "ObservationsSummary": {
+        "properties": {
+          "total_precip_mm": {
+            "type": "number",
+            "title": "Total Precip Mm"
+          },
+          "rain_days_ge_1mm": {
+            "type": "integer",
+            "title": "Rain Days Ge 1Mm"
+          },
+          "finalized_days": {
+            "type": "integer",
+            "title": "Finalized Days"
+          },
+          "provisional_days": {
+            "type": "integer",
+            "title": "Provisional Days"
+          },
+          "not_published_days": {
+            "type": "integer",
+            "title": "Not Published Days"
+          },
+          "published_days": {
+            "type": "integer",
+            "title": "Published Days"
+          },
+          "calendar_days": {
+            "type": "integer",
+            "title": "Calendar Days"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total_precip_mm",
+          "rain_days_ge_1mm",
+          "finalized_days",
+          "provisional_days",
+          "not_published_days",
+          "published_days",
+          "calendar_days"
+        ],
+        "title": "ObservationsSummary"
+      },
+      "ObservationsValidRange": {
+        "properties": {
+          "min_date": {
+            "type": "string",
+            "title": "Min Date"
+          },
+          "max_date": {
+            "type": "string",
+            "title": "Max Date"
+          }
+        },
+        "type": "object",
+        "required": [
+          "min_date",
+          "max_date"
+        ],
+        "title": "ObservationsValidRange"
       },
       "OverallBootstrapCI": {
         "properties": {
