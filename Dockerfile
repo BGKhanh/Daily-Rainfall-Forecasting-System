@@ -45,6 +45,8 @@ RUN groupadd --gid 10001 appuser && \
 # Copy minimal runtime source code, model artifacts, benchmark leaderboard, and built SPA static files
 COPY --chown=appuser:appuser src/ /app/src/
 COPY --chown=appuser:appuser artifacts/models/ /app/artifacts/models/
+RUN test "$(wc -c < /app/artifacts/models/demo_rainfall_vintage.db)" -gt 102400 || \
+    (echo "ERROR: demo_rainfall_vintage.db appears to be an unhydrated Git LFS pointer; pull LFS or run ensure_demo_db.py before docker build." >&2 && exit 1)
 COPY --chown=appuser:appuser reports/test_benchmark/ /app/reports/test_benchmark/
 COPY --from=frontend-builder --chown=appuser:appuser /frontend/dist /app/frontend/dist
 
