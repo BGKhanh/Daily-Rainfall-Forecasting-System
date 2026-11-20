@@ -417,6 +417,9 @@ class ObservationsQueryResponse(BaseModel):
     finality_mode: str
     finality_cutoff_date: Optional[str] = None
     finality_rule: str
+    last_scan_date: Optional[str] = None
+    probe_date: Optional[str] = None
+    probe_timestamp_utc: Optional[str] = None
     series: List[ObservationSeriesPoint]
     forecast_overlay: List[ForecastOverlayPoint] = Field(default_factory=list)
     forecast_overlay_anchor_date: Optional[str] = None

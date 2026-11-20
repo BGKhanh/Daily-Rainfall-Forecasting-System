@@ -18,6 +18,7 @@ from contextlib import asynccontextmanager
 from copy import deepcopy
 from datetime import date, timedelta
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -52,11 +53,17 @@ from src.api.schemas import (
     ScoresResponse,
 )
 from src.config.clock import HCMC_TIMEZONE_NAME, today_hcmc
+from src.config.settings import load_settings
 from src.data.provider import (
     DEFAULT_DEMO_VINTAGE_DB_PATH,
     IncompleteRadiationAtAnchorError,
     WeatherHistoryProvider,
     resolve_sqlite_db_path_and_role,
+)
+from src.data.turso_backend import (
+    get_replica_manager,
+    open_store_connection,
+    resolve_store_backend,
 )
 from src.data.vintage_store import (
     HCMC_ALIASES,
@@ -64,10 +71,12 @@ from src.data.vintage_store import (
     HCMC_LATITUDE,
     HCMC_LOCATION_ID,
     HCMC_LONGITUDE,
+    cached_db_query,
     connect_sqlite,
     derive_eval_split_regime,
     get_complete_anchor_range,
     get_data_snapshot_date,
+    get_db_state_cache_key,
     get_default_complete_anchor_date,
     get_latest_ingest_latency,
     get_latest_precip_and_partial_explanation,
@@ -95,10 +104,12 @@ CANONICAL_LONGITUDE = HCMC_LONGITUDE
 ALLOWED_HCMC_ALIASES = frozenset(HCMC_ALIASES)
 VALID_EVAL_SPLIT_REGIMES = ("DEV_TRAIN", "VALIDATION", "TEST", "POST_TEST")
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_RUNTIME_SETTINGS = load_settings(env_path=None)
+_DEFAULT_QUERY_DAYS = int(_RUNTIME_SETTINGS.application.default_query_days)
 _OBS_MAX_DAYS_BY_GRANULARITY = {
-    "daily": 366,
-    "weekly": 2555,
-    "monthly": 10000,
+    "daily": int(_RUNTIME_SETTINGS.application.obs_max_days_daily),
+    "weekly": int(_RUNTIME_SETTINGS.application.obs_max_days_weekly),
+    "monthly": int(_RUNTIME_SETTINGS.application.obs_max_days_monthly),
 }
 _cached_map_catalog: Optional[Dict[str, str]] = None
 
@@ -133,17 +144,51 @@ def _api_error(
 
 
 def _resolve_active_db_info() -> tuple[Optional[Path], str]:
-    """Return active `(sqlite_db_path, db_role)` respecting active `history_provider` and Two-DB convention."""
+    """Return active `(sqlite_db_path, db_role)` respecting active `history_provider`, `STORE_BACKEND`, and Two-DB convention."""
     active_provider = history_provider
+    has_explicit_override = (
+        isinstance(active_provider, WeatherHistoryProvider)
+        and active_provider.explicit_db_path is not None
+    )
     if isinstance(active_provider, WeatherHistoryProvider):
+        if active_provider.backend == "sample_csv":
+            return None, "sample_csv"
+        if not has_explicit_override:
+            sb = resolve_store_backend()
+            if sb in ("turso_replica", "turso_remote"):
+                if sb == "turso_replica":
+                    return get_replica_manager().replica_path, "turso_replica"
+                return None, "turso_remote"
         if active_provider.backend in ("local", "sqlite"):
             if active_provider.db_path is not None and Path(active_provider.db_path).exists():
                 return Path(active_provider.db_path), str(active_provider.db_role)
             return None, str(active_provider.db_role)
-        if active_provider.backend == "sample_csv":
-            return None, "sample_csv"
         return None, str(active_provider.backend)
+    sb = resolve_store_backend()
+    if sb == "turso_replica":
+        return get_replica_manager().replica_path, "turso_replica"
+    if sb == "turso_remote":
+        return None, "turso_remote"
     return resolve_sqlite_db_path_and_role()
+
+
+def _open_active_store_conn(read_only: bool = True) -> tuple[Optional[Any], Optional[str], str]:
+    """Open active store connection `(conn, cache_id, db_role)` honoring `STORE_BACKEND`."""
+    active_provider = history_provider
+    has_explicit_override = (
+        isinstance(active_provider, WeatherHistoryProvider)
+        and active_provider.explicit_db_path is not None
+    )
+    db_path, db_role = _resolve_active_db_info()
+    if db_role == "sample_csv":
+        return None, None, "sample_csv"
+    if not has_explicit_override and db_role in ("turso_replica", "turso_remote"):
+        conn, resolved = open_store_connection(read_only=read_only, backend=db_role)
+        cache_id = str(get_replica_manager().replica_path) if resolved == "turso_replica" else "turso_remote"
+        return conn, cache_id, resolved
+    if db_path is not None and Path(db_path).exists():
+        return connect_sqlite(db_path, read_only=read_only), str(db_path), db_role
+    return None, None, db_role
 
 
 def _load_doy_climatology_table(db_path: Optional[Path]) -> Optional[Dict[int, float]]:
@@ -230,9 +275,17 @@ def resolve_canonical_hcmc_location(
 
 def load_serving_models():
     global predictor, history_provider, _cached_doy_climatology
+    from src.config.settings import load_settings, verify_model_contract_on_startup
+
+    runtime_settings = load_settings()
     artifact_path = PROJECT_ROOT / "artifacts" / "models"
     model_source = os.environ.get("SERVING_MODEL_SOURCE", "local")
     predictor = StandaloneRainfallPredictor(artifact_dir=artifact_path, mode=model_source)
+    verify_model_contract_on_startup(
+        feature_builders=[predictor.fb_f3, predictor.fb_f2],
+        settings=runtime_settings,
+        metadata=predictor.metadata,
+    )
     history_provider = WeatherHistoryProvider()
     db_path, _ = _resolve_active_db_info()
     if db_path is None:
@@ -245,17 +298,36 @@ def load_serving_models():
     )
 
 
+_logger = logging.getLogger(__name__)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     load_serving_models()
-    yield
+    sb = resolve_store_backend()
+    mgr = None
+    if sb == "turso_replica":
+        try:
+            settings = load_settings()
+            mgr = get_replica_manager()
+            mgr.sync_now()
+            mgr.start_background_sync(
+                interval_sec=float(settings.operational.turso_sync_interval_sec),
+                jitter_sec=float(settings.operational.turso_sync_jitter_sec),
+            )
+        except Exception as exc:
+            _logger.warning("Turso replica startup sync deferred: %s", exc)
+    try:
+        yield
+    finally:
+        if mgr is not None:
+            mgr.stop_background_sync()
 
 
 app = FastAPI(
     title="HCMC Daily Rainfall Forecasting Serving Engine",
     description=(
         "Operational API for 7-day multi-horizon daily rainfall forecasting locked to HCMC "
-        "with locked OpenAPI schemas, Two-DB SQLite DDL V3.2 governance, and shadow model telemetry."
+        "with locked OpenAPI schemas, Two-DB SQLite DDL V3.3 governance, and shadow model monitoring."
     ),
     version="1.2.0",
     lifespan=lifespan,
@@ -266,6 +338,9 @@ _default_cors_origins = [
     "http://127.0.0.1:5173",
     "http://localhost:4173",
     "http://127.0.0.1:4173",
+] + [
+    o for o in _RUNTIME_SETTINGS.operational.cors_allowed_origins
+    if o not in ("http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:4173", "http://127.0.0.1:4173")
 ]
 _extra_cors = [
     o.strip() for o in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()
@@ -330,8 +405,8 @@ async def unified_validation_exception_handler(
 )
 def get_configured_locations():
     """Return configured forecast locations from SQLite `locations` table (sample CSV fallback only in sample_csv mode)."""
-    db_path, db_role = _resolve_active_db_info()
-    if db_role == "sample_csv" or (db_path is None and history_provider is not None and history_provider.backend == "sample_csv"):
+    conn, cache_id, db_role = _open_active_store_conn(read_only=True)
+    if db_role == "sample_csv" or (conn is None and history_provider is not None and history_provider.backend == "sample_csv"):
         return {
             "db_role": "sample_csv",
             "locations": [
@@ -348,17 +423,20 @@ def get_configured_locations():
             ],
         }
 
-    if db_path is None or not db_path.exists():
+    if conn is None:
         raise _api_error(
             503,
             "SERVER_DB_DATA_ERROR",
-            "[SERVER_DB_DATA_ERROR] No SQLite vintage database available to serve /locations.",
+            "[SERVER_DB_DATA_ERROR] No SQLite or Turso vintage database available to serve /locations.",
         )
 
     try:
-        conn = connect_sqlite(db_path, read_only=True)
         try:
-            items = get_locations(conn, active_only=False)
+            state_key = get_db_state_cache_key(conn, str(cache_id or db_role))
+            items = cached_db_query(
+                (state_key, "locations"),
+                lambda: get_locations(conn, active_only=False),
+            )
         finally:
             conn.close()
     except Exception as exc:
@@ -464,23 +542,21 @@ def get_observations(
 
     loc_id, display_name = _resolve_map_location(location_id)
 
-    db_path, db_role = _resolve_active_db_info()
-    if (db_path is None or not db_path.exists()) and db_role == "sample_csv" and DEFAULT_DEMO_VINTAGE_DB_PATH.exists():
-        db_path = DEFAULT_DEMO_VINTAGE_DB_PATH
+    conn, _cache_id, db_role = _open_active_store_conn(read_only=True)
+    if conn is None and db_role == "sample_csv" and DEFAULT_DEMO_VINTAGE_DB_PATH.exists():
+        conn = connect_sqlite(DEFAULT_DEMO_VINTAGE_DB_PATH, read_only=True)
         db_role = "bundled_demo_db"
-    if db_path is None or not db_path.exists():
+    if conn is None:
         raise _api_error(
             503,
             "SERVER_DB_DATA_ERROR",
-            "[SERVER_DB_DATA_ERROR] No SQLite vintage database available to serve /observations.",
+            "[SERVER_DB_DATA_ERROR] No SQLite or Turso vintage database available to serve /observations.",
         )
 
     today_dt = today_hcmc()
     today_iso = today_dt.isoformat()
 
-    conn = None
     try:
-        conn = connect_sqlite(db_path, read_only=True)
         ref_complete_anchor = get_default_complete_anchor_date(conn, location_id=CANONICAL_LOCATION_ID)
         min_obs_d, _, row_cnt = get_observations_bounds(conn, location_id=loc_id)
         valid_min_iso = min_obs_d or "2001-01-01"
@@ -497,7 +573,7 @@ def get_observations(
         if start_date is not None:
             start_dt = _parse_iso_date_param(start_date, "start_date")
         else:
-            start_dt = max(valid_min_dt, end_dt - timedelta(days=89))
+            start_dt = max(valid_min_dt, end_dt - timedelta(days=max(1, _DEFAULT_QUERY_DAYS) - 1))
 
         if start_dt > end_dt:
             raise _api_error(
@@ -550,6 +626,9 @@ def get_observations(
                 "finality_mode": str(cutoffs.get("finality_mode") or "provisional_window_fallback"),
                 "finality_cutoff_date": cutoffs.get("finality_cutoff_date"),
                 "finality_rule": str(cutoffs.get("finality_rule") or ""),
+                "last_scan_date": cutoffs.get("last_scan_date"),
+                "probe_date": cutoffs.get("probe_date"),
+                "probe_timestamp_utc": cutoffs.get("probe_timestamp_utc"),
                 "series": [],
                 "forecast_overlay": [],
                 "forecast_overlay_anchor_date": ref_complete_anchor,
@@ -631,6 +710,9 @@ def get_observations(
         "finality_mode": series_res["finality_mode"],
         "finality_cutoff_date": series_res["finality_cutoff_date"],
         "finality_rule": series_res["finality_rule"],
+        "last_scan_date": series_res.get("last_scan_date"),
+        "probe_date": series_res.get("probe_date"),
+        "probe_timestamp_utc": series_res.get("probe_timestamp_utc"),
         "series": series_res["series"],
         "forecast_overlay": overlay,
         "forecast_overlay_anchor_date": ref_complete_anchor,
@@ -646,7 +728,7 @@ def get_observations(
 )
 def get_health():
     """Health check endpoint reporting model readiness, active Two-DB role, anchor range, and group latency."""
-    db_path, db_role = _resolve_active_db_info()
+    conn, cache_id, db_role = _open_active_store_conn(read_only=True)
     default_anchor: Optional[str] = None
     data_snapshot_date: Optional[str] = None
     scan_window_start: Optional[str] = None
@@ -657,28 +739,54 @@ def get_health():
     anchor_range: Optional[Dict[str, str]] = None
     data_latency: Optional[Dict[str, Any]] = None
     journal_mode: Optional[str] = None
-    if db_path is not None and db_path.exists():
+    if conn is not None:
         try:
-            conn = connect_sqlite(db_path, read_only=True)
             try:
-                default_anchor = get_default_complete_anchor_date(conn, location_id=CANONICAL_LOCATION_ID)
-                data_snapshot_date = get_data_snapshot_date(conn, location_id=CANONICAL_LOCATION_ID)
-                anchor_range = get_complete_anchor_range(conn, location_id=CANONICAL_LOCATION_ID, window_days=35)
-                data_latency = get_latest_ingest_latency(conn, location_id=CANONICAL_LOCATION_ID)
-                if isinstance(data_latency, dict):
-                    scan_window_start = data_latency.get("scan_window_start")
-                    scan_window_end = data_latency.get("scan_window_end")
-                    scan_window_total_days = data_latency.get("scan_window_total_days")
-                    meteo_last_valid = (data_latency.get("groups") or {}).get("METEO_GEOSIT", {}).get("last_valid_date")
-                else:
-                    meteo_last_valid = None
-                latest_precip_obs_date, latest_partial_obs_explanation = get_latest_precip_and_partial_explanation(
-                    conn,
-                    location_id=CANONICAL_LOCATION_ID,
-                    meteo_last_valid_date=meteo_last_valid,
-                )
-                jm_row = conn.execute("PRAGMA journal_mode;").fetchone()
-                journal_mode = str(jm_row[0]).lower() if jm_row else None
+                state_key = get_db_state_cache_key(conn, str(cache_id or db_role))
+
+                def _compute_health_db_stats() -> Dict[str, Any]:
+                    d_anchor = get_default_complete_anchor_date(conn, location_id=CANONICAL_LOCATION_ID)
+                    d_snap = get_data_snapshot_date(conn, location_id=CANONICAL_LOCATION_ID)
+                    a_range = get_complete_anchor_range(conn, location_id=CANONICAL_LOCATION_ID, window_days=35)
+                    lat = get_latest_ingest_latency(conn, location_id=CANONICAL_LOCATION_ID)
+                    s_start = lat.get("scan_window_start") if isinstance(lat, dict) else None
+                    s_end = lat.get("scan_window_end") if isinstance(lat, dict) else None
+                    s_days = lat.get("scan_window_total_days") if isinstance(lat, dict) else None
+                    m_last = (lat.get("groups") or {}).get("METEO_GEOSIT", {}).get("last_valid_date") if isinstance(lat, dict) else None
+                    l_precip, l_expl = get_latest_precip_and_partial_explanation(
+                        conn,
+                        location_id=CANONICAL_LOCATION_ID,
+                        meteo_last_valid_date=m_last,
+                    )
+                    try:
+                        jm_r = conn.execute("PRAGMA journal_mode;").fetchone()
+                        jm = str(jm_r[0]).lower() if jm_r else None
+                    except Exception:
+                        jm = db_role
+                    return {
+                        "default_anchor": d_anchor,
+                        "data_snapshot_date": d_snap,
+                        "anchor_range": a_range,
+                        "data_latency": lat,
+                        "scan_window_start": s_start,
+                        "scan_window_end": s_end,
+                        "scan_window_total_days": s_days,
+                        "latest_precip_obs_date": l_precip,
+                        "latest_partial_obs_explanation": l_expl,
+                        "journal_mode": jm,
+                    }
+
+                h_stats = cached_db_query((state_key, "health"), _compute_health_db_stats)
+                default_anchor = h_stats["default_anchor"]
+                data_snapshot_date = h_stats["data_snapshot_date"]
+                anchor_range = h_stats["anchor_range"]
+                data_latency = h_stats["data_latency"]
+                scan_window_start = h_stats["scan_window_start"]
+                scan_window_end = h_stats["scan_window_end"]
+                scan_window_total_days = h_stats["scan_window_total_days"]
+                latest_precip_obs_date = h_stats["latest_precip_obs_date"]
+                latest_partial_obs_explanation = h_stats["latest_partial_obs_explanation"]
+                journal_mode = h_stats["journal_mode"]
             finally:
                 conn.close()
         except Exception:
@@ -1121,23 +1229,26 @@ def get_scores(
             {"is_prospective": is_prospective},
         )
 
-    db_path, db_role = _resolve_active_db_info()
-    if db_path is None or not db_path.exists():
+    conn, cache_id, db_role = _open_active_store_conn(read_only=True)
+    if conn is None:
         raise _api_error(
             503,
             "SERVER_DB_DATA_ERROR",
-            "[SERVER_DB_DATA_ERROR] No SQLite vintage database available to serve /scores.",
+            "[SERVER_DB_DATA_ERROR] No SQLite or Turso vintage database available to serve /scores.",
         )
 
     sensitivity_out: Dict[str, Any] = {}
     try:
-        conn = connect_sqlite(db_path, read_only=True)
         try:
             try:
-                eval_res, sensitivity_out = _evaluate_scores_with_sensitivity(
-                    conn,
-                    eval_split_regime=eval_split_regime,
-                    is_prospective=is_prospective,
+                state_key = get_db_state_cache_key(conn, str(cache_id or db_role))
+                eval_res, sensitivity_out = cached_db_query(
+                    (state_key, "scores", eval_split_regime, is_prospective),
+                    lambda: _evaluate_scores_with_sensitivity(
+                        conn,
+                        eval_split_regime=eval_split_regime,
+                        is_prospective=is_prospective,
+                    ),
                 )
             except ValueError:
                 eval_res = _empty_scores_payload(eval_split_regime, is_prospective)
@@ -1145,10 +1256,10 @@ def get_scores(
             conn.close()
         if (
             int(eval_res.get("total_scored_rows", 0)) == 0
-            and db_role == "local_or_production_db"
+            and db_role in ("local_or_production_db", "turso_replica", "turso_remote")
             and is_prospective != 1
             and DEFAULT_DEMO_VINTAGE_DB_PATH.exists()
-            and db_path.resolve() != DEFAULT_DEMO_VINTAGE_DB_PATH.resolve()
+            and (cache_id is None or Path(cache_id).resolve() != DEFAULT_DEMO_VINTAGE_DB_PATH.resolve())
         ):
             # Production DB intentionally omits retrospective POST_TEST rows (Round 8 A4);
             # serve the bundled demo ledger truthfully under db_role="bundled_demo_db".
