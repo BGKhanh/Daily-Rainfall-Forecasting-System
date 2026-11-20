@@ -8,7 +8,147 @@ import type {
   ObservationsQueryResponse,
   PredictResponse,
   ProvinceGeoJson,
+  ProvinceGridOverlapData,
 } from "../types/api";
+
+const MOCK_GRID_OVERLAP: ProvinceGridOverlapData = {
+  schema_version: "1.0",
+  generated_at_utc: "2026-11-20T00:00:00Z",
+  earth_radius_km: 6371.0088,
+  unit_count: 2,
+  units: {
+    HCMC: {
+      location_id: "HCMC",
+      display_name: "Ho Chi Minh City",
+      representative_point: { lat: 10.7769, lon: 106.7009 },
+      polygon_area_km2: 2095.5,
+      merra2_grid: {
+        resolution_deg: "0.5x0.625",
+        representative_cell: {
+          cell_id: "MERRA2_201_747",
+          lat_min: 10.75,
+          lat_max: 11.25,
+          lon_min: 106.5625,
+          lon_max: 107.1875,
+          cell_area_km2: 3795.8,
+          cell_height_km: 55.6,
+          cell_width_km: 68.3,
+          intersection_area_km2: 1200.0,
+          pct_of_province_area: 57.27,
+          pct_of_cell_area: 31.5,
+          contains_representative_point: true,
+        },
+        cell_dimensions_km_at_phi: { height_km: 55.6, width_km: 68.3, area_km2: 3795.8 },
+        intersecting_cell_count: 1,
+        pct_sum: 100.0,
+        intersecting_cells: [
+          {
+            cell_id: "MERRA2_201_747",
+            lat_min: 10.75,
+            lat_max: 11.25,
+            lon_min: 106.5625,
+            lon_max: 107.1875,
+            cell_area_km2: 3795.8,
+            cell_height_km: 55.6,
+            cell_width_km: 68.3,
+            intersection_area_km2: 2095.5,
+            pct_of_province_area: 100.0,
+            pct_of_cell_area: 55.21,
+            contains_representative_point: true,
+          },
+        ],
+      },
+      ceres_grid: {
+        resolution_deg: "1.0x1.0",
+        representative_cell: {
+          cell_id: "CERES_10_106",
+          lat_min: 10.0,
+          lat_max: 11.0,
+          lon_min: 106.0,
+          lon_max: 107.0,
+          cell_area_km2: 12145.6,
+          cell_height_km: 111.2,
+          cell_width_km: 109.2,
+          intersection_area_km2: 1900.0,
+          pct_of_province_area: 90.67,
+          pct_of_cell_area: 15.63,
+          contains_representative_point: true,
+        },
+        cell_dimensions_km_at_phi: { height_km: 111.2, width_km: 109.2, area_km2: 12145.6 },
+        intersecting_cell_count: 1,
+        pct_sum: 100.0,
+        intersecting_cells: [
+          {
+            cell_id: "CERES_10_106",
+            lat_min: 10.0,
+            lat_max: 11.0,
+            lon_min: 106.0,
+            lon_max: 107.0,
+            cell_area_km2: 12145.6,
+            cell_height_km: 111.2,
+            cell_width_km: 109.2,
+            intersection_area_km2: 2095.5,
+            pct_of_province_area: 100.0,
+            pct_of_cell_area: 17.25,
+            contains_representative_point: true,
+          },
+        ],
+      },
+    },
+    HANOI: {
+      location_id: "HANOI",
+      display_name: "Ha Noi",
+      representative_point: { lat: 21.0285, lon: 105.8542 },
+      polygon_area_km2: 3358.6,
+      merra2_grid: {
+        resolution_deg: "0.5x0.625",
+        representative_cell: null,
+        cell_dimensions_km_at_phi: { height_km: 55.6, width_km: 64.8, area_km2: 3604.2 },
+        intersecting_cell_count: 1,
+        pct_sum: 100.0,
+        intersecting_cells: [
+          {
+            cell_id: "MERRA2_221_746",
+            lat_min: 20.75,
+            lat_max: 21.25,
+            lon_min: 105.9375,
+            lon_max: 106.5625,
+            cell_area_km2: 3604.2,
+            cell_height_km: 55.6,
+            cell_width_km: 64.8,
+            intersection_area_km2: 3358.6,
+            pct_of_province_area: 100.0,
+            pct_of_cell_area: 93.18,
+            contains_representative_point: true,
+          },
+        ],
+      },
+      ceres_grid: {
+        resolution_deg: "1.0x1.0",
+        representative_cell: null,
+        cell_dimensions_km_at_phi: { height_km: 111.2, width_km: 103.8, area_km2: 11541.5 },
+        intersecting_cell_count: 1,
+        pct_sum: 100.0,
+        intersecting_cells: [
+          {
+            cell_id: "CERES_21_105",
+            lat_min: 21.0,
+            lat_max: 22.0,
+            lon_min: 105.0,
+            lon_max: 106.0,
+            cell_area_km2: 11541.5,
+            cell_height_km: 111.2,
+            cell_width_km: 103.8,
+            intersection_area_km2: 3358.6,
+            pct_of_province_area: 100.0,
+            pct_of_cell_area: 29.1,
+            contains_representative_point: true,
+          },
+        ],
+      },
+    },
+  },
+};
 
 const MOCK_GEOJSON: ProvinceGeoJson = {
   type: "FeatureCollection",
@@ -176,6 +316,9 @@ const MOCK_OBS_DAILY_90D: ObservationsQueryResponse = {
   valid_range: { min_date: "2001-01-01", max_date: "2026-11-19" },
   finality_mode: "source_header_transition",
   finality_cutoff_date: "2026-09-30",
+  last_scan_date: "2026-11-18",
+  probe_date: "2026-11-19",
+  probe_timestamp_utc: "2026-11-19T08:40:00Z",
   finality_rule: "FINALIZED when PRECTOTCORR IS NOT NULL and obs_date <= 2026-09-30.",
   series: [
     ...Array.from({ length: 16 }, (_, idx) => {
@@ -266,6 +409,16 @@ const MOCK_OBS_WEEKLY: ObservationsQueryResponse = {
       status: "FINALIZED",
     },
     {
+      date: "2026-11-09",
+      period_end: "2026-11-15",
+      precip_mm: null,
+      precip_total_mm: 6.4,
+      precip_daily_mean_mm: 3.2,
+      published_days_count: 2,
+      calendar_days_count: 7,
+      status: "PROVISIONAL",
+    },
+    {
       date: "2026-11-16",
       period_end: "2026-11-19",
       precip_mm: null,
@@ -290,6 +443,9 @@ const MOCK_OBS_EMPTY_HANOI: ObservationsQueryResponse = {
   valid_range: { min_date: "2001-01-01", max_date: "2026-11-19" },
   finality_mode: "source_header_transition",
   finality_cutoff_date: "2026-09-30",
+  last_scan_date: "2026-11-18",
+  probe_date: "2026-11-19",
+  probe_timestamp_utc: "2026-11-19T08:40:00Z",
   finality_rule: "FINALIZED when PRECTOTCORR IS NOT NULL and obs_date <= 2026-09-30.",
   series: [],
   forecast_overlay: [],
@@ -329,6 +485,9 @@ function installFetchMock() {
     }
     if (url.includes("/map/vietnam_63_provinces.geojson")) {
       return new Response(JSON.stringify(MOCK_GEOJSON), { status: 200 });
+    }
+    if (url.includes("/map/province_grid_overlap.json")) {
+      return new Response(JSON.stringify(MOCK_GRID_OVERLAP), { status: 200 });
     }
     if (url.startsWith("/observations")) {
       observationCalls.push(url);
@@ -524,6 +683,9 @@ describe("Round 10 English SPA, Single-Model Main, 2-Layer Map & Data Retrieval"
       if (/\bnormalized\b/i.test(content)) {
         violations.push(`${modPath}: contains banned word 'normalized'`);
       }
+      if (/\btelemetry\b/i.test(content)) {
+        violations.push(`${modPath}: contains replaced word 'telemetry'`);
+      }
       if (modPath.endsWith(".tsx")) {
         for (const m of content.match(jsxLiteralTextRe) ?? []) {
           violations.push(`${modPath}: ${m.trim()}`);
@@ -534,5 +696,95 @@ describe("Round 10 English SPA, Single-Model Main, 2-Layer Map & Data Retrieval"
       }
     }
     expect(violations).toEqual([]);
+  });
+
+  it("supports map zoom controls, toggle-to-deselect, X button, Clear selection revert to HCMC, and scrollable 5-row selected table (Part A)", async () => {
+    installFetchMock();
+    render(<App initialGeoJson={MOCK_GEOJSON} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("map-zoom-controls")).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId("map-zoom-level")).toHaveTextContent("1.0×");
+    fireEvent.click(screen.getByRole("button", { name: EN.map.zoomInAria }));
+    expect(screen.getByTestId("map-zoom-level")).toHaveTextContent("1.3×");
+    fireEvent.click(screen.getByRole("button", { name: EN.map.zoomResetLabel }));
+    expect(screen.getByTestId("map-zoom-level")).toHaveTextContent("1.0×");
+
+    const hanoiPoly = document.querySelector('path[data-location-id="HANOI"]');
+    const canThoPoly = document.querySelector('path[data-location-id="CAN_THO"]');
+    expect(hanoiPoly).not.toBeNull();
+    expect(canThoPoly).not.toBeNull();
+
+    // Select Ha Noi -> 2 selected, then click Ha Noi again -> toggles off back to HCMC
+    fireEvent.click(hanoiPoly!);
+    expect(screen.getByTestId("selected-count-badge")).toHaveTextContent("2 selected");
+    fireEvent.click(hanoiPoly!);
+    expect(screen.getByTestId("selected-count-badge")).toHaveTextContent("1 selected");
+
+    // Select Ha Noi + Can Tho -> remove Can Tho via X -> Clear selection reverts to HCMC
+    fireEvent.click(hanoiPoly!);
+    fireEvent.click(canThoPoly!);
+    expect(screen.getByTestId("selected-count-badge")).toHaveTextContent("3 selected");
+    fireEvent.click(screen.getByRole("button", { name: EN.map.deselectBtnLabel("Can Tho") }));
+    expect(screen.getByTestId("selected-count-badge")).toHaveTextContent("2 selected");
+
+    fireEvent.click(screen.getByRole("button", { name: EN.map.clearSelectionBtn }));
+    expect(screen.getByTestId("selected-count-badge")).toHaveTextContent("1 selected");
+    expect(screen.getByTestId("selected-locations-table")).toHaveTextContent("Ho Chi Minh City");
+    expect(document.querySelector(".selected-table-scroll")).not.toBeNull();
+  });
+
+  it("renders Tab 1 GridScalePanel with province selector, MERRA-2 + CERES SVG overlay, overlap %, and 35-var catalog (Part B)", async () => {
+    installFetchMock();
+    render(<App initialGeoJson={MOCK_GEOJSON} initialGridOverlap={MOCK_GRID_OVERLAP} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("grid-scale-svg")).toBeInTheDocument();
+    });
+
+    const svg = screen.getByTestId("grid-scale-svg");
+    expect(svg.querySelectorAll('rect[data-grid-type="merra2"]').length).toBeGreaterThanOrEqual(1);
+    expect(svg.querySelectorAll('rect[data-grid-type="ceres"]').length).toBeGreaterThanOrEqual(1);
+
+    const dropdown = screen.getByLabelText(EN.gridScale.provinceSelectAria);
+    fireEvent.change(dropdown, { target: { value: "HANOI" } });
+    expect(dropdown).toHaveValue("HANOI");
+
+    fireEvent.click(screen.getByLabelText(EN.gridScale.showOverlapToggle));
+    expect(screen.getByTestId("overlap-breakdown-table")).toBeInTheDocument();
+
+    const panel = screen.getByTestId("grid-scale-panel");
+    expect(panel).toHaveTextContent("TOA_SW_DWN");
+    expect(panel.textContent).not.toMatch(/\bCLOUD_AMT\b|\bALB\b/);
+  });
+
+  it("renders Tab 2 Part F probe-aware cutoff, scan date empty slots, weekly partial badge & overlay note, and hides ingest card when empty", async () => {
+    installFetchMock();
+    render(<App initialGeoJson={MOCK_GEOJSON} />);
+
+    fireEvent.click(screen.getByRole("button", { name: EN.tabs.data }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("observations-chart")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("Finalized cutoff: 30 Sep 2026 (probed 19 Nov 2026)")).toBeInTheDocument();
+    expect(screen.getAllByText("Not yet published (as of the 18 Nov 2026 scan)").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByTestId("latest-ingest-footnote")).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/\btelemetry\b/i);
+
+    fireEvent.click(screen.getByRole("button", { name: EN.dataRetrieval.preset2Years }));
+    await waitFor(() => {
+      expect(screen.getAllByText("Partial period (2/7 days)").length).toBeGreaterThanOrEqual(1);
+    });
+    expect(screen.getByText(EN.dataRetrieval.overlayDailyOnlyNote)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(EN.dataRetrieval.locationLabel), { target: { value: "HANOI" } });
+    await waitFor(() => {
+      expect(screen.getByText("No observations have been ingested for this location yet.")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("latest-ingest-footnote")).not.toBeInTheDocument();
   });
 });
