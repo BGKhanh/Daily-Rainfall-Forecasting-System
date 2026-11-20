@@ -66,3 +66,22 @@ python scripts/mlops/run_forecast_ledger.py \
 4. **Chuẩn hóa UTC ISO-8601 & So sánh `julianday()`**: Mọi timestamp ghi vào DB được chuẩn hóa về `YYYY-MM-DDTHH:MM:SS.ffffffZ` qua `normalize_utc_iso()`, và `v_forecast_scores` + `query_observations_as_of()` so sánh qua `julianday(...)` để miễn nhiễm với mọi biến thể chuỗi ISO (`' '`, `'T'`, `'Z'`, `'+07:00'`).
 5. **Mốc Chuyển Nguồn Thực Đo (`audit_probe` trong `ingestion_runs`)**: Thí nghiệm đơn ngày NASA POWER Daily API (`v2.10.4`, chạy `2026-11-19`) xác nhận `header.sources` đổi từ `MERRA2 → GEOSIT` sau **`2026-09-30`** (trễ **50 ngày**) và `SYN1DEG → FLASHFLUX` sau **`2026-08-30`** (trễ **81 ngày**). Script `scripts/audit/probe_nasa_header_sources.py` chèn một dòng `run_type = 'audit_probe'` (bảo toàn khóa 3 nhóm latency + bổ sung `"source_transition_cutoffs"`) để tuân thủ trigger `trg_ingestion_runs_no_update` và phục vụ phân loại `FINALIZED` vs `PROVISIONAL` cho `GET /observations`.
 6. **Khôi phục DB Demo từ Git LFS Fallback**: Trong môi trường CI hoặc khi clone thiếu `git lfs pull`, chạy `python scripts/mlops/ensure_demo_db.py` để phát hiện LFS pointer và tự động tái tạo `demo_rainfall_vintage.db` hợp lệ trước khi chạy test hoặc `docker build`.
+
+---
+
+## 4. Schema Migration `V3.3`, Chế độ Turso (`STORE_BACKEND`) & Pipeline Tự động (Round 11)
+
+1. **DDL `V3.3` & Provenance `config_sha256`**:
+   - Bảng `schema_migrations` (`V3.3`) xác nhận đã thêm cột `config_sha256` cho `ingestion_runs` và `forecasts_ledger` cùng composite index `idx_obs_vintage_loc_date_ingested` trên `(location_id, obs_date, ingested_at_utc, version_num DESC)`.
+   - Các truy vấn API `/observations`, `/health`, `/locations`, `/predict`, `/scores` đẩy bộ lọc ngày trực tiếp xuống bảng gốc thay vì quét toàn bộ view `v_observations_latest`, kết hợp cache trong bộ nhớ theo khóa `(db_identifier, latest_run_id, max_forecast_rowid)`.
+2. **Ba chế độ `STORE_BACKEND` (`src/data/turso_backend.py`)**:
+   - `local` (mặc định trong CI & Docker, không cần token): đọc SQLite local (`rainfall_vintage.db` / `demo_rainfall_vintage.db`).
+   - `turso_replica`: đồng bộ incremental từ Turso về file replica cục bộ (`TURSO_REPLICA_PATH`, mặc định `data/vintage/turso_replica.db`) khi khởi động và theo chu kỳ nền `300s ± 30s` jitter; API đọc từ replica cục bộ với `0` `rows_read` từ xa mỗi request người dùng.
+   - `turso_remote`: truy vấn trực tiếp qua Turso Hrana HTTP v2 (`/v2/pipeline`, ưu tiên `TURSO_READONLY_AUTH_TOKEN` cho kết nối read-only) với batch transaction nguyên tử (`BEGIN IMMEDIATE ... COMMIT / ROLLBACK`).
+   - **Quy tắc Tách hai DB với Turso**: Production DB (`rainfall_vintage.db` — **chỉ chứa quan sát, `forecasts_ledger = 0`**) được đồng bộ lên Turso; Demo DB (`artifacts/models/demo_rainfall_vintage.db` chứa `4,270` dòng hồi cứu) luôn giữ **strictly local**. Chi tiết định lượng xem [`docs/TURSO_COST_AND_OPERATIONS.md`](TURSO_COST_AND_OPERATIONS.md).
+3. **CLI Pipeline Tự động Idempotent (`scripts/mlops/automated_pipeline.py`) & GitHub Actions Cron (`.github/workflows/scheduled_ingest.yml`)**:
+   - `probe-headers`: dò ranh giới `header.sources` theo từng ngày và ghi nhận bản ghi `audit_probe` mới (kèm `config_sha256`).
+   - `ingest-window`: quét cửa sổ NASA POWER (mặc định 210 ngày) bằng giao dịch nguyên tử; ngày trùng hash không tạo bản ghi mới.
+   - `issue-forecasts`: chỉ phát hành dự báo cho ngày neo `COMPLETE_ALL_35` chưa đủ 35 dòng (5 mô hình × 7 ngày); tự động trả trạng thái `SKIPPED` (`no_new_complete_anchor`) khi chưa có ngày neo mới và **không bao giờ chạy `UPDATE` trên `forecasts_ledger`**.
+   - `refresh-cache`: đồng bộ replica (nếu bật), xóa cache cũ, làm ấm `state_key` và gọi webhook làm mới tùy chọn (`CACHE_REFRESH_WEBHOOK_URL`).
+   - Workflow `.github/workflows/scheduled_ingest.yml` chạy vào `20:23 UTC` hằng ngày dưới nhóm khóa `concurrency: ds108-vintage-ingest` (`cancel-in-progress: false`). Lưu ý: theo tài liệu chính thức GitHub Actions, lịch cron hoạt động theo cơ chế best-effort (có thể trễ hoặc bị bỏ qua khi tải cao) và tự động tắt sau 60 ngày repo công khai không có commit mới.

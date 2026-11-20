@@ -2,6 +2,23 @@
 
 All notable canonical reconciliation, MLOps tracking, runtime optimization, and operational limitation updates are recorded in this file.
 
+## [1.5.0-serving / Round 11: 5-Layer Config, Grid-Scale Map UI, Turso Storage & Automated Pipeline] - 2026-11-20
+
+### Added & Changed
+- **5-Layer Configuration Architecture & DDL V3.3 (`config/`, `src/config/settings.py`, `src/data/vintage_store.py`)**:
+  - Added `.env.example`, `config/runtime_config.toml`, `config/training_eda_freeze_v1.toml`, live-probed 35-variable `config/variable_catalog.json` (`scripts/data/probe_variable_grids.py` proving `24` MERRA-2/GEOS-IT + `11` CERES/FLASHFlux grids with `TOA_SW_DWN` present and `CLOUD_AMT`/`ALB` absent), `docs/CONFIG_ARCHITECTURE.md`, and `reports/storage_audit/hardcode_inventory_5layers.json`.
+  - Implemented Pydantic v2 `RuntimeSettings`, `compute_config_sha256()`, fail-fast `verify_model_contract_on_startup()` wired into `predictor.py`/`main.py`, DDL `V3.3` migration (`schema_migrations`, `config_sha256`, `idx_obs_vintage_loc_date_ingested`), and `Dockerfile` `COPY config/ /app/config/`.
+- **Interactive Map Zoom, Spherical Grid-Scale Alignment & Part F Scan Fidelity (`src/data/grid_overlap.py`, `frontend/`)**:
+  - Computed exact spherical polygon overlaps across all 65 Vietnam units (`frontend/public/map/province_grid_overlap.json`).
+  - Added interactive zoom/pan (`1.0×`–`6.0×`), toggle-to-deselect, `×` clear controls, and 5-row sticky scrollable `Selected locations` table (`VietnamMap.tsx`).
+  - Added `GridScalePanel.tsx` comparing true geographic province boundaries against `0.5° × 0.625°` MERRA-2 and `1.0° × 1.0°` CERES cells, `cos(φ)` dimensions, overlap % breakdown, source transition timeline, and 35-variable catalog.
+  - Enforced strict post-probe `FINALIZED` checks, surfaced `last_scan_date`/`probe_date`/`probe_timestamp_utc` on `GET /observations` (`docs/openapi_snapshot.json`), added `mobile-obs-cards`, partial-period badges, Daily-only overlay notice, empty-state footnote hiding, and replaced `"telemetry"` across UI copy.
+- **Turso Storage Backend, Index-First Rewrites & Cost Model (`src/data/turso_backend.py`, `src/data/provider.py`, `scripts/mlops/verify_turso_parity_and_costs.py`)**:
+  - Added `STORE_BACKEND` (`"local"`, `"turso_replica"`, `"turso_remote"`), Hrana v2 client with `TURSO_READONLY_AUTH_TOKEN` & atomic multi-statement transactions, `300s ± 30s` replica background sync in `main.py` lifespan, index-first CTE range pushdowns, and `run_id`-keyed in-process query caching.
+  - Migrated Production DB (observations-only, `forecasts_ledger = 0`) to Turso while keeping Demo DB strictly local; documented 4-scenario cost modeling in `docs/TURSO_COST_AND_OPERATIONS.md` & `reports/storage_audit/turso_parity_and_cost_report.json`.
+- **Idempotent Scheduled Automation (`scripts/mlops/automated_pipeline.py`, `.github/workflows/scheduled_ingest.yml`)**:
+  - Implemented `probe-headers`, `ingest-window`, `issue-forecasts` (stamps `config_sha256`, `SKIPPED` when no new complete anchor exists, zero `UPDATE`s), and `refresh-cache`, orchestrated daily at `20:23 UTC` with GitHub Actions `concurrency` locking.
+
 ## [1.4.0-serving / Round 10 Source Cutoffs, GET /observations, Single-Model UI & Dual-Layer Map] - 2026-11-19
 
 ### Added & Changed

@@ -67,11 +67,14 @@ Rainfall predictability naturally decreases with longer lead times:
   - `@serving` **`SC-35`**: `XGBRegressor` (`objective="reg:tweedie"`, `tweedie_variance_power=1.5`, `max_depth=5`, `n_estimators=100`, `learning_rate=0.03`).
   - `@shadow_val_champ` **`SC-30`**: `LGBMRegressor` (`objective="tweedie"`, `tweedie_variance_power=1.5`, Config A `max_depth=-1`, `num_leaves=31`, `n_estimators=100`, `learning_rate=0.03`).
   - `@shadow_test_contender` **`SC-31`**: `LGBMRegressor` (`objective="tweedie"`, `tweedie_variance_power=1.5`, Config A `max_depth=-1`, `num_leaves=31`, `n_estimators=100`, `learning_rate=0.03`).
-- **Two-DB Convention & API Contract (`/`, `/health`, `/locations`, `/observations`, `/models`, `/predict`, `/scores`, `/benchmark/leaderboard`)**:
-  - **Bundled Demo DB** (`artifacts/models/demo_rainfall_vintage.db`, tracked via Git LFS `.gitattributes` with automated rebuild fallback `scripts/mlops/ensure_demo_db.py`): Baked into `kgb0630/ds_108:1.4.0-serving` (`journal_mode=DELETE`) for reproducible CI, 2,184-origin Test parity, `/observations`, and UI showcase.
-  - **Production / Live DB** (`data/vintage/rainfall_vintage.db` or `$VINTAGE_DB_PATH`): Kept outside the container cleanly with **observations only (`forecasts_ledger = 0`)**. See [`docs/RUNBOOK_STORAGE.md`](docs/RUNBOOK_STORAGE.md) and [`docs/openapi_snapshot.json`](docs/openapi_snapshot.json).
-- **Web Dashboard UI (`frontend/`, Vite + React + TypeScript)**:
-  - Multi-stage Docker builds the SPA static bundle (`frontend/dist`) and FastAPI mounts it at `/` (zero Node.js in Stage 2). Features a single-model (`@serving`) line-chart forecast view, an independent dual-layer `Province boundaries` + `Grid cells` Vietnam map (65 pre-merger units), a real `Data retrieval` archive explorer (`GET /observations`), and `System limitations` with full `Spatial representativeness` citations.
+- **5-Layer Configuration & Startup Contract Guard (`config/`, `src/config/settings.py`)**:
+  - Clean separation of Layer 1 runtime secrets (`.env`, never hashed), Layer 2 operational config (`config/runtime_config.toml`), Layer 3 application thresholds (`config/runtime_config.toml`), Layer 4 model contract (`artifacts/models/metadata.json["model_contract"]` + 35-variable `config/variable_catalog.json` verified across MERRA-2 `0.5° × 0.625°` and CERES/FLASHFlux `1.0° × 1.0°` grids including `TOA_SW_DWN`), and Layer 5 frozen EDA/modeling settings (`config/training_eda_freeze_v1.toml`). FastAPI startup raises `RuntimeError("[MODEL_CONTRACT_MISMATCH]")` on any artifact/schema divergence. See [`docs/CONFIG_ARCHITECTURE.md`](docs/CONFIG_ARCHITECTURE.md).
+- **Two-DB Convention, Turso Store Modes (`STORE_BACKEND`) & API Contract (`/`, `/health`, `/locations`, `/observations`, `/models`, `/predict`, `/scores`, `/benchmark/leaderboard`)**:
+  - **Bundled Demo DB** (`artifacts/models/demo_rainfall_vintage.db`, tracked via Git LFS `.gitattributes` with automated rebuild fallback `scripts/mlops/ensure_demo_db.py`): Baked into `kgb0630/ds_108:1.5.0-serving` (`journal_mode=DELETE`) for reproducible CI, 2,184-origin Test parity, `/observations`, and UI showcase (kept strictly local).
+  - **Production / Live DB** (`data/vintage/rainfall_vintage.db` locally or hosted via Turso with **observations only, `forecasts_ledger = 0`**): Selectable via `STORE_BACKEND` in `{"local", "turso_replica", "turso_remote"}` (zero-token `"local"` default). DDL `V3.3` adds `schema_migrations`, `config_sha256` provenance, and `idx_obs_vintage_loc_date_ingested`; index-first range pushdowns and `run_id`-keyed in-memory caching eliminate full-view scans. See [`docs/RUNBOOK_STORAGE.md`](docs/RUNBOOK_STORAGE.md), [`docs/TURSO_COST_AND_OPERATIONS.md`](docs/TURSO_COST_AND_OPERATIONS.md), and [`docs/openapi_snapshot.json`](docs/openapi_snapshot.json).
+- **Web Dashboard UI & Automated Scheduled Pipeline (`frontend/`, `scripts/mlops/automated_pipeline.py`, `.github/workflows/scheduled_ingest.yml`)**:
+  - Multi-stage Docker builds the SPA static bundle (`frontend/dist`) and FastAPI mounts it at `/` (zero Node.js in Stage 2). Features a single-model (`@serving`) line-chart forecast view, interactive zoom/pan 2-layer Vietnam map (65 pre-merger units), spherical polygon-vs-grid overlap inspector (`src/data/grid_overlap.py`, `GridScalePanel.tsx`), probe-aware `Data retrieval` archive explorer (`GET /observations`), and idempotent daily ingestion/issuance CLI (`probe-headers`, `ingest-window`, `issue-forecasts`, `refresh-cache`).
+  - **Automated Yet Still Retrospective (`is_prospective = 0`) & Immutable Forecast Issuance**: Even with daily scheduled GitHub Actions ingestion, CERES SYN1deg radiation lags real time by ~`80–81` days (`2026-08-30` vs. `2026-11-20`); any newly complete anchor issued once CERES publishes stays retrospective (`is_prospective = 0`) because `obs_first_ingested_at_utc` precedes or accompanies the late CERES completion. `issue-forecasts` performs **zero `UPDATE`s** on `forecasts_ledger` — it appends rows only for newly complete anchors and logs `SKIPPED` otherwise. Scheduled runs (`cron: "23 20 * * *"`, `concurrency: ds108-vintage-ingest`) are subject to official GitHub Actions scheduler constraints: best-effort cron delays during peak load and automatic workflow disabling after `60` consecutive days with no repository commits ([GitHub Docs: Events Triggering Workflows](https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/events-that-trigger-workflows#schedule), [Disabling and Enabling Workflows](https://docs.github.com/en/actions/managing-workflow-runs-and-deployments/managing-workflow-runs/disabling-and-enabling-a-workflow), accessed `2026-11-20`).
   - **Cloud Deployment Note**: Cloud hosting deployment (e.g., AWS) is deferred; no cloud hosting latency or platform sizing claims are published until benchmarked live.
 - **Evaluation Scope & Live NRT Disclaimer**:
   - Evaluation metrics are computed strictly on completed NASA POWER MERRA-2 and CERES SYN1deg observations; autonomous real-time (live NRT) forecasting is not supported in this release due to ~78-day CERES latency and observed interior radiation dropouts such as `2026-11-06` in FLASHFlux.
@@ -164,10 +167,11 @@ DS108_project/
 │   │   ├── sc31_lightgbm_tweedie_f3.joblib # Shadow test contender
 │   │   └── metadata.json              # Frozen hyperparameters & cryptographic SHA-256 hashes
 │   └── feature_names.json             # Audited canonical feature lists (F0..F3, 70 features)
+├── config/                            # Layer 2-5 TOML & probed 35-var catalog (runtime, freeze, variable_catalog.json)
 ├── src/
-│   ├── api/                           # FastAPI Serving Application (main.py)
+│   ├── api/                           # FastAPI Serving Application (main.py, schemas.py)
 │   ├── inference/                     # Standalone Serving Predictor & Pyfunc Wrapper
-│   │   ├── predictor.py               # StandaloneRainfallPredictor (dynamic lag & horizons)
+│   │   ├── predictor.py               # StandaloneRainfallPredictor (startup contract guard, dynamic lag & horizons)
 │   │   └── pyfunc.py                  # MLflow custom pyfunc wrapper (DagsHub Cloud ready)
 │   ├── models/                        # Model definitions & champion factories
 │   │   ├── tweedie.py                 # XGBoost & LightGBM Tweedie regressors
@@ -175,10 +179,10 @@ DS108_project/
 │   │   ├── hurdle.py                  # Two-Stage Hurdle forecasters
 │   │   └── nixtla/                    # Adapters for StatsForecast & NeuralForecast
 │   ├── feature_engineering/           # Feature engineering pipelines (FeatureBuilder F0..F3)
-│   ├── data/                          # Data crawler, validation audits, canonical loader
+│   ├── data/                          # Data crawler, DDL V3.3 SQLite/Turso store, spherical grid overlap, loader
 │   ├── evaluation/                    # Metrics (MAE, RMSE, MASE) & benchmark protocols
 │   ├── analysis/                      # Statistical diagnostics, ranking, Pareto frontiers
-│   ├── config/                        # Constants, Vietnam coordinates & DagsHub MLOps config (mlops.py)
+│   ├── config/                        # Constants, 5-layer settings.py validator, clock & DagsHub MLOps config
 │   └── utils/                         # Reproducibility seeds and helpers
 ├── scripts/
 │   ├── benchmarks/                    # 72 canonical scenario runners (Phase 1-5 & Test Stage 3)
@@ -192,7 +196,9 @@ DS108_project/
 │   │   ├── compare_rainy_season_grid.py # 21-day rainy season grid equivalence test
 │   │   ├── compare_sc30_configs.py     # Config A vs Config B audit
 │   │   └── run_radiation_ablation.py   # Radiation latency impact study
-│   ├── mlops/                         # Cloud MLflow sync, packaging & governance tools
+│   ├── mlops/                         # Cloud MLflow, Turso parity/cost verification & automated pipeline CLI
+│   │   ├── automated_pipeline.py       # Idempotent probe/ingest/issue-forecasts/refresh-cache CLI
+│   │   ├── verify_turso_parity_and_costs.py # Live Turso parity, 2.0x cost modeling & prod migration
 │   │   ├── backfill_mlflow_tracking.py # Backfill 76 runs & register models to DagsHub Cloud
 │   │   ├── verify_mlflow_registry.py   # End-to-end verification from DagsHub Model Registry
 │   │   ├── promote_champion_model.py   # Cloud governance CLI (--status / --promote-scenario)
