@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "HCMC Daily Rainfall Forecasting Serving Engine",
-    "description": "Operational API for 7-day multi-horizon daily rainfall forecasting locked to HCMC with locked OpenAPI schemas, Two-DB SQLite DDL V3.2 governance, and shadow model telemetry.",
+    "description": "Operational API for 7-day multi-horizon daily rainfall forecasting locked to HCMC with locked OpenAPI schemas, Two-DB SQLite DDL V3.3 governance, and shadow model monitoring.",
     "version": "1.2.0"
   },
   "paths": {
@@ -236,7 +236,7 @@
             }
           },
           "400": {
-            "description": "Bad Request — Client-supplied `request.history` payload violates business or physical rules (<30 continuous days, calendar date gap, NaN/-999.0 sentinel, physical bound violation, or stale radiation lag).",
+            "description": "Bad Request \u2014 Client-supplied `request.history` payload violates business or physical rules (<30 continuous days, calendar date gap, NaN/-999.0 sentinel, physical bound violation, or stale radiation lag).",
             "content": {
               "application/json": {
                 "schema": {
@@ -246,7 +246,7 @@
             }
           },
           "422": {
-            "description": "Unprocessable Entity — Invalid JSON/Pydantic schema types, unsupported `location_id`/`province` outside Ho Chi Minh City, OR `anchor_date` missing/violating `COMPLETE_ALL_35` radiation completeness.",
+            "description": "Unprocessable Entity \u2014 Invalid JSON/Pydantic schema types, unsupported `location_id`/`province` outside Ho Chi Minh City, OR `anchor_date` missing/violating `COMPLETE_ALL_35` radiation completeness.",
             "content": {
               "application/json": {
                 "schema": {
@@ -256,7 +256,7 @@
             }
           },
           "503": {
-            "description": "Service Unavailable — Predictor not initialized, OR server-side DB/history provider failed or returned incomplete/NaN meteorological records when `request.history` is omitted.",
+            "description": "Service Unavailable \u2014 Predictor not initialized, OR server-side DB/history provider failed or returned incomplete/NaN meteorological records when `request.history` is omitted.",
             "content": {
               "application/json": {
                 "schema": {
@@ -320,7 +320,7 @@
             }
           },
           "422": {
-            "description": "Unprocessable Entity — Invalid `eval_split_regime` or `is_prospective` query parameter.",
+            "description": "Unprocessable Entity \u2014 Invalid `eval_split_regime` or `is_prospective` query parameter.",
             "content": {
               "application/json": {
                 "schema": {
@@ -330,7 +330,7 @@
             }
           },
           "503": {
-            "description": "Service Unavailable — SQLite vintage database unavailable or corrupted.",
+            "description": "Service Unavailable \u2014 SQLite vintage database unavailable or corrupted.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1504,6 +1504,39 @@
           "finality_rule": {
             "type": "string",
             "title": "Finality Rule"
+          },
+          "last_scan_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Scan Date"
+          },
+          "probe_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Probe Date"
+          },
+          "probe_timestamp_utc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Probe Timestamp Utc"
           },
           "series": {
             "items": {
