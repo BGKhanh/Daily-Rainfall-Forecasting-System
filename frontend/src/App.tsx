@@ -6,6 +6,7 @@ import {
   fetchLocations,
   fetchObservations,
   fetchPredictByAnchor,
+  fetchProvinceGridOverlap,
   fetchVietnamGeoJson,
 } from "./api/client";
 import { AboutLimitationsSection } from "./components/AboutLimitationsSection";
@@ -19,10 +20,12 @@ import type {
   ObservationSeriesPoint,
   PredictResponse,
   ProvinceGeoJson,
+  ProvinceGridOverlapData,
 } from "./types/api";
 
 interface AppProps {
   initialGeoJson?: ProvinceGeoJson;
+  initialGridOverlap?: ProvinceGridOverlapData;
 }
 
 const NAV_ORDER: NavTabId[] = ["forecast", "data", "governance"];
@@ -33,7 +36,7 @@ function isoMinusDays(iso: string, days: number): string {
   return new Date(dt.getTime() - days * 86400000).toISOString().slice(0, 10);
 }
 
-export const App: React.FC<AppProps> = ({ initialGeoJson }) => {
+export const App: React.FC<AppProps> = ({ initialGeoJson, initialGridOverlap }) => {
   const [activeTab, setActiveTab] = useState<NavTabId>("forecast");
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
 
@@ -42,6 +45,7 @@ export const App: React.FC<AppProps> = ({ initialGeoJson }) => {
   const [selectedLocationIds, setSelectedLocationIds] = useState<string[]>(["HCMC"]);
   const [focusedLocationId, setFocusedLocationId] = useState<string>("HCMC");
   const [geoJson, setGeoJson] = useState<ProvinceGeoJson | null>(initialGeoJson ?? null);
+  const [gridOverlap, setGridOverlap] = useState<ProvinceGridOverlapData | null>(initialGridOverlap ?? null);
   const [mapError, setMapError] = useState<string | null>(null);
 
   const [prediction, setPrediction] = useState<PredictResponse | null>(null);
@@ -92,6 +96,17 @@ export const App: React.FC<AppProps> = ({ initialGeoJson }) => {
         });
     }
 
+    if (!initialGridOverlap) {
+      fetchProvinceGridOverlap()
+        .then((ov) => {
+          if (!active) return;
+          setGridOverlap(ov);
+        })
+        .catch(() => {
+          // Safe non-fatal fallback if test mock omits overlap JSON
+        });
+    }
+
     async function bootstrap() {
       try {
         const [healthData, locsData] = await Promise.all([fetchHealth(), fetchLocations()]);
@@ -124,24 +139,55 @@ export const App: React.FC<AppProps> = ({ initialGeoJson }) => {
       predictSeqRef.current += 1;
       window.clearTimeout(coldTimer);
     };
-  }, [initialGeoJson]);
+  }, [initialGeoJson, initialGridOverlap]);
 
-  const handleToggleLocation = (locationId: string) => {
-    setFocusedLocationId(locationId);
-    setSelectedLocationIds((prev) =>
-      prev.includes(locationId) ? prev : [...prev, locationId]
-    );
-    const activeLoc = locations.find((l) => l.location_id === locationId && l.is_active);
+  const getDefaultLocId = () => locations.find((l) => l.is_active)?.location_id ?? "HCMC";
+
+  const applySelectionChange = (nextIds: string[], nextFocusedId: string) => {
+    setSelectedLocationIds(nextIds);
+    setFocusedLocationId(nextFocusedId);
+    const activeLoc = locations.find((l) => l.location_id === nextFocusedId && l.is_active);
     if (activeLoc) {
-      void loadPrediction(locationId, health?.default_complete_anchor_date ?? undefined);
+      void loadPrediction(nextFocusedId, health?.default_complete_anchor_date ?? undefined);
     }
   };
 
+  const handleToggleLocation = (locationId: string) => {
+    const isAlreadySelected = selectedLocationIds.includes(locationId);
+    if (!isAlreadySelected) {
+      const nextIds = [...selectedLocationIds, locationId];
+      applySelectionChange(nextIds, locationId);
+      return;
+    }
+    const remaining = selectedLocationIds.filter((id) => id !== locationId);
+    if (remaining.length === 0) {
+      const defLoc = getDefaultLocId();
+      applySelectionChange([defLoc], defLoc);
+      return;
+    }
+    const nextFocus = focusedLocationId === locationId ? remaining[remaining.length - 1] : focusedLocationId;
+    applySelectionChange(remaining, nextFocus);
+  };
+
+  const handleRemoveLocation = (locationId: string) => {
+    const remaining = selectedLocationIds.filter((id) => id !== locationId);
+    if (remaining.length === 0) {
+      const defLoc = getDefaultLocId();
+      applySelectionChange([defLoc], defLoc);
+      return;
+    }
+    const nextFocus = focusedLocationId === locationId ? remaining[remaining.length - 1] : focusedLocationId;
+    applySelectionChange(remaining, nextFocus);
+  };
+
+  const handleClearSelection = () => {
+    const defLoc = getDefaultLocId();
+    applySelectionChange([defLoc], defLoc);
+  };
+
   const handleResetSelection = () => {
-    const defaultLoc = locations.find((l) => l.is_active)?.location_id ?? "HCMC";
-    setSelectedLocationIds([defaultLoc]);
-    setFocusedLocationId(defaultLoc);
-    void loadPrediction(defaultLoc, health?.default_complete_anchor_date ?? undefined);
+    const defLoc = getDefaultLocId();
+    applySelectionChange([defLoc], defLoc);
   };
 
   const handleTogglePrior14d = async (enabled: boolean) => {
@@ -270,8 +316,11 @@ export const App: React.FC<AppProps> = ({ initialGeoJson }) => {
               selectedLocationIds={selectedLocationIds}
               focusedLocationId={focusedLocationId}
               onToggleLocation={handleToggleLocation}
+              onRemoveLocation={handleRemoveLocation}
+              onClearSelection={handleClearSelection}
               onResetSelection={handleResetSelection}
               geoJson={geoJson}
+              gridOverlap={gridOverlap}
               mapError={mapError}
               prediction={prediction}
               loading={predictLoading}

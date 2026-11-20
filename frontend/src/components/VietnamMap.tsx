@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { EN, stripDiacriticsForSearch } from "../i18n/en";
 import type { LocationItem, ProvinceFeature, ProvinceGeoJson } from "../types/api";
 
@@ -9,8 +9,13 @@ interface VietnamMapProps {
   selectedLocationIds: string[];
   focusedLocationId: string;
   onToggleLocation: (locationId: string) => void;
+  onRemoveLocation?: (locationId: string) => void;
+  onClearSelection?: () => void;
   onResetSelection: () => void;
 }
+
+const MIN_ZOOM = 1.0;
+const MAX_ZOOM = 6.0;
 
 const LON_MIN = 101.8;
 const LON_MAX = 117.3;
@@ -158,12 +163,53 @@ export const VietnamMap: React.FC<VietnamMapProps> = ({
   selectedLocationIds,
   focusedLocationId,
   onToggleLocation,
+  onRemoveLocation,
+  onClearSelection,
   onResetSelection,
 }) => {
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [hoveredFeature, setHoveredFeature] = useState<ProvinceFeature | null>(null);
   const [showBoundaries, setShowBoundaries] = useState<boolean>(true);
   const [showGridCells, setShowGridCells] = useState<boolean>(true);
+  const [zoom, setZoom] = useState<number>(1.0);
+  const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const dragRef = useRef<{ active: boolean; lastX: number; lastY: number; moved: boolean }>({
+    active: false,
+    lastX: 0,
+    lastY: 0,
+    moved: false,
+  });
+  const pinchDistRef = useRef<number | null>(null);
+
+  const clampZoom = (z: number) => Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Number(z.toFixed(2))));
+
+  const clampPan = (px: number, py: number, z: number) => {
+    if (z <= 1.0) return { x: 0, y: 0 };
+    const maxPanX = (SVG_W * (z - 1)) / 2;
+    const maxPanY = (SVG_H * (z - 1)) / 2;
+    return {
+      x: Math.max(-maxPanX, Math.min(maxPanX, px)),
+      y: Math.max(-maxPanY, Math.min(maxPanY, py)),
+    };
+  };
+
+  const applyZoomFactor = (factor: number) => {
+    setZoom((prevZ) => {
+      const nextZ = clampZoom(prevZ * factor);
+      setPan((prevPan) => clampPan(prevPan.x, prevPan.y, nextZ));
+      return nextZ;
+    });
+  };
+
+  const resetView = () => {
+    setZoom(1.0);
+    setPan({ x: 0, y: 0 });
+  };
+
+  const handleResetAll = () => {
+    resetView();
+    onResetSelection();
+  };
 
   const activeLocationsById = useMemo(() => {
     const map = new Map<string, LocationItem>();
@@ -242,8 +288,8 @@ export const VietnamMap: React.FC<VietnamMapProps> = ({
             />
             <span>{EN.map.toggleGridCells}</span>
           </label>
-          {selectedLocationIds.length > 1 || focusedLocationId !== "HCMC" ? (
-            <button type="button" className="btn-chip" onClick={onResetSelection}>
+          {selectedLocationIds.length > 1 || focusedLocationId !== "HCMC" || zoom > 1.0 ? (
+            <button type="button" className="btn-chip" onClick={handleResetAll}>
               {EN.map.resetSelectionBtn}
             </button>
           ) : null}
@@ -257,111 +303,218 @@ export const VietnamMap: React.FC<VietnamMapProps> = ({
           ) : !geoJson ? (
             <div className="empty-box">{EN.map.loadingMap}</div>
           ) : (
-            <div className="map-svg-wrap">
+            <div
+              className="map-svg-wrap"
+              tabIndex={0}
+              onWheel={(e) => {
+                if (e.ctrlKey || e.metaKey) {
+                  e.preventDefault();
+                  applyZoomFactor(e.deltaY < 0 ? 1.2 : 1 / 1.2);
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.target !== e.currentTarget) return;
+                if (e.key === "+" || e.key === "=") {
+                  e.preventDefault();
+                  applyZoomFactor(1.25);
+                } else if (e.key === "-") {
+                  e.preventDefault();
+                  applyZoomFactor(1 / 1.25);
+                } else if (e.key === "0") {
+                  e.preventDefault();
+                  resetView();
+                } else if (e.key === "ArrowLeft") {
+                  e.preventDefault();
+                  setPan((p) => clampPan(p.x + 28, p.y, zoom));
+                } else if (e.key === "ArrowRight") {
+                  e.preventDefault();
+                  setPan((p) => clampPan(p.x - 28, p.y, zoom));
+                } else if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setPan((p) => clampPan(p.x, p.y + 28, zoom));
+                } else if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setPan((p) => clampPan(p.x, p.y - 28, zoom));
+                }
+              }}
+              onPointerDown={(e) => {
+                if (zoom <= 1.0) return;
+                dragRef.current = { active: true, lastX: e.clientX, lastY: e.clientY, moved: false };
+              }}
+              onPointerMove={(e) => {
+                if (!dragRef.current.active) return;
+                const dx = e.clientX - dragRef.current.lastX;
+                const dy = e.clientY - dragRef.current.lastY;
+                if (Math.abs(dx) > 2 || Math.abs(dy) > 2) dragRef.current.moved = true;
+                dragRef.current.lastX = e.clientX;
+                dragRef.current.lastY = e.clientY;
+                setPan((p) => clampPan(p.x + dx, p.y + dy, zoom));
+              }}
+              onPointerUp={() => {
+                dragRef.current.active = false;
+              }}
+              onTouchMove={(e) => {
+                if (e.touches.length === 2) {
+                  const t0 = e.touches[0];
+                  const t1 = e.touches[1];
+                  const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+                  if (pinchDistRef.current !== null && pinchDistRef.current > 0) {
+                    applyZoomFactor(dist / pinchDistRef.current);
+                  }
+                  pinchDistRef.current = dist;
+                }
+              }}
+              onTouchEnd={() => {
+                pinchDistRef.current = null;
+              }}
+            >
+              <div className="map-zoom-controls" data-testid="map-zoom-controls">
+                <button
+                  type="button"
+                  className="zoom-btn"
+                  aria-label={EN.map.zoomInAria}
+                  onClick={() => applyZoomFactor(1.3)}
+                  disabled={zoom >= MAX_ZOOM}
+                >
+                  {EN.map.zoomInLabel}
+                </button>
+                <button
+                  type="button"
+                  className="zoom-btn"
+                  aria-label={EN.map.zoomOutAria}
+                  onClick={() => applyZoomFactor(1 / 1.3)}
+                  disabled={zoom <= MIN_ZOOM}
+                >
+                  {EN.map.zoomOutLabel}
+                </button>
+                <button
+                  type="button"
+                  className="zoom-btn zoom-btn--reset"
+                  onClick={resetView}
+                  disabled={zoom <= MIN_ZOOM && pan.x === 0 && pan.y === 0}
+                >
+                  {EN.map.zoomResetLabel}
+                </button>
+                <span className="zoom-level-pill" data-testid="map-zoom-level">
+                  {EN.map.zoomLevelText(zoom)}
+                </span>
+              </div>
+
               <svg
                 className="vietnam-svg"
                 viewBox={`0 0 ${SVG_W} ${SVG_H}`}
                 role="img"
                 aria-label={EN.map.svgAriaLabel}
               >
-                {showBoundaries && (
-                  <g data-testid="map-boundaries-layer">
-                    {features.map((feature) => {
-                      const locId = feature.properties.location_id;
-                      const isSupported = activeLocationsById.has(locId);
-                      const isSelected = selectedSet.has(locId);
-                      const isFocused = locId === focusedLocationId;
-                      const statusLabel = isSupported ? EN.map.statusSupported : EN.map.statusUnsupported;
-                      const ariaName = `${feature.properties.display_name}, ${statusLabel}`;
+                <g
+                  data-testid="map-zoom-viewport"
+                  transform={`translate(${(SVG_W / 2 + pan.x).toFixed(2)} ${(SVG_H / 2 + pan.y).toFixed(2)}) scale(${zoom}) translate(${(-SVG_W / 2).toFixed(2)} ${(-SVG_H / 2).toFixed(2)})`}
+                >
+                  {showBoundaries && (
+                    <g data-testid="map-boundaries-layer">
+                      {features.map((feature) => {
+                        const locId = feature.properties.location_id;
+                        const isSupported = activeLocationsById.has(locId);
+                        const isSelected = selectedSet.has(locId);
+                        const isFocused = locId === focusedLocationId;
+                        const statusLabel = isSupported ? EN.map.statusSupported : EN.map.statusUnsupported;
+                        const ariaName = `${feature.properties.display_name}, ${statusLabel}`;
 
-                      return (
-                        <path
-                          key={feature.properties.polygon_code}
-                          d={featureToSvgPath(feature)}
-                          tabIndex={0}
-                          role="button"
-                          aria-label={ariaName}
-                          aria-pressed={isSelected}
-                          data-location-id={locId}
-                          data-supported={isSupported ? "true" : "false"}
-                          className={[
-                            "map-province",
-                            isSupported ? "map-province--supported" : "map-province--unsupported",
-                            isSelected ? "map-province--selected" : "",
-                            isFocused ? "map-province--focused" : "",
-                          ]
-                            .filter(Boolean)
-                            .join(" ")}
-                          onMouseEnter={() => setHoveredFeature(feature)}
-                          onMouseLeave={() =>
-                            setHoveredFeature((prev) =>
-                              prev?.properties.polygon_code === feature.properties.polygon_code ? null : prev
-                            )
-                          }
-                          onFocus={() => setHoveredFeature(feature)}
-                          onClick={() => {
-                            setHoveredFeature(feature);
-                            onToggleLocation(locId);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
+                        return (
+                          <path
+                            key={feature.properties.polygon_code}
+                            d={featureToSvgPath(feature)}
+                            vectorEffect="non-scaling-stroke"
+                            tabIndex={0}
+                            role="button"
+                            aria-label={ariaName}
+                            aria-pressed={isSelected}
+                            data-location-id={locId}
+                            data-supported={isSupported ? "true" : "false"}
+                            className={[
+                              "map-province",
+                              isSupported ? "map-province--supported" : "map-province--unsupported",
+                              isSelected ? "map-province--selected" : "",
+                              isFocused ? "map-province--focused" : "",
+                            ]
+                              .filter(Boolean)
+                              .join(" ")}
+                            onMouseEnter={() => setHoveredFeature(feature)}
+                            onMouseLeave={() =>
+                              setHoveredFeature((prev) =>
+                                prev?.properties.polygon_code === feature.properties.polygon_code ? null : prev
+                              )
+                            }
+                            onFocus={() => setHoveredFeature(feature)}
+                            onClick={() => {
+                              if (dragRef.current.moved) {
+                                dragRef.current.moved = false;
+                                return;
+                              }
                               setHoveredFeature(feature);
                               onToggleLocation(locId);
-                            }
-                          }}
-                        >
-                          <title>{ariaName}</title>
-                        </path>
-                      );
-                    })}
-                  </g>
-                )}
-
-                {showGridCells && (
-                  <g data-testid="map-grid-layer" className="map-grid-layer">
-                    {MERRA2_LATTICE.map((cell) => {
-                      const [x1, y1] = projectCoord(cell.lonMin, cell.latMax);
-                      const [x2, y2] = projectCoord(cell.lonMax, cell.latMin);
-                      const isHighlighted = highlightedCellKeys.has(cell.key);
-                      const isModelCell = cell.key === HCMC_CELL_KEY;
-                      return (
-                        <rect
-                          key={cell.key}
-                          x={x1}
-                          y={y1}
-                          width={Math.max(1, Number((x2 - x1).toFixed(2)))}
-                          height={Math.max(1, Number((y2 - y1).toFixed(2)))}
-                          data-grid-highlighted={isHighlighted ? "true" : "false"}
-                          className={[
-                            "map-grid-lattice-cell",
-                            isHighlighted ? "map-grid-lattice-cell--active" : "",
-                            isModelCell ? "map-grid-lattice-cell--model" : "",
-                          ]
-                            .filter(Boolean)
-                            .join(" ")}
-                        >
-                          {isHighlighted && (
-                            <title>
-                              {`${EN.map.hoverGridHint}: [${cell.latMin.toFixed(2)}N, ${cell.latMax.toFixed(2)}N] x [${cell.lonMin.toFixed(4)}E, ${cell.lonMax.toFixed(4)}E]`}
-                            </title>
-                          )}
-                        </rect>
-                      );
-                    })}
-                  </g>
-                )}
-
-                {activeLocationsList.map((loc) => {
-                  const [mx, my] = projectCoord(loc.longitude, loc.latitude);
-                  return (
-                    <g key={loc.location_id} className="map-marker-group">
-                      <circle cx={mx} cy={my} r={5.5} className="map-marker-halo" />
-                      <circle cx={mx} cy={my} r={3.2} className="map-marker-dot" />
-                      <title>{`${loc.display_name} (${loc.latitude.toFixed(4)}N, ${loc.longitude.toFixed(4)}E)`}</title>
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                setHoveredFeature(feature);
+                                onToggleLocation(locId);
+                              }
+                            }}
+                          >
+                            <title>{ariaName}</title>
+                          </path>
+                        );
+                      })}
                     </g>
-                  );
-                })}
+                  )}
+
+                  {showGridCells && (
+                    <g data-testid="map-grid-layer" className="map-grid-layer">
+                      {MERRA2_LATTICE.map((cell) => {
+                        const [x1, y1] = projectCoord(cell.lonMin, cell.latMax);
+                        const [x2, y2] = projectCoord(cell.lonMax, cell.latMin);
+                        const isHighlighted = highlightedCellKeys.has(cell.key);
+                        const isModelCell = cell.key === HCMC_CELL_KEY;
+                        return (
+                          <rect
+                            key={cell.key}
+                            x={x1}
+                            y={y1}
+                            width={Math.max(1, Number((x2 - x1).toFixed(2)))}
+                            height={Math.max(1, Number((y2 - y1).toFixed(2)))}
+                            vectorEffect="non-scaling-stroke"
+                            data-grid-highlighted={isHighlighted ? "true" : "false"}
+                            className={[
+                              "map-grid-lattice-cell",
+                              isHighlighted ? "map-grid-lattice-cell--active" : "",
+                              isModelCell ? "map-grid-lattice-cell--model" : "",
+                            ]
+                              .filter(Boolean)
+                              .join(" ")}
+                          >
+                            {isHighlighted && (
+                              <title>
+                                {`${EN.map.hoverGridHint}: [${cell.latMin.toFixed(2)}N, ${cell.latMax.toFixed(2)}N] x [${cell.lonMin.toFixed(4)}E, ${cell.lonMax.toFixed(4)}E]`}
+                              </title>
+                            )}
+                          </rect>
+                        );
+                      })}
+                    </g>
+                  )}
+
+                  {activeLocationsList.map((loc) => {
+                    const [mx, my] = projectCoord(loc.longitude, loc.latitude);
+                    return (
+                      <g key={loc.location_id} className="map-marker-group">
+                        <circle cx={mx} cy={my} r={5.5 / zoom} className="map-marker-halo" />
+                        <circle cx={mx} cy={my} r={3.2 / zoom} className="map-marker-dot" />
+                        <title>{`${loc.display_name} (${loc.latitude.toFixed(4)}N, ${loc.longitude.toFixed(4)}E)`}</title>
+                      </g>
+                    );
+                  })}
+                </g>
               </svg>
 
               {hoveredFeature && (
@@ -408,14 +561,31 @@ export const VietnamMap: React.FC<VietnamMapProps> = ({
 
         <div className="map-sidebar-col">
           <div className="selected-locations-box" data-testid="selected-locations-table">
-            <div className="list-caption">{EN.map.selectedTableHeading}</div>
-            <div className="table-scroll">
-              <table className="data-table data-table--compact">
+            <div className="selected-header-row">
+              <div className="selected-title-group">
+                <span className="list-caption">{EN.map.selectedTableHeading}</span>
+                <span className="pill-badge pill-badge--active" data-testid="selected-count-badge">
+                  {EN.map.selectedCountBadge(selectedLocationIds.length)}
+                </span>
+              </div>
+              {onClearSelection && (
+                <button
+                  type="button"
+                  className="btn-chip"
+                  onClick={onClearSelection}
+                >
+                  {EN.map.clearSelectionBtn}
+                </button>
+              )}
+            </div>
+            <div className="selected-table-scroll">
+              <table className="data-table data-table--compact sticky-head-table">
                 <thead>
                   <tr>
                     <th>{EN.map.selectedColLocation}</th>
                     <th>{EN.map.selectedColStatus}</th>
                     <th className="num">{EN.map.selectedColCells}</th>
+                    <th aria-label={EN.map.clearSelectionBtn} />
                   </tr>
                 </thead>
                 <tbody>
@@ -436,6 +606,16 @@ export const VietnamMap: React.FC<VietnamMapProps> = ({
                           </span>
                         </td>
                         <td className="num">{cellCount}</td>
+                        <td className="num">
+                          <button
+                            type="button"
+                            className="deselect-x-btn"
+                            aria-label={EN.map.deselectBtnLabel(disp)}
+                            onClick={() => (onRemoveLocation ? onRemoveLocation(locId) : onToggleLocation(locId))}
+                          >
+                            {EN.map.deselectSymbol}
+                          </button>
+                        </td>
                       </tr>
                     );
                   })}
