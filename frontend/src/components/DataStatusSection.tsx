@@ -495,7 +495,10 @@ export const DataStatusSection: React.FC<DataStatusSectionProps> = ({
               </div>
               <div className="metric-sub">
                 {data.finality_cutoff_date
-                  ? `${EN.dataRetrieval.cutoffLabel}: ${formatReadableDate(data.finality_cutoff_date)}`
+                  ? EN.dataRetrieval.cutoffWithProbe(
+                      formatReadableDate(data.finality_cutoff_date),
+                      data.probe_date ? formatReadableDate(data.probe_date) : null
+                    )
                   : ""}
               </div>
             </div>
@@ -522,15 +525,23 @@ export const DataStatusSection: React.FC<DataStatusSectionProps> = ({
                 <span className="line-swatch line-swatch--provisional" />
                 {EN.dataRetrieval.legendProvisional}
               </span>
-              <span className="legend-item">
-                <span className="line-swatch line-swatch--forecast" />
-                {EN.dataRetrieval.legendForecast}
-              </span>
+              {data.granularity === "daily" && (
+                <span className="legend-item">
+                  <span className="line-swatch line-swatch--forecast" />
+                  {EN.dataRetrieval.legendForecast}
+                </span>
+              )}
               <span className="legend-item">
                 <span className="legend-swatch legend-swatch--gap" />
                 {EN.dataRetrieval.legendNotPublished}
               </span>
             </div>
+
+            {data.granularity !== "daily" && (
+              <div className="info-banner" role="status" data-testid="overlay-daily-only-note">
+                {EN.dataRetrieval.overlayDailyOnlyNote}
+              </div>
+            )}
 
             <div className="chart-wrap">
               <svg
@@ -625,7 +636,7 @@ export const DataStatusSection: React.FC<DataStatusSectionProps> = ({
             </div>
           </div>
 
-          <div className="table-scroll">
+          <div className="table-scroll desktop-obs-table">
             <table className="data-table">
               <thead>
                 <tr>
@@ -639,14 +650,28 @@ export const DataStatusSection: React.FC<DataStatusSectionProps> = ({
               <tbody>
                 {pagedRows.map((row) => {
                   const v = getValue(row);
+                  const scanStr = data.last_scan_date ? formatReadableDate(data.last_scan_date) : null;
+                  const statusText =
+                    row.status === "NOT_PUBLISHED"
+                      ? EN.dataRetrieval.notPublishedAsOf(scanStr)
+                      : EN.dataRetrieval.statusLabels[row.status];
+                  const isPartialPeriod =
+                    data.granularity !== "daily" &&
+                    row.published_days_count > 0 &&
+                    row.published_days_count < row.calendar_days_count;
                   return (
                     <tr key={`${row.date}_${row.period_end}`}>
                       <td title={row.date}>{formatReadableDate(row.date)}</td>
                       <td className="mono">{row.period_end}</td>
                       <td>
                         <span className={`pill-badge pill-badge--${row.status.toLowerCase()}`}>
-                          {EN.dataRetrieval.statusLabels[row.status]}
+                          {statusText}
                         </span>
+                        {isPartialPeriod && (
+                          <span className="pill-badge inline-badge" data-testid="partial-period-badge">
+                            {EN.dataRetrieval.partialPeriodBadge(row.published_days_count, row.calendar_days_count)}
+                          </span>
+                        )}
                       </td>
                       <td className="num">{v !== null ? v.toFixed(2) : EN.forecast.nullValue}</td>
                       <td className="num">{`${row.published_days_count} / ${row.calendar_days_count}`}</td>
@@ -655,6 +680,49 @@ export const DataStatusSection: React.FC<DataStatusSectionProps> = ({
                 })}
               </tbody>
             </table>
+          </div>
+
+          <div className="mobile-obs-cards" data-testid="mobile-obs-cards">
+            {pagedRows.map((row) => {
+              const v = getValue(row);
+              const scanStr = data.last_scan_date ? formatReadableDate(data.last_scan_date) : null;
+              const statusText =
+                row.status === "NOT_PUBLISHED"
+                  ? EN.dataRetrieval.notPublishedAsOf(scanStr)
+                  : EN.dataRetrieval.statusLabels[row.status];
+              const isPartialPeriod =
+                data.granularity !== "daily" &&
+                row.published_days_count > 0 &&
+                row.published_days_count < row.calendar_days_count;
+              return (
+                <article key={`m_${row.date}_${row.period_end}`} className="day-card">
+                  <div className="day-card-header">
+                    <strong>{formatReadableDate(row.date)}</strong>
+                    <span className="day-card-iso">{row.period_end}</span>
+                    <span className={`pill-badge pill-badge--${row.status.toLowerCase()}`}>
+                      {statusText}
+                    </span>
+                  </div>
+                  <dl className="day-card-metrics">
+                    <div>
+                      <dt>{yAxisTitle}</dt>
+                      <dd>{v !== null ? v.toFixed(2) : EN.forecast.nullValue}</dd>
+                    </div>
+                    <div>
+                      <dt>{EN.dataRetrieval.tableHeaders.publishedDays}</dt>
+                      <dd>
+                        {`${row.published_days_count} / ${row.calendar_days_count}`}
+                        {isPartialPeriod && (
+                          <span className="pill-badge inline-badge">
+                            {EN.dataRetrieval.partialPeriodBadge(row.published_days_count, row.calendar_days_count)}
+                          </span>
+                        )}
+                      </dd>
+                    </div>
+                  </dl>
+                </article>
+              );
+            })}
           </div>
 
           <div className="pagination-bar">
@@ -681,8 +749,8 @@ export const DataStatusSection: React.FC<DataStatusSectionProps> = ({
         </>
       ) : null}
 
-      {health && (
-        <div className="subpanel status-footnote-panel">
+      {data && data.has_data && health && (
+        <div className="subpanel status-footnote-panel" data-testid="latest-ingest-footnote">
           <h4>{EN.dataRetrieval.scanWindowHeading}</h4>
           <div className="footnote-metrics">
             <span>

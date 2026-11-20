@@ -260,6 +260,9 @@ export interface ObservationsQueryResponse {
   finality_mode: string;
   finality_cutoff_date: string | null;
   finality_rule: string;
+  last_scan_date?: string | null;
+  probe_date?: string | null;
+  probe_timestamp_utc?: string | null;
   series: ObservationSeriesPoint[];
   forecast_overlay: ForecastOverlayPoint[];
   forecast_overlay_anchor_date?: string | null;
@@ -272,6 +275,77 @@ export interface ObservationsQueryResponse {
     published_days: number;
     calendar_days: number;
   };
+}
+
+export interface OverlapGridCell {
+  cell_id: string;
+  lat_min: number;
+  lat_max: number;
+  lon_min: number;
+  lon_max: number;
+  cell_area_km2: number;
+  cell_height_km: number;
+  cell_width_km: number;
+  intersection_area_km2: number;
+  pct_of_province_area: number;
+  pct_of_cell_area: number;
+  contains_representative_point: boolean;
+}
+
+export interface OverlapGridSection {
+  resolution_deg: string;
+  representative_cell: OverlapGridCell | null;
+  cell_dimensions_km_at_phi: {
+    height_km: number;
+    width_km: number;
+    area_km2: number;
+  };
+  intersecting_cell_count: number;
+  pct_sum: number;
+  intersecting_cells: OverlapGridCell[];
+}
+
+export interface ProvinceOverlapUnit {
+  location_id: string;
+  display_name: string;
+  representative_point: {
+    lat: number;
+    lon: number;
+  };
+  polygon_area_km2: number;
+  merra2_grid: OverlapGridSection;
+  ceres_grid: OverlapGridSection;
+}
+
+export interface ProvinceGridOverlapData {
+  schema_version: string;
+  generated_at_utc: string;
+  earth_radius_km: number;
+  unit_count: number;
+  units: Record<string, ProvinceOverlapUnit>;
+}
+
+export interface VariableCatalogEntry {
+  code: string;
+  label_vi: string;
+  label_en: string;
+  unit: string;
+  group: string;
+  source_finalized: string;
+  source_provisional: string;
+  grid_id: string;
+  grid_resolution_deg: string;
+  required_by_serving_model: boolean;
+  is_queryable_in_ui: boolean;
+  verified_by_probe_date: string;
+}
+
+export interface VariableCatalogData {
+  schema_version: string;
+  verified_by_probe_date: string;
+  probe_window: string;
+  total_variables: number;
+  variables: VariableCatalogEntry[];
 }
 
 export type NavTabId = "forecast" | "data" | "governance";

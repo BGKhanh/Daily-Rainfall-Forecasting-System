@@ -6,6 +6,7 @@ import type {
   ObservationsQueryResponse,
   PredictResponse,
   ProvinceGeoJson,
+  ProvinceGridOverlapData,
 } from "../types/api";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "");
@@ -125,4 +126,8 @@ export async function fetchSameOriginJson<T>(relativePath: string): Promise<T> {
 
 export function fetchVietnamGeoJson(): Promise<ProvinceGeoJson> {
   return fetchSameOriginJson<ProvinceGeoJson>("/map/vietnam_63_provinces.geojson");
+}
+
+export function fetchProvinceGridOverlap(): Promise<ProvinceGridOverlapData> {
+  return fetchSameOriginJson<ProvinceGridOverlapData>("/map/province_grid_overlap.json");
 }

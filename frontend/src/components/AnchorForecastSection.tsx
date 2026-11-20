@@ -7,8 +7,10 @@ import type {
   ObservationSeriesPoint,
   PredictResponse,
   ProvinceGeoJson,
+  ProvinceGridOverlapData,
 } from "../types/api";
 import { VietnamMap } from "./VietnamMap";
+import { GridScalePanel } from "./GridScalePanel";
 import { computeTicksMultiplesOf5 } from "../utils/chart";
 
 interface AnchorForecastSectionProps {
@@ -17,8 +19,11 @@ interface AnchorForecastSectionProps {
   selectedLocationIds: string[];
   focusedLocationId: string;
   onToggleLocation: (locationId: string) => void;
+  onRemoveLocation?: (locationId: string) => void;
+  onClearSelection?: () => void;
   onResetSelection: () => void;
   geoJson: ProvinceGeoJson | null;
+  gridOverlap: ProvinceGridOverlapData | null;
   mapError: string | null;
   prediction: PredictResponse | null;
   loading: boolean;
@@ -59,8 +64,11 @@ export const AnchorForecastSection: React.FC<AnchorForecastSectionProps> = ({
   selectedLocationIds,
   focusedLocationId,
   onToggleLocation,
+  onRemoveLocation,
+  onClearSelection,
   onResetSelection,
   geoJson,
+  gridOverlap,
   mapError,
   prediction,
   loading,
@@ -177,6 +185,8 @@ export const AnchorForecastSection: React.FC<AnchorForecastSectionProps> = ({
         selectedLocationIds={selectedLocationIds}
         focusedLocationId={focusedLocationId}
         onToggleLocation={onToggleLocation}
+        onRemoveLocation={onRemoveLocation}
+        onClearSelection={onClearSelection}
         onResetSelection={onResetSelection}
       />
 
@@ -406,6 +416,12 @@ export const AnchorForecastSection: React.FC<AnchorForecastSectionProps> = ({
           </>
         )}
       </section>
+
+      <GridScalePanel
+        geoJson={geoJson}
+        gridOverlap={gridOverlap}
+        focusedLocationId={focusedLocationId}
+      />
     </div>
   );
 };
