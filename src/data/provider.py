@@ -28,6 +28,7 @@ from typing import Any, Dict, Optional
 import pandas as pd
 
 from src.config.constants import Config
+from src.data.turso_backend import open_store_connection, resolve_store_backend
 from src.data.vintage_store import (
     ALL_35_VARS,
     HCMC_LOCATION_ID,
@@ -105,7 +106,7 @@ class BaseWeatherHistoryAdapter(ABC):
 
 
 class SQLiteVintageHistoryAdapter(BaseWeatherHistoryAdapter):
-    """Reads canonical daily observations directly from DDL V3.2 `v_observations_latest`."""
+    """Reads canonical daily observations using indexed vintage queries (local SQLite or Turso)."""
 
     backend_name = "sqlite"
 
@@ -115,6 +116,7 @@ class SQLiteVintageHistoryAdapter(BaseWeatherHistoryAdapter):
         location_id: str = HCMC_LOCATION_ID,
         db_role: Optional[str] = None,
     ) -> None:
+        self._explicit_db_path = db_path is not None
         resolved_path, inferred_role = resolve_sqlite_db_path_and_role(db_path)
         self.db_path = resolved_path if resolved_path is not None else DEFAULT_VINTAGE_DB_PATH
         self.db_role = db_role or inferred_role
@@ -128,20 +130,37 @@ class SQLiteVintageHistoryAdapter(BaseWeatherHistoryAdapter):
         anchor_date: Optional[str] = None,
     ) -> WeatherHistoryResult:
         del province  # Location is strictly locked to canonical HCMC.
-        if not self.db_path.exists():
-            raise FileNotFoundError(f"SQLite vintage DB not found: {self.db_path}")
+        store_backend = resolve_store_backend()
+        use_turso = not self._explicit_db_path and store_backend in ("turso_replica", "turso_remote")
+        if use_turso:
+            conn, resolved_backend = open_store_connection(read_only=True, backend=store_backend)
+            active_db_role = resolved_backend
+            source_detail = f"{resolved_backend}:turso"
+        else:
+            if not self.db_path.exists():
+                raise FileNotFoundError(f"SQLite vintage DB not found: {self.db_path}")
+            conn = connect_sqlite(self.db_path, read_only=True)
+            active_db_role = self.db_role
+            source_detail = f"sqlite:{self.db_path.name}"
 
-        conn = connect_sqlite(self.db_path, read_only=True)
         try:
-            total_rows = int(
+            avail_rows = int(
                 conn.execute(
-                    "SELECT COUNT(*) FROM v_observations_latest WHERE location_id = ?",
-                    (self.location_id,),
+                    """
+                    SELECT COUNT(*) FROM (
+                        SELECT obs_date
+                        FROM observations_vintage
+                        WHERE location_id = ?
+                        GROUP BY obs_date
+                        LIMIT ?
+                    )
+                    """,
+                    (self.location_id, int(days)),
                 ).fetchone()[0]
             )
-            if total_rows < days:
+            if avail_rows < days:
                 raise RuntimeError(
-                    f"[SERVER_DB_DATA_ERROR] SQLite DB has only {total_rows} row(s), need >= {days} continuous days."
+                    f"[SERVER_DB_DATA_ERROR] Vintage store has only {avail_rows} day(s), need >= {days} continuous days."
                 )
 
             if anchor_date is not None:
@@ -154,10 +173,12 @@ class SQLiteVintageHistoryAdapter(BaseWeatherHistoryAdapter):
                 chosen_anchor = pd.Timestamp(parsed_anchor).strftime("%Y-%m-%d")
                 anchor_row = conn.execute(
                     """
-                    SELECT obs_date, completeness_regime, missing_count, missing_meteo_count,
-                           missing_flashflux_count, missing_ceres_count
-                    FROM v_observations_latest
+                    SELECT obs_date, completeness_regime, missing_count,
+                           missing_meteo_count, missing_flashflux_count, missing_ceres_count
+                    FROM observations_vintage
                     WHERE location_id = ? AND obs_date = ?
+                    ORDER BY version_num DESC
+                    LIMIT 1
                     """,
                     (self.location_id, chosen_anchor),
                 ).fetchone()
@@ -189,7 +210,7 @@ class SQLiteVintageHistoryAdapter(BaseWeatherHistoryAdapter):
                 if chosen_anchor is None:
                     raise RuntimeError(
                         f"[SERVER_DB_DATA_ERROR] No valid COMPLETE_ALL_35 anchor date with continuous 30-day window "
-                        f"found in {self.db_path} (max_date={run_date})."
+                        f"found in {source_detail} (max_date={run_date})."
                     )
                 anchor_regime = "COMPLETE_ALL_35"
 
@@ -198,11 +219,17 @@ class SQLiteVintageHistoryAdapter(BaseWeatherHistoryAdapter):
 
             rows = conn.execute(
                 f"""
-                SELECT obs_date, completeness_regime, {', '.join(ALL_35_VARS)}
-                FROM v_observations_latest
-                WHERE location_id = ?
-                  AND obs_date BETWEEN ? AND ?
-                ORDER BY obs_date ASC
+                SELECT o.obs_date, o.completeness_regime, {', '.join(f'o.{c}' for c in ALL_35_VARS)}
+                FROM observations_vintage o
+                WHERE o.location_id = ?
+                  AND o.obs_date BETWEEN ? AND ?
+                  AND o.version_num = (
+                      SELECT MAX(v2.version_num)
+                      FROM observations_vintage v2
+                      WHERE v2.location_id = o.location_id
+                        AND v2.obs_date = o.obs_date
+                  )
+                ORDER BY o.obs_date ASC
                 """,
                 (self.location_id, win_start, chosen_anchor),
             ).fetchall()
@@ -233,12 +260,18 @@ class SQLiteVintageHistoryAdapter(BaseWeatherHistoryAdapter):
             target_end = (anchor_dt + timedelta(days=7)).strftime("%Y-%m-%d")
             target_rows = conn.execute(
                 """
-                SELECT obs_date, PRECTOTCORR
-                FROM v_observations_latest
-                WHERE location_id = ?
-                  AND obs_date BETWEEN ? AND ?
-                  AND PRECTOTCORR IS NOT NULL
-                ORDER BY obs_date ASC
+                SELECT o.obs_date, o.PRECTOTCORR
+                FROM observations_vintage o
+                WHERE o.location_id = ?
+                  AND o.obs_date BETWEEN ? AND ?
+                  AND o.PRECTOTCORR IS NOT NULL
+                  AND o.version_num = (
+                      SELECT MAX(v2.version_num)
+                      FROM observations_vintage v2
+                      WHERE v2.location_id = o.location_id
+                        AND v2.obs_date = o.obs_date
+                  )
+                ORDER BY o.obs_date ASC
                 """,
                 (self.location_id, target_start, target_end),
             ).fetchall()
@@ -246,7 +279,8 @@ class SQLiteVintageHistoryAdapter(BaseWeatherHistoryAdapter):
         finally:
             conn.close()
 
-        df = pd.DataFrame([dict(r) for r in rows]).drop(columns=["completeness_regime"])
+        row_cols = ["obs_date", "completeness_regime", *ALL_35_VARS]
+        df = pd.DataFrame([dict(zip(row_cols, r)) for r in rows]).drop(columns=["completeness_regime"])
         df = df.rename(columns={"obs_date": "DATE"})
         df["DATE"] = pd.to_datetime(df["DATE"]).dt.normalize()
         en_to_vi = {k: v for k, v in Config.COLUMN_MAPPING.items() if k == "DATE" or k in ALL_35_VARS}
@@ -258,10 +292,10 @@ class SQLiteVintageHistoryAdapter(BaseWeatherHistoryAdapter):
             backend=self.backend_name,
             is_static_sample=False,
             data_as_of=anchor_dt,
-            source_detail=f"sqlite:{self.db_path.name}",
+            source_detail=source_detail,
             observed_precip_by_date=observed_precip,
             anchor_completeness_regime=anchor_regime,
-            db_role=self.db_role,
+            db_role=active_db_role,
         )
 
 
@@ -511,6 +545,10 @@ class WeatherHistoryProvider:
             self.db_role = "sample_csv"
             return LocalWeatherHistoryAdapter(sample_csv_path=self.sample_csv_path)
         if backend == "local":
+            if self.explicit_db_path is None and resolve_store_backend() in ("turso_replica", "turso_remote"):
+                sb = resolve_store_backend()
+                self.db_role = sb
+                return SQLiteVintageHistoryAdapter(db_path=None, db_role=sb)
             if self.sample_csv_path is None and self.db_path is not None and self.db_path.exists():
                 return SQLiteVintageHistoryAdapter(db_path=self.db_path, db_role=self.db_role)
             self.db_role = "sample_csv"

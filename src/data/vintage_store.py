@@ -18,6 +18,7 @@ import logging
 import os
 import sqlite3
 import subprocess
+import threading
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -182,6 +183,7 @@ DDL_V3_STATEMENTS: Tuple[str, ...] = (
         latest_valid_by_group_json TEXT,
         revision_stats_json        TEXT,
         git_sha                    TEXT NOT NULL,
+        config_sha256              TEXT,
         error_message              TEXT,
         CHECK (status = 'SUCCESS' OR (rows_inserted_v0 = 0 AND rows_new_vintage = 0 AND rows_unpublished_skipped = 0))
     );
@@ -277,6 +279,15 @@ DDL_V3_STATEMENTS: Tuple[str, ...] = (
     """,
     "CREATE INDEX IF NOT EXISTS idx_obs_vintage_loc_date_ver ON observations_vintage (location_id, obs_date, version_num DESC);",
     "CREATE INDEX IF NOT EXISTS idx_obs_vintage_as_of_time ON observations_vintage (location_id, ingested_at_utc, obs_date, version_num DESC);",
+    "CREATE INDEX IF NOT EXISTS idx_obs_vintage_loc_date_ingested ON observations_vintage (location_id, obs_date, ingested_at_utc, version_num DESC);",
+    # 3b. schema_migrations
+    """
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+        version        TEXT PRIMARY KEY,
+        description    TEXT NOT NULL,
+        applied_at_utc TEXT NOT NULL
+    );
+    """,
     # 4. forecasts_ledger
     """
     CREATE TABLE IF NOT EXISTS forecasts_ledger (
@@ -316,6 +327,7 @@ DDL_V3_STATEMENTS: Tuple[str, ...] = (
         is_degraded_input           INTEGER NOT NULL DEFAULT 0 CHECK (is_degraded_input IN (0, 1)),
         degraded_reason             TEXT,
         git_sha                     TEXT NOT NULL,
+        config_sha256               TEXT,
         UNIQUE (location_id, model_id, data_as_of, horizon_day),
         CHECK (
             is_degraded_input = CASE
@@ -583,6 +595,13 @@ def connect_sqlite(
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
     conn.execute(f"PRAGMA recursive_triggers = {'ON' if recursive_triggers else 'OFF'};")
+    try:
+        from src.config.settings import load_settings
+
+        cache_kb = int(load_settings(env_path=None).operational.sqlite_cache_size_kb)
+    except Exception:
+        cache_kb = 16000
+    conn.execute(f"PRAGMA cache_size = -{abs(cache_kb)};")
     if str(db_path) != ":memory:":
         conn.execute("PRAGMA journal_mode = WAL;")
     return conn
@@ -603,8 +622,100 @@ def finalize_db_for_read_only(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA journal_mode = DELETE;")
 
 
+def _safe_compute_config_sha256() -> str:
+    try:
+        from src.config.settings import compute_config_sha256
+
+        return compute_config_sha256()
+    except Exception:
+        return "unknown"
+
+
+def apply_migrations_v3_3(conn: sqlite3.Connection, *, config_sha256: Optional[str] = None) -> None:
+    """Idempotently migrate DDL V3.2 stores to V3.3 (config_sha256, schema_migrations, loc+date+ingested index)."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            version        TEXT PRIMARY KEY,
+            description    TEXT NOT NULL,
+            applied_at_utc TEXT NOT NULL
+        );
+        """
+    )
+    ir_cols = {str(r[1]) for r in conn.execute("PRAGMA table_info(ingestion_runs)").fetchall()}
+    fl_cols = {str(r[1]) for r in conn.execute("PRAGMA table_info(forecasts_ledger)").fetchall()}
+    if "config_sha256" not in ir_cols:
+        conn.execute("ALTER TABLE ingestion_runs ADD COLUMN config_sha256 TEXT;")
+    if "config_sha256" not in fl_cols:
+        conn.execute("ALTER TABLE forecasts_ledger ADD COLUMN config_sha256 TEXT;")
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_obs_vintage_loc_date_ingested ON observations_vintage (location_id, obs_date, ingested_at_utc, version_num DESC);"
+    )
+
+    active_cfg_sha = config_sha256 or _safe_compute_config_sha256()
+    need_ir_backfill = int(
+        conn.execute(
+            "SELECT COUNT(*) FROM ingestion_runs WHERE config_sha256 IS NULL OR config_sha256 = ''"
+        ).fetchone()[0]
+    )
+    need_fl_backfill = int(
+        conn.execute(
+            "SELECT COUNT(*) FROM forecasts_ledger WHERE config_sha256 IS NULL OR config_sha256 = ''"
+        ).fetchone()[0]
+    )
+    if need_ir_backfill > 0 or need_fl_backfill > 0:
+        conn.execute("BEGIN IMMEDIATE;")
+        try:
+            conn.execute("DROP TRIGGER IF EXISTS trg_ingestion_runs_no_update;")
+            conn.execute("DROP TRIGGER IF EXISTS trg_forecasts_ledger_no_update;")
+            if need_ir_backfill > 0:
+                conn.execute(
+                    "UPDATE ingestion_runs SET config_sha256 = ? WHERE config_sha256 IS NULL OR config_sha256 = ''",
+                    (active_cfg_sha,),
+                )
+            if need_fl_backfill > 0:
+                conn.execute(
+                    "UPDATE forecasts_ledger SET config_sha256 = ? WHERE config_sha256 IS NULL OR config_sha256 = ''",
+                    (active_cfg_sha,),
+                )
+            conn.execute(
+                """
+                CREATE TRIGGER IF NOT EXISTS trg_forecasts_ledger_no_update
+                BEFORE UPDATE ON forecasts_ledger
+                BEGIN
+                    SELECT RAISE(ABORT, 'IMMUTABLE_VIOLATION: forecasts_ledger is immutable; UPDATE is prohibited.');
+                END;
+                """
+            )
+            conn.execute(
+                """
+                CREATE TRIGGER IF NOT EXISTS trg_ingestion_runs_no_update
+                BEFORE UPDATE ON ingestion_runs
+                BEGIN
+                    SELECT RAISE(ABORT, 'IMMUTABLE_VIOLATION: ingestion_runs is append-only; UPDATE is prohibited.');
+                END;
+                """
+            )
+            conn.execute("COMMIT;")
+        except Exception:
+            try:
+                conn.execute("ROLLBACK;")
+            except sqlite3.Error:
+                pass
+            raise
+
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO schema_migrations (version, description, applied_at_utc)
+        VALUES ('V3.3', 'Add config_sha256 column on ingestion_runs & forecasts_ledger plus idx_obs_vintage_loc_date_ingested', ?)
+        """,
+        (utc_now_iso(),),
+    )
+
+
 def init_schema(conn: sqlite3.Connection, *, seed_hcmc_location: bool = True) -> None:
-    """Apply DDL V3.2 tables, indexes, 9 triggers, and 3 views cleanly, then finalize WAL."""
+    """Apply DDL V3.3 tables, indexes, 9 triggers, views, and idempotent migrations cleanly, then finalize WAL."""
     for stmt in DDL_V3_STATEMENTS:
         conn.execute(stmt)
     if seed_hcmc_location:
@@ -625,6 +736,7 @@ def init_schema(conn: sqlite3.Connection, *, seed_hcmc_location: bool = True) ->
                 utc_now_iso(),
             ),
         )
+    apply_migrations_v3_3(conn)
     finalize_db_for_read_only(conn)
 
 
@@ -804,6 +916,7 @@ def seed_historical_csv_vintage_v0(
         )
 
     finished_at = utc_now_iso()
+    cfg_sha = _safe_compute_config_sha256()
     try:
         conn.execute("BEGIN IMMEDIATE;")
         conn.execute(
@@ -812,10 +925,10 @@ def seed_historical_csv_vintage_v0(
                 run_id, run_type, started_at_utc, finished_at_utc, status,
                 location_id, scan_window_start, scan_window_end,
                 rows_scanned, rows_inserted_v0, rows_new_vintage,
-                rows_late_fill_only, rows_value_change, rows_unchanged, git_sha
-            ) VALUES (?, 'historical_seed', ?, ?, 'SUCCESS', ?, ?, ?, ?, ?, 0, 0, 0, 0, ?)
+                rows_late_fill_only, rows_value_change, rows_unchanged, git_sha, config_sha256
+            ) VALUES (?, 'historical_seed', ?, ?, 'SUCCESS', ?, ?, ?, ?, ?, 0, 0, 0, 0, ?, ?)
             """,
-            (run_id, started_at, finished_at, location_id, win_start, win_end, total_rows, total_rows, sha),
+            (run_id, started_at, finished_at, location_id, win_start, win_end, total_rows, total_rows, sha, cfg_sha),
         )
         if fail_after_rows is not None and 0 <= fail_after_rows <= len(records):
             if fail_after_rows > 0:
@@ -839,10 +952,10 @@ def seed_historical_csv_vintage_v0(
                 location_id, scan_window_start, scan_window_end,
                 rows_scanned, rows_inserted_v0, rows_new_vintage,
                 rows_late_fill_only, rows_value_change, rows_unchanged,
-                rows_unpublished_skipped, git_sha, error_message
-            ) VALUES (?, 'historical_seed', ?, ?, 'FAILED', ?, ?, ?, ?, 0, 0, 0, 0, 0, 0, ?, ?)
+                rows_unpublished_skipped, git_sha, config_sha256, error_message
+            ) VALUES (?, 'historical_seed', ?, ?, 'FAILED', ?, ?, ?, ?, 0, 0, 0, 0, 0, 0, ?, ?, ?)
             """,
-            (run_id, started_at, utc_now_iso(), location_id, win_start, win_end, total_rows, sha, str(exc)),
+            (run_id, started_at, utc_now_iso(), location_id, win_start, win_end, total_rows, sha, cfg_sha, str(exc)),
         )
         conn.execute("COMMIT;")
         finalize_db_for_read_only(conn)
@@ -890,15 +1003,59 @@ def read_latest_observations(
     return df.reset_index(drop=True)
 
 
+def get_db_state_cache_key(conn: sqlite3.Connection, db_identifier: str) -> Tuple[str, Optional[str], int]:
+    """Return `(db_identifier, latest_ingestion_run_id, max_forecast_rowid)` cache invalidation key."""
+    ir_row = conn.execute(
+        """
+        SELECT run_id
+        FROM ingestion_runs
+        ORDER BY julianday(finished_at_utc) DESC, rowid DESC
+        LIMIT 1
+        """
+    ).fetchone()
+    latest_run_id = str(ir_row["run_id"]) if ir_row is not None else None
+    fl_row = conn.execute("SELECT COALESCE(MAX(rowid), 0) AS max_id FROM forecasts_ledger").fetchone()
+    max_fc_id = int(fl_row["max_id"] or 0) if fl_row is not None else 0
+    return (str(db_identifier), latest_run_id, max_fc_id)
+
+
+_INPROCESS_CACHE_LOCK = threading.Lock()
+_DB_INPROCESS_CACHE: Dict[Tuple[Any, ...], Any] = {}
+
+
+def _get_cache_store() -> tuple[Any, Dict[Tuple[Any, ...], Any]]:
+    return _INPROCESS_CACHE_LOCK, _DB_INPROCESS_CACHE
+
+
+def cached_db_query(cache_key: Tuple[Any, ...], compute_fn: Callable[[], Any]) -> Any:
+    """Thread-safe bounded in-process cache keyed by `(db_state_key, query_name, ...)`."""
+    lock, store = _get_cache_store()
+    with lock:
+        if cache_key in store:
+            return store[cache_key]
+    val = compute_fn()
+    with lock:
+        if len(store) >= 128:
+            store.clear()
+        store[cache_key] = val
+    return val
+
+
+def clear_db_query_cache() -> None:
+    lock, store = _get_cache_store()
+    with lock:
+        store.clear()
+
+
 def get_default_complete_anchor_date(
     conn: sqlite3.Connection,
     location_id: str = HCMC_LOCATION_ID,
     max_date: Optional[str] = None,
 ) -> Optional[str]:
     """
-    Return the latest `obs_date` in `v_observations_latest` with `completeness_regime = 'COMPLETE_ALL_35'`
+    Return the latest `obs_date` with `completeness_regime = 'COMPLETE_ALL_35'`
     (optionally `<= max_date`) whose trailing 30-day window `[anchor - 29d .. anchor]` is continuous and
-    contains no missing meteorological/precipitation observations.
+    contains no missing meteorological/precipitation observations. Uses index-first base table pushdown.
     """
     where_clauses = ["location_id = ?", "completeness_regime = 'COMPLETE_ALL_35'"]
     params: List[Any] = [location_id]
@@ -907,15 +1064,38 @@ def get_default_complete_anchor_date(
         where_clauses.append("obs_date <= ?")
         params.append(max_date_str)
 
+    # Probe latest 250 candidate rows first (idx_obs_vintage_loc_date_ver DESC); widen only if empty
     candidates = conn.execute(
         f"""
-        SELECT obs_date
-        FROM v_observations_latest
+        SELECT o.obs_date
+        FROM observations_vintage o
         WHERE {' AND '.join(where_clauses)}
-        ORDER BY obs_date DESC
+          AND o.version_num = (
+              SELECT MAX(v.version_num)
+              FROM observations_vintage v
+              WHERE v.location_id = o.location_id AND v.obs_date = o.obs_date
+          )
+        ORDER BY o.obs_date DESC
+        LIMIT 250
         """,
         tuple(params),
     ).fetchall()
+
+    if not candidates:
+        candidates = conn.execute(
+            f"""
+            SELECT o.obs_date
+            FROM observations_vintage o
+            WHERE {' AND '.join(where_clauses)}
+              AND o.version_num = (
+                  SELECT MAX(v.version_num)
+                  FROM observations_vintage v
+                  WHERE v.location_id = o.location_id AND v.obs_date = o.obs_date
+              )
+            ORDER BY o.obs_date DESC
+            """,
+            tuple(params),
+        ).fetchall()
 
     for cand in candidates:
         anchor_str = str(cand["obs_date"])
@@ -925,12 +1105,17 @@ def get_default_complete_anchor_date(
             """
             SELECT
                 COUNT(*) AS cnt,
-                SUM(CASE WHEN missing_count = 0 THEN 1 ELSE 0 END) AS complete_cnt
-            FROM v_observations_latest
-            WHERE location_id = ?
-              AND obs_date BETWEEN ? AND ?
+                SUM(CASE WHEN o.missing_count = 0 THEN 1 ELSE 0 END) AS complete_cnt
+            FROM observations_vintage o
+            INNER JOIN (
+                SELECT obs_date, MAX(version_num) AS max_ver
+                FROM observations_vintage
+                WHERE location_id = ?
+                  AND obs_date BETWEEN ? AND ?
+                GROUP BY obs_date
+            ) m ON o.location_id = ? AND o.obs_date = m.obs_date AND o.version_num = m.max_ver
             """,
-            (location_id, win_start, anchor_str),
+            (location_id, win_start, anchor_str, location_id),
         ).fetchone()
         if stats is not None and int(stats["cnt"] or 0) == 30 and int(stats["complete_cnt"] or 0) == 30:
             return anchor_str
@@ -949,12 +1134,17 @@ def get_complete_anchor_range(
     """
     rows = conn.execute(
         """
-        SELECT obs_date, missing_count, completeness_regime
-        FROM v_observations_latest
-        WHERE location_id = ?
-        ORDER BY obs_date ASC
+        SELECT o.obs_date, o.missing_count, o.completeness_regime
+        FROM observations_vintage o
+        INNER JOIN (
+            SELECT obs_date, MAX(version_num) AS max_ver
+            FROM observations_vintage
+            WHERE location_id = ?
+            GROUP BY obs_date
+        ) m ON o.location_id = ? AND o.obs_date = m.obs_date AND o.version_num = m.max_ver
+        ORDER BY o.obs_date ASC
         """,
-        (location_id,),
+        (location_id, location_id),
     ).fetchall()
     if not rows:
         return None
@@ -996,9 +1186,9 @@ def get_data_snapshot_date(
     *,
     location_id: str = HCMC_LOCATION_ID,
 ) -> Optional[str]:
-    """Return latest `obs_date` recorded in `v_observations_latest` for `location_id`."""
+    """Return latest `obs_date` recorded in `observations_vintage` via covering index."""
     row = conn.execute(
-        "SELECT MAX(obs_date) AS max_obs_date FROM v_observations_latest WHERE location_id = ?",
+        "SELECT MAX(obs_date) AS max_obs_date FROM observations_vintage WHERE location_id = ?",
         (location_id,),
     ).fetchone()
     if row is None or row["max_obs_date"] is None:
@@ -1011,14 +1201,45 @@ def get_latest_precip_obs_date(
     *,
     location_id: str = HCMC_LOCATION_ID,
 ) -> Optional[str]:
-    """Return latest `obs_date` with non-null `PRECTOTCORR` in `v_observations_latest`."""
-    row = conn.execute(
+    """Return latest `obs_date` with non-null `PRECTOTCORR` in latest vintage via index-first seek."""
+    recent_dates = conn.execute(
         """
-        SELECT MAX(obs_date) AS max_precip_date
-        FROM v_observations_latest
-        WHERE location_id = ? AND PRECTOTCORR IS NOT NULL
+        SELECT DISTINCT obs_date
+        FROM observations_vintage
+        WHERE location_id = ?
+        ORDER BY obs_date DESC
+        LIMIT 30
         """,
         (location_id,),
+    ).fetchall()
+    for drow in recent_dates:
+        d_str = str(drow["obs_date"])
+        latest = conn.execute(
+            """
+            SELECT PRECTOTCORR
+            FROM observations_vintage
+            WHERE location_id = ? AND obs_date = ?
+            ORDER BY version_num DESC
+            LIMIT 1
+            """,
+            (location_id, d_str),
+        ).fetchone()
+        if latest is not None and latest["PRECTOTCORR"] is not None:
+            return d_str
+
+    row = conn.execute(
+        """
+        SELECT MAX(o.obs_date) AS max_precip_date
+        FROM observations_vintage o
+        INNER JOIN (
+            SELECT obs_date, MAX(version_num) AS max_ver
+            FROM observations_vintage
+            WHERE location_id = ?
+            GROUP BY obs_date
+        ) m ON o.location_id = ? AND o.obs_date = m.obs_date AND o.version_num = m.max_ver
+        WHERE o.PRECTOTCORR IS NOT NULL
+        """,
+        (location_id, location_id),
     ).fetchone()
     if row is None or row["max_precip_date"] is None:
         return None
@@ -1083,8 +1304,9 @@ def get_latest_precip_and_partial_explanation(
         """
         SELECT obs_date, PRECTOTCORR, missing_count, missing_meteo_count,
                missing_flashflux_count, missing_ceres_count, missing_vars_json
-        FROM v_observations_latest
+        FROM observations_vintage
         WHERE location_id = ? AND obs_date = ?
+        ORDER BY version_num DESC
         LIMIT 1
         """,
         (location_id, latest_precip_date),
@@ -1312,6 +1534,7 @@ def insert_forecasts_idempotent(
                 int(row.get("is_degraded_input", 0)),
                 row.get("degraded_reason"),
                 str(row["git_sha"]),
+                str(row.get("config_sha256") or _safe_compute_config_sha256()),
             )
         )
 
@@ -1328,7 +1551,7 @@ def insert_forecasts_idempotent(
                     input_window_start, input_window_end, input_window_hash,
                     input_vintage_manifest_json, input_provisional_days,
                     meteo_missing_count, flashflux_max_ffill_days, ceres_policy_applied,
-                    ceres_max_staleness_days, is_degraded_input, degraded_reason, git_sha
+                    ceres_max_staleness_days, is_degraded_input, degraded_reason, git_sha, config_sha256
                 ) VALUES (
                     ?, ?, ?, ?, ?,
                     ?, ?, ?, ?,
@@ -1337,7 +1560,7 @@ def insert_forecasts_idempotent(
                     ?, ?, ?,
                     ?, ?,
                     ?, ?, ?,
-                    ?, ?, ?, ?
+                    ?, ?, ?, ?, ?
                 )
                 """,
                 to_insert,
@@ -1699,6 +1922,7 @@ def ingest_nasa_power_window(
         ]
         insert_obs_sql = f"INSERT INTO observations_vintage ({', '.join(obs_col_list)}) VALUES ({', '.join(['?'] * len(obs_col_list))})"
 
+        cfg_sha = _safe_compute_config_sha256()
         conn.execute("BEGIN IMMEDIATE;")
         conn.execute(
             """
@@ -1708,15 +1932,15 @@ def ingest_nasa_power_window(
                 nasa_api_version, nasa_sources_header_json,
                 rows_scanned, rows_inserted_v0, rows_new_vintage,
                 rows_late_fill_only, rows_value_change, rows_unchanged,
-                rows_unpublished_skipped, latest_valid_by_group_json, revision_stats_json, git_sha
-            ) VALUES (?, ?, ?, ?, 'SUCCESS', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                rows_unpublished_skipped, latest_valid_by_group_json, revision_stats_json, git_sha, config_sha256
+            ) VALUES (?, ?, ?, ?, 'SUCCESS', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 run_id, run_type, started_at, finished_at, location_id, win_start, win_end,
                 api_version, sources_json,
                 rows_scanned, rows_inserted_v0, rows_new_vintage,
                 rows_late_fill_only, rows_value_change, rows_unchanged,
-                rows_unpublished_skipped, latest_group_json, revision_stats_json, sha,
+                rows_unpublished_skipped, latest_group_json, revision_stats_json, sha, cfg_sha,
             ),
         )
         if obs_inserts:
@@ -1756,10 +1980,10 @@ def ingest_nasa_power_window(
                 location_id, scan_window_start, scan_window_end,
                 rows_scanned, rows_inserted_v0, rows_new_vintage,
                 rows_late_fill_only, rows_value_change, rows_unchanged,
-                rows_unpublished_skipped, git_sha, error_message
-            ) VALUES (?, ?, ?, ?, 'FAILED', ?, ?, ?, 0, 0, 0, 0, 0, 0, 0, ?, ?)
+                rows_unpublished_skipped, git_sha, config_sha256, error_message
+            ) VALUES (?, ?, ?, ?, 'FAILED', ?, ?, ?, 0, 0, 0, 0, 0, 0, 0, ?, ?, ?)
             """,
-            (run_id, run_type, started_at, utc_now_iso(), location_id, win_start, win_end, sha, str(exc)),
+            (run_id, run_type, started_at, utc_now_iso(), location_id, win_start, win_end, sha, _safe_compute_config_sha256(), str(exc)),
         )
         conn.execute("COMMIT;")
         finalize_db_for_read_only(conn)
@@ -1872,32 +2096,53 @@ def get_source_transition_cutoffs(
     reference_date_iso: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Read persisted `source_transition_cutoffs` from `ingestion_runs.latest_valid_by_group_json`
-    and fall back cleanly to `COMPLETE_ALL_35` + `provisional_window_days = 120` when absent.
+    Read persisted `source_transition_cutoffs`, `probe_timestamp_utc`, `probe_date`,
+    and `last_scan_date` from `ingestion_runs`, falling back cleanly to
+    `COMPLETE_ALL_35` + `provisional_window_days = 120` when absent.
     """
     rows = conn.execute(
         """
-        SELECT latest_valid_by_group_json, scan_window_end
+        SELECT run_type, scan_window_start, scan_window_end, started_at_utc,
+               finished_at_utc, latest_valid_by_group_json
         FROM ingestion_runs
         WHERE location_id = ?
           AND status = 'SUCCESS'
-          AND latest_valid_by_group_json IS NOT NULL
         ORDER BY julianday(finished_at_utc) DESC, rowid DESC
         """,
         (location_id,),
     ).fetchall()
 
     scan_end: Optional[str] = None
+    last_scan_date: Optional[str] = None
+    probe_ts: Optional[str] = None
+    probe_date: Optional[str] = None
+    found_cutoffs: Optional[Dict[str, Any]] = None
+
     for row in rows:
+        rtype = str(row["run_type"])
         if scan_end is None and row["scan_window_end"]:
             scan_end = str(row["scan_window_end"])
-        try:
-            payload = json.loads(str(row["latest_valid_by_group_json"]))
-        except Exception:
-            continue
-        cutoffs = payload.get("source_transition_cutoffs")
-        if isinstance(cutoffs, dict) and cutoffs.get("finality_cutoff_date"):
-            return cutoffs
+        if last_scan_date is None and rtype in ("manual_scan", "historical_seed") and row["scan_window_end"]:
+            last_scan_date = str(row["scan_window_end"])
+        if probe_ts is None and rtype == "audit_probe":
+            probe_ts = str(row["started_at_utc"] or row["finished_at_utc"])
+            probe_date = probe_ts[:10]
+        if found_cutoffs is None and row["latest_valid_by_group_json"]:
+            try:
+                payload = json.loads(str(row["latest_valid_by_group_json"]))
+            except Exception:
+                payload = {}
+            cutoffs = payload.get("source_transition_cutoffs") if isinstance(payload, dict) else None
+            if isinstance(cutoffs, dict) and cutoffs.get("finality_cutoff_date"):
+                found_cutoffs = dict(cutoffs)
+                if cutoffs.get("experiment_date"):
+                    probe_date = str(cutoffs["experiment_date"])
+
+    if found_cutoffs is not None:
+        found_cutoffs.setdefault("probe_timestamp_utc", probe_ts)
+        found_cutoffs.setdefault("probe_date", probe_date or (probe_ts[:10] if probe_ts else None))
+        found_cutoffs.setdefault("last_scan_date", last_scan_date or scan_end)
+        return found_cutoffs
 
     ref_str = reference_date_iso or scan_end or date.today().isoformat()
     loc_row = conn.execute(
@@ -1910,6 +2155,9 @@ def get_source_transition_cutoffs(
         "finality_mode": "provisional_window_fallback",
         "finality_cutoff_date": cutoff_d,
         "provisional_window_days": win_days,
+        "probe_timestamp_utc": probe_ts,
+        "probe_date": probe_date,
+        "last_scan_date": last_scan_date or scan_end,
         "finality_rule": (
             f"FINALIZED when completeness_regime == 'COMPLETE_ALL_35' and age > {win_days} days "
             f"(obs_date < {cutoff_d}); otherwise PROVISIONAL."
@@ -1922,11 +2170,11 @@ def get_observations_bounds(
     *,
     location_id: str = HCMC_LOCATION_ID,
 ) -> Tuple[Optional[str], Optional[str], int]:
-    """Return `(min_obs_date, max_obs_date, total_rows)` in `v_observations_latest` for `location_id`."""
+    """Return `(min_obs_date, max_obs_date, distinct_dates)` using covering index on `observations_vintage`."""
     row = conn.execute(
         """
-        SELECT MIN(obs_date) AS min_d, MAX(obs_date) AS max_d, COUNT(*) AS cnt
-        FROM v_observations_latest
+        SELECT MIN(obs_date) AS min_d, MAX(obs_date) AS max_d, COUNT(DISTINCT obs_date) AS cnt
+        FROM observations_vintage
         WHERE location_id = ?
         """,
         (location_id,),
@@ -1977,21 +2225,50 @@ def get_observations_series(
     reference_date_iso: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Build continuous daily / weekly (ISO Monday-Sunday) / monthly precipitation series from
-    `v_observations_latest` preserving NOT_PUBLISHED gaps and verified FINALIZED vs PROVISIONAL cutoffs.
+    Build continuous daily / weekly (ISO Monday-Sunday) / monthly precipitation series using
+    index-first base table filtering on `observations_vintage`, strict post-probe FINALIZED checks,
+    and NOT_PUBLISHED gap preservation.
     """
     cutoffs = get_source_transition_cutoffs(conn, location_id=location_id, reference_date_iso=reference_date_iso)
     finality_mode = str(cutoffs.get("finality_mode") or "provisional_window_fallback")
     cutoff_date = cutoffs.get("finality_cutoff_date")
     win_days = int(cutoffs.get("provisional_window_days") or DEFAULT_PROVISIONAL_WINDOW_DAYS)
+    probe_ts = cutoffs.get("probe_timestamp_utc")
+    probe_date = cutoffs.get("probe_date")
+    last_scan_date = cutoffs.get("last_scan_date")
     ref_d = date.fromisoformat(reference_date_iso or end_date)
+    probe_ts_norm = normalize_utc_iso(str(probe_ts)) if probe_ts else None
+
+    post_probe_windows: List[Tuple[str, str]] = []
+    if probe_ts:
+        scan_rows = conn.execute(
+            """
+            SELECT scan_window_start, scan_window_end
+            FROM ingestion_runs
+            WHERE location_id = ?
+              AND status = 'SUCCESS'
+              AND run_type IN ('historical_seed', 'manual_scan')
+              AND julianday(started_at_utc) >= julianday(?)
+            """,
+            (location_id, str(probe_ts)),
+        ).fetchall()
+        post_probe_windows = [
+            (str(r["scan_window_start"]), str(r["scan_window_end"])) for r in scan_rows
+        ]
 
     rows = conn.execute(
         """
-        SELECT obs_date, PRECTOTCORR, completeness_regime
-        FROM v_observations_latest
-        WHERE location_id = ? AND obs_date BETWEEN ? AND ?
-        ORDER BY obs_date ASC
+        SELECT o.obs_date, o.PRECTOTCORR, o.completeness_regime, o.ingest_origin, o.ingested_at_utc
+        FROM observations_vintage o
+        WHERE o.location_id = ?
+          AND o.obs_date BETWEEN ? AND ?
+          AND o.version_num = (
+              SELECT MAX(v2.version_num)
+              FROM observations_vintage v2
+              WHERE v2.location_id = o.location_id
+                AND v2.obs_date = o.obs_date
+          )
+        ORDER BY o.obs_date ASC
         """,
         (location_id, start_date, end_date),
     ).fetchall()
@@ -2029,7 +2306,17 @@ def get_observations_series(
         else:
             precip_val = round(float(raw_precip), 4)
             if finality_mode == "source_header_transition" and cutoff_date:
-                day_status = "FINALIZED" if cur_iso <= str(cutoff_date) else "PROVISIONAL"
+                in_cutoff = cur_iso <= str(cutoff_date)
+                row_origin = str(rec["ingest_origin"] or "") if rec is not None else ""
+                row_ingested = str(rec["ingested_at_utc"] or "") if rec is not None else ""
+                row_ingested_norm = normalize_utc_iso(row_ingested) if row_ingested else ""
+                covered_post_probe = (
+                    (probe_ts_norm is None)
+                    or (row_origin == "HISTORICAL_CSV_SEED")
+                    or (bool(row_ingested_norm) and row_ingested_norm >= probe_ts_norm)
+                    or any(w_s <= cur_iso <= w_e for (w_s, w_e) in post_probe_windows)
+                )
+                day_status = "FINALIZED" if (in_cutoff and covered_post_probe) else "PROVISIONAL"
             else:
                 comp = str(rec["completeness_regime"]) if rec is not None else ""
                 is_old_enough = (ref_d - cur).days > win_days
@@ -2078,6 +2365,9 @@ def get_observations_series(
         "finality_mode": finality_mode,
         "finality_cutoff_date": str(cutoff_date) if cutoff_date else None,
         "finality_rule": str(cutoffs.get("finality_rule") or ""),
+        "last_scan_date": last_scan_date,
+        "probe_date": probe_date,
+        "probe_timestamp_utc": probe_ts,
         "series": series,
         "summary": {
             "total_precip_mm": round(total_precip, 4),
