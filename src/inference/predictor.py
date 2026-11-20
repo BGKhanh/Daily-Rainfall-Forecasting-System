@@ -52,6 +52,13 @@ class StandaloneRainfallPredictor:
         else:
             self._load_from_registry()
 
+        from src.config.settings import verify_model_contract_on_startup
+
+        verify_model_contract_on_startup(
+            feature_builders=[self.fb_f3, self.fb_f2],
+            metadata=self.metadata,
+        )
+
     def _load_local_artifacts(self) -> None:
         """Load serialized models and FeatureBuilders from local artifacts directory."""
         self.model_serving = joblib.load(self.artifact_dir / "sc35_xgboost_tweedie_f3.joblib")

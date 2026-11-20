@@ -1,0 +1,30 @@
+# DS108 HCMC Rainfall Forecasting — Structured Runtime Configuration
+# Layer 2 (Operational) + Layer 3 (Application & Business)
+
+[operational]
+store_backend = "local"
+turso_sync_interval_sec = 300
+turso_sync_jitter_sec = 30
+nasa_api_base_url = "https://power.larc.nasa.gov/api/temporal/daily/point"
+nasa_api_timeout_sec = 120
+nasa_api_max_params = 20
+scan_window_days = 210
+provisional_window_days = 120
+sqlite_cache_size_kb = 16000
+cors_allowed_origins = [
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "http://localhost:4173",
+  "http://127.0.0.1:4173",
+]
+
+[application]
+default_query_days = 90
+obs_max_days_daily = 366
+obs_max_days_weekly = 2555
+obs_max_days_monthly = 10000
+rain_day_threshold_mm = 1.0
+prior_observations_preview_days = 14
+map_max_selected_visible_rows = 5
+map_zoom_min = 1.0
+map_zoom_max = 6.0

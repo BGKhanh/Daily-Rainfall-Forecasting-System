@@ -2,6 +2,83 @@
   "project": "Rainfall Forecasting HCMC (DS108)",
   "version": "1.0.0",
   "date_packaged": "2026-11-13",
+  "model_contract": {
+    "horizon_days": 7,
+    "required_input_variables": [
+      "ALLSKY_SFC_SW_DWN",
+      "TOA_SW_DWN",
+      "ALLSKY_SFC_LW_DWN",
+      "CLRSKY_SFC_SW_DWN",
+      "ALLSKY_SFC_SW_DNI",
+      "ALLSKY_SFC_SW_DIFF",
+      "ALLSKY_SFC_PAR_TOT",
+      "CLRSKY_SFC_PAR_TOT",
+      "ALLSKY_SFC_UVA",
+      "ALLSKY_SFC_UVB",
+      "ALLSKY_SFC_UV_INDEX",
+      "T2M",
+      "T2MDEW",
+      "T2MWET",
+      "TS",
+      "T2M_RANGE",
+      "T2M_MAX",
+      "T2M_MIN",
+      "QV2M",
+      "RH2M",
+      "PRECTOTCORR",
+      "PS",
+      "WS2M",
+      "WS2M_MAX",
+      "WS2M_MIN",
+      "WS2M_RANGE",
+      "WD2M",
+      "WS10M",
+      "WS10M_MAX",
+      "WS10M_MIN",
+      "WS10M_RANGE",
+      "WD10M",
+      "GWETTOP",
+      "GWETROOT",
+      "GWETPROF"
+    ],
+    "min_contiguous_history_days": 30,
+    "recommended_fetch_window_days": 35,
+    "feature_warmup_lookback_days": 29,
+    "time_standard": "LST",
+    "nasa_community": "RE",
+    "canonical_location_id": "HCMC",
+    "canonical_latitude": 10.7769,
+    "canonical_longitude": 106.7009,
+    "completeness_policy": "COMPLETE_MODEL_REQUIRED_VARS"
+  },
+  "frozen_eda_modeling_config": {
+    "dev_train_end": "2018-04-30",
+    "validation_end": "2020-04-30",
+    "test_end": "2026-04-30",
+    "wet_season_months": [
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11
+    ],
+    "rolling_windows": [
+      7,
+      14,
+      30
+    ],
+    "lag_days": [
+      1,
+      2,
+      3,
+      7
+    ],
+    "rain_threshold_tau_mm": 1.0,
+    "tweedie_variance_power": 1.5,
+    "canonical_mase_scale_dev_train": 3.7015424361567635
+  },
   "governance_frozen_constants": {
     "canonical_dev_train_cutoff": "2018-04-30",
     "canonical_dev_train_origins": 6293,
@@ -158,7 +235,7 @@
     "sc35_xgb_h7.json": "8b2fc2763546103a48a9c695e90afe1a85b7220c4272afe806c54a10f32d6d65",
     "sc35_xgboost_tweedie_f3.joblib": "eee30d04c666dd099608cfba6c26ea3eec690bc7bfd9a6c6715983b74515653f",
     "standalone_inference.py": "0848ba6ec2302fde58b9ba8e479b404af17be927208af5ce0a3133c4132c86ec",
-    "demo_rainfall_vintage.db": "d8145bd40a49382da5ad15e6a0237e4a5768296f2457e4d899593b60656193de"
+    "demo_rainfall_vintage.db": "d2366555912facd5820b02f4c4aab97f2f49c3267ad06d92cc833ad6e1af3e20"
   },
   "timezone": "Asia/Ho_Chi_Minh (UTC+7)"
 }

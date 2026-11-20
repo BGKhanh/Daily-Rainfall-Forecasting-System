@@ -225,8 +225,14 @@ tests/*
 !tests/storage/
 !tests/storage/**
 scripts/*
+!scripts/audit/
+scripts/audit/*
+!scripts/audit/probe_nasa_header_sources.py
 !scripts/data/
+scripts/data/*
 !scripts/data/ingest_nasa_vintage.py
+!scripts/data/probe_variable_grids.py
+!scripts/data/compute_province_grid_overlap.py
 !scripts/mlops/
 !scripts/mlops/**
 **/__pycache__/

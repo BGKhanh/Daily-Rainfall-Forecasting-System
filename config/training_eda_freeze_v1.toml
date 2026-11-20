@@ -1,0 +1,13 @@
+# DS108 HCMC Rainfall Forecasting — Frozen EDA & Modeling Decisions (Layer 5)
+# Mirrors artifacts/models/metadata.json["frozen_eda_modeling_config"]
+
+[freeze]
+dev_train_end = "2018-04-30"
+validation_end = "2020-04-30"
+test_end = "2026-04-30"
+wet_season_months = [5, 6, 7, 8, 9, 10, 11]
+rolling_windows = [7, 14, 30]
+lag_days = [1, 2, 3, 7]
+rain_threshold_tau_mm = 1.0
+tweedie_variance_power = 1.5
+canonical_mase_scale_dev_train = 3.7015424361567635
