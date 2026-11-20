@@ -38,7 +38,7 @@ jobs:
 
       - name: Run Ruff lint on serving backend & storage DDL V3
         run: |
-          ruff check src/api src/config/clock.py src/inference src/data/provider.py src/data/vintage_store.py src/featurengineering/builder.py scripts/mlops/export_from_registry.py scripts/mlops/run_operational_checks.py scripts/mlops/run_forecast_ledger.py scripts/mlops/ensure_demo_db.py tests/serving tests/storage
+          ruff check src/api src/config/clock.py src/config/settings.py src/inference src/data/provider.py src/data/vintage_store.py src/data/grid_overlap.py src/data/turso_backend.py src/featurengineering/builder.py scripts/mlops/export_from_registry.py scripts/mlops/run_operational_checks.py scripts/mlops/run_forecast_ledger.py scripts/mlops/ensure_demo_db.py scripts/mlops/automated_pipeline.py scripts/mlops/verify_turso_parity_and_costs.py tests/serving tests/storage
 
       - name: Run Tier 1 suite (API OpenAPI/Scores Contract, Clock, Column Guard, 2184-Origin Parity, DDL V3.2)
         env:
@@ -89,12 +89,12 @@ jobs:
 
       - name: Build serving Docker image
         run: |
-          docker build -t kgb0630/ds_108:1.4.0-serving .
+          docker build -t kgb0630/ds_108:1.5.0-serving .
 
       - name: Run container & verify /, /locations, /observations, /health, /models, /predict, /scores, and RSS <= 350 MB
         run: |
           set -e
-          docker run -d --name ds108-smoke -p 8000:8000 kgb0630/ds_108:1.4.0-serving
+          docker run -d --name ds108-smoke -p 8000:8000 kgb0630/ds_108:1.5.0-serving
           trap "docker rm -f ds108-smoke || true" EXIT
 
           for i in $(seq 1 30); do

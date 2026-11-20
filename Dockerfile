@@ -42,8 +42,9 @@ RUN pip install --no-cache-dir -r requirements-serving.txt
 RUN groupadd --gid 10001 appuser && \
     useradd --uid 10001 --gid 10001 --create-home --shell /usr/sbin/nologin appuser
 
-# Copy minimal runtime source code, model artifacts, benchmark leaderboard, and built SPA static files
+# Copy minimal runtime source code, configuration, model artifacts, benchmark leaderboard, and built SPA static files
 COPY --chown=appuser:appuser src/ /app/src/
+COPY --chown=appuser:appuser config/ /app/config/
 COPY --chown=appuser:appuser artifacts/models/ /app/artifacts/models/
 RUN test "$(wc -c < /app/artifacts/models/demo_rainfall_vintage.db)" -gt 102400 || \
     (echo "ERROR: demo_rainfall_vintage.db appears to be an unhydrated Git LFS pointer; pull LFS or run ensure_demo_db.py before docker build." >&2 && exit 1)
