@@ -25,6 +25,7 @@ import os
 from pathlib import Path
 import random
 import re
+import shutil
 import sqlite3
 import threading
 import time
@@ -56,6 +57,147 @@ _BEGIN_RE = re.compile(r"^\s*BEGIN(?:\s+(?:DEFERRED|IMMEDIATE|EXCLUSIVE))?\b", r
 _COMMIT_RE = re.compile(r"^\s*(?:COMMIT|END)(?:\s+TRANSACTION)?\b", re.IGNORECASE)
 _ROLLBACK_RE = re.compile(r"^\s*ROLLBACK(?:\s+TRANSACTION)?\b", re.IGNORECASE)
 _READ_ONLY_SQL_RE = re.compile(r"^\s*(?:SELECT|WITH|EXPLAIN|PRAGMA\s+(?:table_info|index_list|foreign_key_check|database_list|query_only|foreign_keys)\b)", re.IGNORECASE)
+
+STARTER_MONTHLY_ROWS_READ_LIMIT = 500_000_000
+STARTER_MONTHLY_ROWS_WRITTEN_LIMIT = 10_000_000
+STARTER_MONTHLY_SYNC_BYTES_LIMIT = 3 * 1024 * 1024 * 1024
+QUOTA_WARNING_RATIO = 0.70
+
+_BEARER_TOKEN_RE = re.compile(r"(Bearer\s+)[A-Za-z0-9._\-+/=]+", re.IGNORECASE)
+_JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\b")
+_URL_USERINFO_RE = re.compile(r"(https?://)([^:@/\s]+):([^@/\s]+)@", re.IGNORECASE)
+_QUERY_SECRET_RE = re.compile(r"([?&](?:authToken|token|api_key|key|secret)=)([^&\s'\"]+)", re.IGNORECASE)
+_KV_SECRET_RE = re.compile(
+    r"((?:TURSO_(?:DB|READONLY_AUTH|AUTH|API)_TOKEN|DAGSHUB(?:_USER)?_TOKEN|MLFLOW_TRACKING_PASSWORD|Authorization)\s*[:=]\s*)([^\s,;'\"]+)",
+    re.IGNORECASE,
+)
+
+_TURSO_RUNTIME_LOCK = threading.Lock()
+_TURSO_RUNTIME_STATE: Dict[str, Any] = {
+    "blocked": False,
+    "degraded_reason": None,
+    "last_blocked_at_utc": None,
+    "last_error": None,
+    "quota_warning": False,
+    "quota_rows_read_pct": 0.0,
+}
+
+
+class TursoQuotaBlockedError(sqlite3.OperationalError):
+    """Raised when Turso returns HTTP 402/403/429 or a BLOCKED/quota exhaustion error."""
+
+
+def redact_secrets(text: Optional[str], extra_secrets: Sequence[str] = ()) -> str:
+    """Redact bearer tokens, JWTs, and credential env values before logging or returning diagnostics."""
+    if not text:
+        return ""
+    out = str(text)
+    for env_key in (
+        "TURSO_DB_TOKEN",
+        "TURSO_READONLY_AUTH_TOKEN",
+        "TURSO_AUTH_TOKEN",
+        "TURSO_API_TOKEN",
+        "DAGSHUB_TOKEN",
+        "DAGSHUB_USER_TOKEN",
+        "MLFLOW_TRACKING_PASSWORD",
+    ):
+        val = os.environ.get(env_key, "").strip()
+        if len(val) >= 6 and val in out:
+            out = out.replace(val, "[REDACTED]")
+    for sec in extra_secrets:
+        s = (sec or "").strip()
+        if len(s) >= 6 and s in out:
+            out = out.replace(s, "[REDACTED]")
+    out = _BEARER_TOKEN_RE.sub(r"\1[REDACTED]", out)
+    out = _URL_USERINFO_RE.sub(r"\1[REDACTED]:[REDACTED]@", out)
+    out = _QUERY_SECRET_RE.sub(r"\1[REDACTED]", out)
+    out = _KV_SECRET_RE.sub(r"\1[REDACTED]", out)
+    out = _JWT_RE.sub("[REDACTED_JWT]", out)
+    return out
+
+
+def _is_quota_or_blocked_message(message: str) -> bool:
+    low = (message or "").lower()
+    return any(
+        marker in low
+        for marker in ("blocked", "quota", "reads_blocked", "writes_blocked", "payment required", "rate limit", "too many requests")
+    )
+
+
+def get_turso_runtime_status() -> Dict[str, Any]:
+    """Return a thread-safe snapshot of global Turso blocked/quota status."""
+    with _TURSO_RUNTIME_LOCK:
+        return dict(_TURSO_RUNTIME_STATE)
+
+
+def record_turso_quota_blocked(reason: str, error_msg: str = "") -> None:
+    """Mark global Turso runtime state as degraded/blocked using secret-redacted error details."""
+    redacted = redact_secrets(error_msg)
+    with _TURSO_RUNTIME_LOCK:
+        _TURSO_RUNTIME_STATE["blocked"] = True
+        _TURSO_RUNTIME_STATE["degraded_reason"] = reason
+        _TURSO_RUNTIME_STATE["last_blocked_at_utc"] = now_utc_iso()
+        _TURSO_RUNTIME_STATE["last_error"] = redacted[:300] if redacted else None
+
+
+def evaluate_turso_quota_warning(
+    rows_read_used: int,
+    *,
+    rows_written_used: int = 0,
+    sync_bytes_used: int = 0,
+    rows_read_limit: int = STARTER_MONTHLY_ROWS_READ_LIMIT,
+    rows_written_limit: int = STARTER_MONTHLY_ROWS_WRITTEN_LIMIT,
+    sync_bytes_limit: int = STARTER_MONTHLY_SYNC_BYTES_LIMIT,
+) -> Dict[str, Any]:
+    """Evaluate 500M monthly reads / 10M writes / 3GB sync quota against 70% warning threshold."""
+    read_ratio = float(rows_read_used) / float(max(1, rows_read_limit))
+    write_ratio = float(rows_written_used) / float(max(1, rows_written_limit))
+    sync_ratio = float(sync_bytes_used) / float(max(1, sync_bytes_limit))
+    max_ratio = max(read_ratio, write_ratio, sync_ratio)
+    warning = max_ratio >= QUOTA_WARNING_RATIO
+    read_pct = round(read_ratio * 100.0, 4)
+    with _TURSO_RUNTIME_LOCK:
+        _TURSO_RUNTIME_STATE["quota_rows_read_pct"] = read_pct
+        if warning:
+            _TURSO_RUNTIME_STATE["quota_warning"] = True
+    if warning:
+        logger.warning(
+            "Turso monthly quota warning triggered (>= %.0f%%): rows_read=%.2f%% (%d/%d).",
+            QUOTA_WARNING_RATIO * 100.0,
+            read_pct,
+            rows_read_used,
+            rows_read_limit,
+        )
+    return {
+        "turso_quota_warning": warning,
+        "rows_read_pct": read_pct,
+        "rows_written_pct": round(write_ratio * 100.0, 4),
+        "sync_bytes_pct": round(sync_ratio * 100.0, 4),
+        "threshold_pct": QUOTA_WARNING_RATIO * 100.0,
+    }
+
+
+def clear_turso_blocked_state() -> None:
+    """Clear degraded/blocked flags after a successful remote or replica sync, preserving quota warning."""
+    with _TURSO_RUNTIME_LOCK:
+        _TURSO_RUNTIME_STATE["blocked"] = False
+        _TURSO_RUNTIME_STATE["degraded_reason"] = None
+        _TURSO_RUNTIME_STATE["last_error"] = None
+
+
+def clear_turso_runtime_status() -> None:
+    """Reset runtime blocked/quota state (used on successful remote probe or in tests)."""
+    with _TURSO_RUNTIME_LOCK:
+        _TURSO_RUNTIME_STATE.update(
+            {
+                "blocked": False,
+                "degraded_reason": None,
+                "last_blocked_at_utc": None,
+                "last_error": None,
+                "quota_warning": False,
+                "quota_rows_read_pct": 0.0,
+            }
+        )
 
 
 def resolve_store_backend(explicit_backend: Optional[str] = None) -> str:
@@ -269,6 +411,7 @@ class TursoHranaClient:
         self.timeout_sec = float(timeout_sec)
         self.max_retries = int(max_retries)
         self.backoff_base_sec = float(backoff_base_sec)
+        self._resolved_token = resolved_token
         self._auth_header = f"Bearer {resolved_token}"
         self._session = requests.Session()
         self._session.headers.update(
@@ -322,12 +465,33 @@ class TursoHranaClient:
         for attempt in range(self.max_retries + 1):
             try:
                 resp = self._session.post(endpoint, json=payload, timeout=self.timeout_sec)
-                if resp.status_code in (429, 502, 503, 504) and attempt < self.max_retries:
+                if resp.status_code in (402, 403):
+                    msg = redact_secrets(
+                        f"Turso Hrana HTTP {resp.status_code} BLOCKED/quota: {resp.text[:300]}",
+                        extra_secrets=[self._resolved_token],
+                    )
+                    record_turso_quota_blocked("TURSO_REMOTE_BLOCKED_FALLBACK_LOCAL", msg)
+                    raise TursoQuotaBlockedError(msg)
+                if resp.status_code == 429:
+                    if attempt < self.max_retries:
+                        time.sleep(self.backoff_base_sec * (2**attempt))
+                        continue
+                    msg = redact_secrets(
+                        f"Turso Hrana HTTP 429 rate-limit/quota exhausted: {resp.text[:300]}",
+                        extra_secrets=[self._resolved_token],
+                    )
+                    record_turso_quota_blocked("TURSO_REMOTE_BLOCKED_FALLBACK_LOCAL", msg)
+                    raise TursoQuotaBlockedError(msg)
+                if resp.status_code in (502, 503, 504) and attempt < self.max_retries:
                     time.sleep(self.backoff_base_sec * (2**attempt))
                     continue
                 if resp.status_code >= 400:
+                    safe_txt = redact_secrets(resp.text[:300], extra_secrets=[self._resolved_token])
+                    if _is_quota_or_blocked_message(safe_txt):
+                        record_turso_quota_blocked("TURSO_REMOTE_BLOCKED_FALLBACK_LOCAL", safe_txt)
+                        raise TursoQuotaBlockedError(f"Turso Hrana HTTP {resp.status_code}: {safe_txt}")
                     raise sqlite3.OperationalError(
-                        f"Turso Hrana HTTP {resp.status_code}: {resp.text[:300]}"
+                        f"Turso Hrana HTTP {resp.status_code}: {safe_txt}"
                     )
                 body = resp.json()
                 req_read = 0
@@ -346,14 +510,20 @@ class TursoHranaClient:
                     self.total_rows_read += req_read
                     self.total_rows_written += req_written
                     self.last_query_duration_ms = req_dur
+                clear_turso_blocked_state()
                 return body
+            except TursoQuotaBlockedError:
+                raise
             except requests.RequestException as exc:
                 last_exc = exc
                 if attempt < self.max_retries:
                     time.sleep(self.backoff_base_sec * (2**attempt))
                     continue
-                raise sqlite3.OperationalError(f"Turso network failure: {exc}") from exc
-        raise sqlite3.OperationalError(f"Turso request failed: {last_exc}")
+                safe_exc = redact_secrets(str(exc), extra_secrets=[self._resolved_token])
+                raise sqlite3.OperationalError(f"Turso network failure: {safe_exc}") from exc
+        raise sqlite3.OperationalError(
+            f"Turso request failed: {redact_secrets(str(last_exc), extra_secrets=[self._resolved_token])}"
+        )
 
     def close(self) -> None:
         self._session.close()
@@ -517,7 +687,13 @@ class TursoRemoteConnection:
         for item in body.get("results", []):
             if item.get("type") == "error":
                 err = item.get("error") or {}
-                msg = str(err.get("message") or item)
+                msg = redact_secrets(
+                    str(err.get("message") or item),
+                    extra_secrets=[self.client._resolved_token],
+                )
+                if _is_quota_or_blocked_message(msg):
+                    record_turso_quota_blocked("TURSO_REMOTE_BLOCKED_FALLBACK_LOCAL", msg)
+                    raise TursoQuotaBlockedError(msg)
                 raise _map_turso_error(msg)
 
     def execute_batch(self, statements: Sequence[Tuple[str, Any]], *, atomic: bool = True) -> Tuple[int, int]:
@@ -689,6 +865,7 @@ _INGESTION_RUNS_COLS = (
     "revision_stats_json",
     "git_sha",
     "config_sha256",
+    "operational_config_sha256",
     "error_message",
 )
 
@@ -723,6 +900,8 @@ _FORECASTS_LEDGER_META_COLS = (
     "degraded_reason",
     "git_sha",
     "config_sha256",
+    "issued_by",
+    "result_config_sha256",
 )
 
 
@@ -779,9 +958,23 @@ class TursoReplicaManager:
         self.last_sync_duration_ms: float = 0.0
         self.last_sync_rows_read: int = 0
         self.last_sync_error: Optional[str] = None
+        self.last_hash_verified: Optional[bool] = None
+        self.consecutive_failures: int = 0
+        self.is_degraded: bool = False
+        self.degraded_reason: Optional[str] = None
 
-    def sync_now(self) -> Dict[str, Any]:
-        """Incrementally pull append-only rows from remote Turso into local SQLite replica."""
+    @staticmethod
+    def _cleanup_sqlite_files(path: Path) -> None:
+        for suffix in ("", "-wal", "-shm", "-journal"):
+            cand = path.with_name(path.name + suffix)
+            if cand.exists():
+                try:
+                    cand.unlink()
+                except OSError:
+                    pass
+
+    def sync_now(self, *, verify_hashes: Optional[bool] = None) -> Dict[str, Any]:
+        """Atomically stage, integrity-check, verify parity, finalize, and swap local SQLite replica."""
         import json as _json
 
         from src.data.vintage_store import (
@@ -793,14 +986,24 @@ class TursoReplicaManager:
 
         t0 = time.perf_counter()
         watermark_path = self.replica_path.with_suffix(".sync_state.json")
+        staging_path = self.replica_path.with_name(f"{self.replica_path.name}.staging.{os.getpid()}.db")
+        staging_wm_path = self.replica_path.with_name(f"{watermark_path.name}.tmp.{os.getpid()}")
+
         with self._sync_lock:
             self.replica_path.parent.mkdir(parents=True, exist_ok=True)
-            remote_client = TursoHranaClient(
-                db_url=self.db_url, auth_token=self.auth_token, read_only=True
-            )
-            remote_conn = TursoRemoteConnection(client=remote_client, read_only=True)
-            local_conn = connect_sqlite(self.replica_path, read_only=False)
+            self._cleanup_sqlite_files(staging_path)
+            if self.replica_path.exists():
+                shutil.copy2(self.replica_path, staging_path)
+
+            remote_client: Optional[TursoHranaClient] = None
+            remote_conn: Optional[TursoRemoteConnection] = None
+            local_conn: Optional[sqlite3.Connection] = None
             try:
+                remote_client = TursoHranaClient(
+                    db_url=self.db_url, auth_token=self.auth_token, read_only=True
+                )
+                remote_conn = TursoRemoteConnection(client=remote_client, read_only=True)
+                local_conn = connect_sqlite(staging_path, read_only=False)
                 init_schema(local_conn, seed_hcmc_location=False)
                 wm = {"obs_rowid": 0, "fc_rowid": 0}
                 if watermark_path.exists():
@@ -811,7 +1014,8 @@ class TursoReplicaManager:
                 local_obs_count = int(
                     local_conn.execute("SELECT COUNT(*) FROM observations_vintage").fetchone()[0]
                 )
-                if local_obs_count == 0:
+                is_initial_seed = local_obs_count == 0
+                if is_initial_seed:
                     wm["obs_rowid"] = 0
                     wm["fc_rowid"] = 0
 
@@ -923,17 +1127,64 @@ class TursoReplicaManager:
                     if len(batch) < 500:
                         break
 
-                watermark_path.write_text(
+                # 5. Staging verification: SQLite integrity_check + O(1) row counts + optional full table SHA-256
+                integ_row = local_conn.execute("PRAGMA integrity_check;").fetchone()
+                integ_status = str(integ_row[0]).lower() if integ_row else ""
+                if integ_status != "ok":
+                    raise RuntimeError(f"[REPLICA_INTEGRITY_ERROR] PRAGMA integrity_check returned {integ_status!r}.")
+
+                check_hashes = is_initial_seed if verify_hashes is None else bool(verify_hashes)
+                verified_counts: Dict[str, int] = {}
+                verified_hashes: Dict[str, str] = {}
+                for tbl in ("locations", "ingestion_runs", "observations_vintage", "forecasts_ledger"):
+                    loc_cnt = int(local_conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0])
+                    rem_cnt = int(remote_conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0])
+                    if loc_cnt != rem_cnt:
+                        raise RuntimeError(
+                            f"[REPLICA_PARITY_MISMATCH] Table {tbl} count mismatch: local={loc_cnt} != remote={rem_cnt}."
+                        )
+                    verified_counts[tbl] = loc_cnt
+                    _, loc_sha = compute_table_content_sha256(local_conn, tbl)
+                    verified_hashes[tbl] = loc_sha
+                    if check_hashes:
+                        _, rem_sha = compute_table_content_sha256(remote_conn, tbl)
+                        if loc_sha != rem_sha:
+                            raise RuntimeError(
+                                f"[REPLICA_SHA256_MISMATCH] Table {tbl}: local={loc_sha[:12]} != remote={rem_sha[:12]}."
+                            )
+
+                finalize_db_for_read_only(local_conn)
+                local_conn.close()
+                local_conn = None
+                remote_conn.close()
+                remote_conn = None
+
+                # Cleanly flush any WAL/SHM on target before atomic os.replace
+                for suffix in ("-wal", "-shm", "-journal"):
+                    cand = self.replica_path.with_name(self.replica_path.name + suffix)
+                    if cand.exists():
+                        try:
+                            cand.unlink()
+                        except OSError:
+                            pass
+                os.replace(staging_path, self.replica_path)
+                staging_wm_path.write_text(
                     _json.dumps({"obs_rowid": last_obs_rid, "fc_rowid": last_fc_rid}),
                     encoding="utf-8",
                 )
-                finalize_db_for_read_only(local_conn)
+                os.replace(staging_wm_path, watermark_path)
+
                 snap = remote_client.usage_snapshot()
                 self.sync_count += 1
                 self.last_sync_at_utc = now_utc_iso()
                 self.last_sync_duration_ms = round((time.perf_counter() - t0) * 1000.0, 2)
                 self.last_sync_rows_read = snap.total_rows_read
                 self.last_sync_error = None
+                self.last_hash_verified = bool(verify_hashes) if verify_hashes is not None else bool(verified_hashes)
+                self.consecutive_failures = 0
+                self.is_degraded = False
+                self.degraded_reason = None
+                clear_turso_blocked_state()
                 if self.on_synced_callback is not None:
                     self.on_synced_callback()
                 return {
@@ -941,14 +1192,45 @@ class TursoReplicaManager:
                     "last_sync_at_utc": self.last_sync_at_utc,
                     "duration_ms": self.last_sync_duration_ms,
                     "rows_read": self.last_sync_rows_read,
+                    "hash_verified": self.last_hash_verified,
                     "replica_path": str(self.replica_path),
+                    "table_counts": verified_counts,
+                    "table_sha256": verified_hashes,
                 }
             except Exception as exc:
-                self.last_sync_error = str(exc)
+                self.consecutive_failures += 1
+                extra = [self.auth_token] if self.auth_token else []
+                safe_err = redact_secrets(str(exc), extra_secrets=extra)
+                self.last_sync_error = safe_err[:300]
+                if isinstance(exc, TursoQuotaBlockedError):
+                    self.is_degraded = True
+                    self.degraded_reason = "TURSO_REMOTE_BLOCKED_FALLBACK_LOCAL"
+                elif self.consecutive_failures >= 3:
+                    self.is_degraded = True
+                    self.degraded_reason = "REPLICA_SYNC_CONSECUTIVE_FAILURES"
                 raise
             finally:
-                local_conn.close()
-                remote_conn.close()
+                if local_conn is not None:
+                    try:
+                        local_conn.close()
+                    except Exception:
+                        pass
+                if remote_conn is not None:
+                    try:
+                        remote_conn.close()
+                    except Exception:
+                        pass
+                if remote_client is not None:
+                    try:
+                        remote_client.close()
+                    except Exception:
+                        pass
+                self._cleanup_sqlite_files(staging_path)
+                if staging_wm_path.exists():
+                    try:
+                        staging_wm_path.unlink()
+                    except OSError:
+                        pass
 
     def start_background_sync(self, *, interval_sec: float = 300.0, jitter_sec: float = 30.0) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -964,7 +1246,11 @@ class TursoReplicaManager:
                 try:
                     self.sync_now()
                 except Exception as exc:
-                    logger.warning("Background Turso replica sync failed: %s", exc)
+                    extra = [self.auth_token] if self.auth_token else []
+                    logger.warning(
+                        "Background Turso replica sync failed: %s",
+                        redact_secrets(str(exc), extra_secrets=extra),
+                    )
 
         self._thread = threading.Thread(
             target=_loop, name="turso-replica-sync", daemon=True
@@ -1012,6 +1298,66 @@ def _clear_replica_registry_for_tests() -> None:
         for mgr in _REPLICA_MANAGERS.values():
             mgr.stop_background_sync()
         _REPLICA_MANAGERS.clear()
+    clear_turso_runtime_status()
+
+
+def _resolve_local_fallback_sqlite(explicit_db_path: Optional[Union[str, Path]] = None) -> Optional[Path]:
+    from src.data.provider import resolve_sqlite_db_path_and_role
+
+    p_arg = Path(explicit_db_path) if explicit_db_path else None
+    fallback_path, _ = resolve_sqlite_db_path_and_role(p_arg)
+    if fallback_path is not None and fallback_path.exists():
+        return fallback_path
+    return None
+
+
+class _QuotaFallbackReadConnection:
+    """
+    Read-only wrapper over `TursoRemoteConnection` that seamlessly falls back to a local
+    SQLite vintage DB if Turso returns HTTP 402/403/429 BLOCKED/quota exhaustion.
+    """
+
+    def __init__(self, remote_conn: TursoRemoteConnection, fallback_sqlite_path: Path) -> None:
+        self._remote = remote_conn
+        self._fallback_path = fallback_sqlite_path
+        self._local: Optional[sqlite3.Connection] = None
+
+    def _activate_fallback(self, reason: str, error_msg: str) -> sqlite3.Connection:
+        from src.data.vintage_store import connect_sqlite
+
+        record_turso_quota_blocked(reason, error_msg)
+        if self._local is None:
+            self._local = connect_sqlite(self._fallback_path, read_only=True)
+        return self._local
+
+    def execute(self, sql: str, parameters: Any = ()) -> Any:
+        if self._local is not None:
+            return self._local.execute(sql, parameters)
+        try:
+            return self._remote.execute(sql, parameters)
+        except TursoQuotaBlockedError as exc:
+            local_conn = self._activate_fallback("TURSO_REMOTE_BLOCKED_FALLBACK_LOCAL", str(exc))
+            return local_conn.execute(sql, parameters)
+
+    def commit(self) -> None:
+        if self._local is not None:
+            self._local.commit()
+        else:
+            self._remote.commit()
+
+    def rollback(self) -> None:
+        if self._local is not None:
+            self._local.rollback()
+        else:
+            self._remote.rollback()
+
+    def close(self) -> None:
+        if self._local is not None:
+            try:
+                self._local.close()
+            finally:
+                self._local = None
+        self._remote.close()
 
 
 def open_store_connection(
@@ -1043,7 +1389,14 @@ def open_store_connection(
         mgr = get_replica_manager(replica_path=Path(db_path) if db_path else None)
         if read_only:
             if not mgr.replica_path.exists():
-                mgr.sync_now()
+                try:
+                    mgr.sync_now()
+                except TursoQuotaBlockedError as exc:
+                    fallback_path = _resolve_local_fallback_sqlite(None)
+                    if fallback_path is None:
+                        raise
+                    record_turso_quota_blocked("TURSO_REMOTE_BLOCKED_FALLBACK_LOCAL", str(exc))
+                    return connect_sqlite(fallback_path, read_only=True), "local_fallback"
             return connect_sqlite(mgr.replica_path, read_only=True), resolved
 
         def _after_write() -> None:
@@ -1051,17 +1404,19 @@ def open_store_connection(
             try:
                 mgr.sync_now()
             except Exception as exc:
-                logger.warning("Post-write replica sync skipped: %s", exc)
+                logger.warning("Post-write replica sync skipped: %s", redact_secrets(str(exc)))
 
         return TursoRemoteConnection(read_only=False, on_commit_callback=_after_write), resolved
 
-    return (
-        TursoRemoteConnection(
-            read_only=read_only,
-            on_commit_callback=None if read_only else clear_db_query_cache,
-        ),
-        resolved,
+    remote_conn = TursoRemoteConnection(
+        read_only=read_only,
+        on_commit_callback=None if read_only else clear_db_query_cache,
     )
+    if read_only:
+        fallback_path = _resolve_local_fallback_sqlite(db_path)
+        if fallback_path is not None:
+            return _QuotaFallbackReadConnection(remote_conn, fallback_path), resolved
+    return remote_conn, resolved
 
 
 class TursoPlatformClient:
@@ -1076,19 +1431,21 @@ class TursoPlatformClient:
         self._session = requests.Session()
         self._session.headers.update({"Authorization": f"Bearer {tok}"})
 
+    def _request_json(self, method: str, path: str, **kwargs: Any) -> Dict[str, Any]:
+        r = self._session.request(method, f"{TURSO_PLATFORM_API_BASE}{path}", timeout=self.timeout_sec, **kwargs)
+        try:
+            r.raise_for_status()
+        except requests.HTTPError as exc:
+            safe_err = redact_secrets(str(exc), extra_secrets=[self._token])
+            raise requests.HTTPError(safe_err, response=r) from None
+        return r.json() if r.content else {}
+
     def list_organizations(self) -> List[Dict[str, Any]]:
-        r = self._session.get(f"{TURSO_PLATFORM_API_BASE}/organizations", timeout=self.timeout_sec)
-        r.raise_for_status()
-        data = r.json()
+        data = self._request_json("GET", "/organizations")
         return data if isinstance(data, list) else data.get("organizations", [data])
 
     def list_databases(self, org_slug: str) -> List[Dict[str, Any]]:
-        r = self._session.get(
-            f"{TURSO_PLATFORM_API_BASE}/organizations/{org_slug}/databases",
-            timeout=self.timeout_sec,
-        )
-        r.raise_for_status()
-        return r.json().get("databases", [])
+        return self._request_json("GET", f"/organizations/{org_slug}/databases").get("databases", [])
 
     def create_database(
         self, org_slug: str, name: str, *, group: str = "default", size_limit: Optional[str] = None
@@ -1096,13 +1453,7 @@ class TursoPlatformClient:
         payload: Dict[str, Any] = {"name": name, "group": group}
         if size_limit:
             payload["size_limit"] = size_limit
-        r = self._session.post(
-            f"{TURSO_PLATFORM_API_BASE}/organizations/{org_slug}/databases",
-            json=payload,
-            timeout=self.timeout_sec,
-        )
-        r.raise_for_status()
-        return r.json()
+        return self._request_json("POST", f"/organizations/{org_slug}/databases", json=payload)
 
     def create_db_token(
         self,
@@ -1112,28 +1463,26 @@ class TursoPlatformClient:
         expiration: str = "1d",
         authorization: str = "full-access",
     ) -> str:
-        r = self._session.post(
-            f"{TURSO_PLATFORM_API_BASE}/organizations/{org_slug}/databases/{db_name}/auth/tokens",
+        data = self._request_json(
+            "POST",
+            f"/organizations/{org_slug}/databases/{db_name}/auth/tokens",
             params={"expiration": expiration, "authorization": authorization},
-            timeout=self.timeout_sec,
         )
-        r.raise_for_status()
-        return str(r.json()["jwt"])
+        return str(data["jwt"])
 
     def delete_database(self, org_slug: str, db_name: str) -> None:
-        r = self._session.delete(
-            f"{TURSO_PLATFORM_API_BASE}/organizations/{org_slug}/databases/{db_name}",
-            timeout=self.timeout_sec,
-        )
-        r.raise_for_status()
+        self._request_json("DELETE", f"/organizations/{org_slug}/databases/{db_name}")
 
     def get_org_usage(self, org_slug: str) -> Dict[str, Any]:
-        r = self._session.get(
-            f"{TURSO_PLATFORM_API_BASE}/organizations/{org_slug}/usage",
-            timeout=self.timeout_sec,
-        )
-        r.raise_for_status()
-        return r.json()
+        data = self._request_json("GET", f"/organizations/{org_slug}/usage")
+        total = data.get("total") or {}
+        if total:
+            data["quota_status"] = evaluate_turso_quota_warning(
+                int(total.get("rows_read") or 0),
+                rows_written_used=int(total.get("rows_written") or 0),
+                sync_bytes_used=int(total.get("bytes_synced") or 0),
+            )
+        return data
 
 
 def compute_table_content_sha256(conn: Any, table_name: str) -> Tuple[int, str]:
@@ -1151,7 +1500,7 @@ def compute_table_content_sha256(conn: Any, table_name: str) -> Tuple[int, str]:
         cols = "location_id, obs_date, version_num, run_id, ingest_origin, missing_count, completeness_regime, row_value_hash, PRECTOTCORR, " + ", ".join(ALL_35_VARS[:3])
     elif table_name == "forecasts_ledger":
         order = "location_id, model_id, data_as_of, horizon_day, target_date"
-        cols = "location_id, model_id, eval_split_regime, data_as_of, horizon_day, target_date, ROUND(pred_mm, 8), input_window_hash, config_sha256"
+        cols = "location_id, model_id, eval_split_regime, data_as_of, horizon_day, target_date, ROUND(pred_mm, 8), input_window_hash, config_sha256, issued_by, result_config_sha256"
     else:
         raise ValueError(f"Unsupported verification table: {table_name!r}")
 
@@ -1180,15 +1529,17 @@ def migrate_sqlite_to_turso(
         ALL_35_VARS,
         DDL_V3_STATEMENTS,
         apply_migrations_v3_3,
+        apply_migrations_v3_4,
         connect_sqlite,
     )
 
     src_conn = connect_sqlite(source_sqlite_path, read_only=True)
     try:
-        # 1. Ensure schema V3.2 + V3.3 + triggers + views exist on remote Turso
+        # 1. Ensure schema V3.2..V3.4 + triggers + views exist on remote Turso
         for stmt in DDL_V3_STATEMENTS:
             target_conn.execute(stmt)
         apply_migrations_v3_3(target_conn)
+        apply_migrations_v3_4(target_conn)
 
         stats: Dict[str, Any] = {
             "source_db": str(source_sqlite_path),
