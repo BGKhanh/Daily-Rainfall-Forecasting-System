@@ -16,13 +16,13 @@ export const COLD_START_THRESHOLD_MS = Number(
 );
 
 export const APP_CONFIG = {
-  repoUrl: import.meta.env.VITE_REPO_URL || "https://github.com/BGKhanh/Precipitation-EDA",
+  repoUrl: import.meta.env.VITE_REPO_URL || "https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System",
   ciUrl:
     import.meta.env.VITE_CI_URL ||
-    "https://github.com/BGKhanh/Precipitation-EDA/actions",
+    "https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System/actions",
   mlflowUrl:
     import.meta.env.VITE_MLFLOW_URL ||
-    "https://dagshub.com/BGKhanh/Precipitation-EDA.mlflow",
+    "https://dagshub.com/BGKhanh/Daily-Rainfall-Forecasting-System.mlflow",
 };
 
 export class ApiClientError extends Error {

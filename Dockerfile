@@ -5,9 +5,9 @@ WORKDIR /frontend
 
 ARG VITE_API_BASE_URL=""
 ARG VITE_COLD_START_THRESHOLD_MS="3000"
-ARG VITE_REPO_URL="https://github.com/BGKhanh/Precipitation-EDA"
-ARG VITE_CI_URL="https://github.com/BGKhanh/Precipitation-EDA/actions"
-ARG VITE_MLFLOW_URL="https://dagshub.com/BGKhanh/Precipitation-EDA.mlflow"
+ARG VITE_REPO_URL="https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System"
+ARG VITE_CI_URL="https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System/actions"
+ARG VITE_MLFLOW_URL="https://dagshub.com/BGKhanh/Daily-Rainfall-Forecasting-System.mlflow"
 
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL \
     VITE_COLD_START_THRESHOLD_MS=$VITE_COLD_START_THRESHOLD_MS \

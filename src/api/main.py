@@ -1,5 +1,5 @@
 """
-FastAPI Serving Engine for HCMC Daily Rainfall Forecasting System
+FastAPI Serving Engine for HCMC Daily-Rainfall-Forecasting-System
 =================================================================
 Serves operational multi-horizon rainfall forecasts using:
 - Serving Champion: SC-35 XGBoost Tweedie F3 (governance_role: test_ranking_winner_as_originally_benchmarked)

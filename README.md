@@ -1,7 +1,7 @@
-# Ho Chi Minh City Daily Rainfall Forecasting System
+# Ho Chi Minh City Daily-Rainfall-Forecasting-System
 
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/release/python-3120/)
-[![Backend CI](https://github.com/BGKhanh/Precipitation-EDA/actions/workflows/ci.yml/badge.svg)](https://github.com/BGKhanh/Precipitation-EDA/actions/workflows/ci.yml)
+[![Backend CI](https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System/actions/workflows/ci.yml/badge.svg)](https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System/actions/workflows/ci.yml)
 [![Models](https://img.shields.io/badge/models-XGBoost%20%7C%20LightGBM%20%7C%20Hurdle%20%7C%20Neural-green.svg)]()
 [![Forecast Horizon](https://img.shields.io/badge/forecast%20horizon-1--7%20days-orange.svg)]()
 [![Tests Passing](https://img.shields.io/badge/tests-passing-brightgreen.svg)](tests/)

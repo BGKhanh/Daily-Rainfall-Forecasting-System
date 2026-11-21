@@ -238,7 +238,7 @@ jobs:
       - name: Audit Registry Aliases & SHA-256 Digests
         if: steps.check_secret.outputs.has_secret == 'true'
         env:
-          MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI || 'https://dagshub.com/BGKhanh/Precipitation-EDA.mlflow' }}
+          MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI || 'https://dagshub.com/BGKhanh/Daily-Rainfall-Forecasting-System.mlflow' }}
           MLFLOW_TRACKING_USERNAME: ${{ vars.MLFLOW_TRACKING_USERNAME || 'BGKhanh' }}
           MLFLOW_TRACKING_PASSWORD: ${{ secrets.DAGSHUB_USER_TOKEN }}
         run: |
