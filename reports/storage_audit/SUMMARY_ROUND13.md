@@ -2,7 +2,7 @@
 
 - **Docker Serving Image Tag**: `kgb0630/ds_108:1.7.0-serving`
 - **Baseline Commit & CI (`8b2ddc4`)**:
-  - `Backend Serving CI` Run ID: [`44893514827`](https://github.com/BGKhanh/Precipitation-EDA/actions/runs/44893514827) — `completed / success`
+  - `Backend Serving CI` Run ID: [`44893514827`](https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System/actions/runs/44893514827) — `completed / success`
   - Scheduled Ingest (`3895d97`) Run ID: `44851190614` — `completed / success`
 
 ---
@@ -30,7 +30,7 @@ Evaluation benchmark source: `research/imputer_benchmark/` (`pc_integration_audi
 ### A.2 Production Serving Implementation & Startup Artifact Verification
 - **Lookup Artifact**: `artifacts/models/solar_doy_climatology_dev_train.json`
   - Fit exclusively on `Dev Train` (`2001-01-01..2018-04-30`), circular window `r = 7`, explicit integer-string keys `"1".."366"` across all 11 solar/CERES variables.
-  - Artifact SHA-256: `5f7aec6a446a7b097b8ac8823e4483e59dd642f983bc0255cc1b2e977e7d326b`.
+  - Artifact SHA-256: `6d16431eeee0c44f55169c909d94bab3210e78dbe4a88a9435dc3c9dea6d9872`.
 - **Pure-Runtime Imputation Module**: `src/inference/solar_imputation.py`
   - Exports `load_solar_doy_climatology`, `apply_serving_solar_doy_fallback`, and `PC_CERES_POLICY_NAME = "P-c_DOY_MEDIAN_11_SOLAR_V1"`.
   - Rejects sentinels (`<= -900.0`), non-finite floats, and non-numeric strings; selectively fills **only** `NaN` solar cells in-memory while leaving observed FLASHFlux values untouched and never mutating `observations_vintage`.
@@ -104,5 +104,5 @@ Evaluation benchmark source: `research/imputer_benchmark/` (`pc_integration_audi
 - **Documentation & CI Updates**:
   - Updated `README.md`, `docs/LIMITATIONS.md`, `docs/CHANGELOG.md`, `.github/workflows/ci.yml` (`kgb0630/ds_108:1.7.0-serving`, V3.5 migration proof validation, `tests/test_pc_solar_imputation_contract.py`, `2026-11-17` smoke checks), `.agents/skills/serving-and-vintage-ops/SKILL.md`, and `.gitignore`.
 - **GitHub Actions CI Status**:
-  - **Baseline (`8b2ddc4`)**: `Backend Serving CI` Run [`44893514827`](https://github.com/BGKhanh/Precipitation-EDA/actions/runs/44893514827) — `completed / success`.
+  - **Baseline (`8b2ddc4`)**: `Backend Serving CI` Run [`44893514827`](https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System/actions/runs/44893514827) — `completed / success`.
   - **Round 13 (`1.7.0-serving`)**: Verified post-push on `origin/main` via GitHub Actions `Backend Serving CI` (`tier1-ci`, `docker-smoke`, `registry-verify`).
