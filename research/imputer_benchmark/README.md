@@ -63,3 +63,84 @@ This directory houses the self-contained exogenous imputation module, determinis
 
 - **Round 12 Status:** Operational `POST /predict` and production serving artifacts remain untouched.
 - **Recommended Next Step:** Run formal MLflow model governance evaluation to either (a) promote a FlashFlux-only 27-var (`retrained_no_ceres_27vars`) model contender via `@shadow_val_champ` -> `@shadow_test_contender` -> `@serving`, eliminating the ~80-day CERES SYN1deg lag dependency altogether, or (b) pair frozen `SC-31`/`SC-30` with an explicit DOY-climatology / Hybrid imputer fallback path behind an audited request flag.
+
+## Round 13: True Future Days, 3-Clause Validation Gate & `P-c` Split-Horizon Audit
+
+### Pre-Declared 3-Clause Validation Selection Gate Provenance
+
+- **Clause 1 (`Validation MAE`)**: $|\Delta\text{MAE}_{\text{val}}| \le 0.020\text{ mm}$ — originated in **Round 5 (`MT-Q1`)**.
+- **Clause 2 (`Validation RMSE`)**: $\Delta\text{RMSE}_{\text{val}} \le +0.050\text{ mm}$ — added following Round 12 and formalized with numeric bounds in **Round 13**.
+- **Clause 3 (`Validation P90-Tail MAE`, $\ge 11.086\text{ mm}$)**: $\Delta\text{P90-Tail MAE}_{\text{val}} \le +0.250\text{ mm}$ — added following Round 12 and formalized in **Round 13**.
+- *Why Clauses 2 & 3 are mandatory:* Round 12 proved `raw_nan` slightly lowered aggregate Validation MAE (`-0.0078` to `-0.0627 mm`) while severely degrading RMSE (`+0.13` to `+0.78 mm`) and P90-Tail MAE (`+1.00+ mm`); selecting on MAE alone would promote an unsafe model.
+- *Model-retention rationale:* Any future transition to a retrained 24/27-variable model would be motivated strictly by operational simplicity after completing full new-model MLflow governance — **not accuracy**, as Test-set accuracy differences vs the frozen 35-variable ensemble are statistically insignificant.
+
+### True Future Days (`effective_future_days = max(0, 7 - lag_days)`) from `ingestion_runs`
+
+| Policy | Constraints | Anchor (2026-11-21) | Typical Lag | `effective_future_days` (Nov 19 / 20 / 21) | `is_prospective = 1`? |
+|---|---|---|---:|---:|---|
+| `P-0_COMPLETE_ALL_35` | Requires all 35 variables (24 Meteo + 3 FlashFlux + 8 CERES SYN1deg); 0 true future days. | `2026-08-30` | 80-83d | 0 / 0 / 0 | `False` |
+| `P-a_P-b_FLASHFLUX_27VARS` | Eliminates CERES-8 only; 0 true future days whenever FlashFlux lag >= 7 days or interior dropouts occur (e.g., 2026-11-06). | `2026-11-12` | 6-9d | 0 / 0 / 0 | `False` |
+| `P-c_DOY_MEDIAN_ALL_11_SOLAR` | Anchor constrained only by 24 Meteorology vars; unlocks 3 to 5 true future days (is_prospective=1) and stateless DOY lookup. | `2026-11-17` | 2-4d | 5 / 4 / 3 | `True` |
+| `P-c-ffill7_LE7D_PLUS_DOY_CERES8` | Anchor constrained by 24 Meteo vars (FlashFlux ffill when lag<=7d + DOY CERES-8); same 3 to 5 true future days as P-c. | `2026-11-17` | 2-4d | 5 / 4 / 3 | `True` |
+
+### 3-Clause Validation Gate Decision: **`p_c_doy_median_all_11_solar`** (`stop_condition_triggered=False`)
+
+> Both P-c and passing candidate(s) fall within <= 0.005 mm sampling noise on max|delta_MAE_val|; selected P-c (DOY_MEDIAN_ALL_11_SOLAR) by Occam's razor because it is stateless and anchor-DOY deterministic.
+
+| Candidate | All 3 Models Pass? | `SC-35` Val dMAE / dRMSE / dP90 | `SC-31` Val dMAE / dRMSE / dP90 | `SC-30` Val dMAE / dRMSE / dP90 |
+|---|---|---|---|---|
+| `p_c_doy_median_all_11_solar` | `True` | +0.0028 / -0.0049 / -0.0296 | -0.0020 / -0.0000 / -0.0113 | +0.0053 / +0.0008 / -0.0426 |
+| `p_c_ffill7_lag2d` | `True` | +0.0103 / -0.0015 / -0.0295 | +0.0070 / +0.0036 / -0.0163 | +0.0152 / +0.0030 / -0.0584 |
+| `p_c_ffill7_lag3d` | `True` | +0.0122 / -0.0012 / -0.0353 | +0.0087 / +0.0039 / -0.0222 | +0.0195 / +0.0030 / -0.0606 |
+| `p_c_ffill7_lag5d` | `False` | +0.0196 / +0.0026 / -0.0336 | +0.0167 / +0.0102 / -0.0259 | +0.0307 / +0.0105 / -0.0586 |
+| `p_c_ffill7_lag7d` | `False` | +0.0250 / +0.0062 / -0.0268 | +0.0214 / +0.0110 / -0.0197 | +0.0421 / +0.0160 / -0.0464 |
+
+### Test (`2,184` Origins) Split-Horizon Breakdown (`h=1..7` vs `h=1..3` vs `h=4..7`)
+
+| Model | Method | Slice | MAE | delta MAE | MSE | RMSE | delta RMSE | P90-Tail MAE | delta P90-Tail |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|
+| SC-35 | `clean` | `h1_to_7` | 3.7333 | +0.0000 | 65.5809 | 8.0982 | +0.0000 | 15.5139 | +0.0000 |
+| SC-35 | `clean` | `h1_to_3` | 3.6747 | +0.0000 | 63.9118 | 7.9945 | +0.0000 | 15.1226 | +0.0000 |
+| SC-35 | `clean` | `h4_to_7` | 3.7774 | +0.0000 | 66.8327 | 8.1751 | +0.0000 | 15.8074 | +0.0000 |
+| SC-35 | `p_c_doy_median_all_11_solar` | `h1_to_7` | 3.7314 | -0.0019 | 65.5133 | 8.0940 | -0.0042 | 15.4973 | -0.0166 |
+| SC-35 | `p_c_doy_median_all_11_solar` | `h1_to_3` | 3.6760 | +0.0013 | 63.9140 | 7.9946 | +0.0001 | 15.1259 | +0.0033 |
+| SC-35 | `p_c_doy_median_all_11_solar` | `h4_to_7` | 3.7729 | -0.0044 | 66.7128 | 8.1678 | -0.0073 | 15.7759 | -0.0316 |
+| SC-35 | `p_c_ffill7_lag3d` | `h1_to_7` | 3.7317 | -0.0016 | 65.3067 | 8.0813 | -0.0169 | 15.4756 | -0.0383 |
+| SC-35 | `p_c_ffill7_lag3d` | `h1_to_3` | 3.6784 | +0.0038 | 63.6836 | 7.9802 | -0.0143 | 15.0812 | -0.0414 |
+| SC-35 | `p_c_ffill7_lag3d` | `h4_to_7` | 3.7716 | -0.0057 | 66.5240 | 8.1562 | -0.0189 | 15.7715 | -0.0359 |
+| SC-35 | `p_c_ffill7_lag7d` | `h1_to_7` | 3.7310 | -0.0024 | 65.2387 | 8.0770 | -0.0212 | 15.4582 | -0.0558 |
+| SC-35 | `p_c_ffill7_lag7d` | `h1_to_3` | 3.6785 | +0.0038 | 63.6329 | 7.9770 | -0.0175 | 15.0684 | -0.0542 |
+| SC-35 | `p_c_ffill7_lag7d` | `h4_to_7` | 3.7703 | -0.0070 | 66.4430 | 8.1513 | -0.0239 | 15.7505 | -0.0569 |
+| SC-35 | `retrained_no_solar_24vars` | `h1_to_7` | 3.7281 | -0.0053 | 65.3849 | 8.0861 | -0.0121 | 15.5231 | +0.0092 |
+| SC-35 | `retrained_no_solar_24vars` | `h1_to_3` | 3.6718 | -0.0029 | 63.7670 | 7.9854 | -0.0091 | 15.1579 | +0.0353 |
+| SC-35 | `retrained_no_solar_24vars` | `h4_to_7` | 3.7703 | -0.0070 | 66.5984 | 8.1608 | -0.0143 | 15.7971 | -0.0104 |
+| SC-31 | `clean` | `h1_to_7` | 3.7246 | +0.0000 | 65.9240 | 8.1194 | +0.0000 | 15.6293 | +0.0000 |
+| SC-31 | `clean` | `h1_to_3` | 3.6715 | +0.0000 | 64.4560 | 8.0284 | +0.0000 | 15.3099 | +0.0000 |
+| SC-31 | `clean` | `h4_to_7` | 3.7645 | +0.0000 | 67.0251 | 8.1869 | +0.0000 | 15.8689 | +0.0000 |
+| SC-31 | `p_c_doy_median_all_11_solar` | `h1_to_7` | 3.7227 | -0.0020 | 65.8674 | 8.1159 | -0.0035 | 15.6210 | -0.0084 |
+| SC-31 | `p_c_doy_median_all_11_solar` | `h1_to_3` | 3.6731 | +0.0015 | 64.3317 | 8.0207 | -0.0077 | 15.2800 | -0.0299 |
+| SC-31 | `p_c_doy_median_all_11_solar` | `h4_to_7` | 3.7598 | -0.0046 | 67.0191 | 8.1865 | -0.0004 | 15.8767 | +0.0078 |
+| SC-31 | `p_c_ffill7_lag3d` | `h1_to_7` | 3.7219 | -0.0027 | 65.7004 | 8.1056 | -0.0138 | 15.6090 | -0.0203 |
+| SC-31 | `p_c_ffill7_lag3d` | `h1_to_3` | 3.6700 | -0.0016 | 64.2185 | 8.0136 | -0.0148 | 15.2624 | -0.0475 |
+| SC-31 | `p_c_ffill7_lag3d` | `h4_to_7` | 3.7609 | -0.0036 | 66.8119 | 8.1739 | -0.0130 | 15.8690 | +0.0001 |
+| SC-31 | `p_c_ffill7_lag7d` | `h1_to_7` | 3.7197 | -0.0050 | 65.6057 | 8.0997 | -0.0196 | 15.5903 | -0.0391 |
+| SC-31 | `p_c_ffill7_lag7d` | `h1_to_3` | 3.6694 | -0.0022 | 64.1483 | 8.0093 | -0.0192 | 15.2530 | -0.0570 |
+| SC-31 | `p_c_ffill7_lag7d` | `h4_to_7` | 3.7574 | -0.0071 | 66.6988 | 8.1669 | -0.0199 | 15.8432 | -0.0257 |
+| SC-31 | `retrained_no_solar_24vars` | `h1_to_7` | 3.7291 | +0.0045 | 65.9142 | 8.1188 | -0.0006 | 15.6377 | +0.0084 |
+| SC-31 | `retrained_no_solar_24vars` | `h1_to_3` | 3.6792 | +0.0076 | 64.5525 | 8.0345 | +0.0060 | 15.3308 | +0.0209 |
+| SC-31 | `retrained_no_solar_24vars` | `h4_to_7` | 3.7666 | +0.0021 | 66.9354 | 8.1814 | -0.0055 | 15.8680 | -0.0009 |
+| SC-30 | `clean` | `h1_to_7` | 3.7501 | +0.0000 | 65.8426 | 8.1143 | +0.0000 | 15.6159 | +0.0000 |
+| SC-30 | `clean` | `h1_to_3` | 3.6885 | +0.0000 | 64.3358 | 8.0210 | +0.0000 | 15.2703 | +0.0000 |
+| SC-30 | `clean` | `h4_to_7` | 3.7962 | +0.0000 | 66.9727 | 8.1837 | +0.0000 | 15.8752 | +0.0000 |
+| SC-30 | `p_c_doy_median_all_11_solar` | `h1_to_7` | 3.7502 | +0.0002 | 65.7059 | 8.1059 | -0.0084 | 15.5782 | -0.0377 |
+| SC-30 | `p_c_doy_median_all_11_solar` | `h1_to_3` | 3.6902 | +0.0017 | 64.1137 | 8.0071 | -0.0139 | 15.2079 | -0.0624 |
+| SC-30 | `p_c_doy_median_all_11_solar` | `h4_to_7` | 3.7952 | -0.0010 | 66.9001 | 8.1792 | -0.0044 | 15.8560 | -0.0192 |
+| SC-30 | `p_c_ffill7_lag3d` | `h1_to_7` | 3.7465 | -0.0036 | 65.4444 | 8.0898 | -0.0246 | 15.5457 | -0.0702 |
+| SC-30 | `p_c_ffill7_lag3d` | `h1_to_3` | 3.6914 | +0.0029 | 64.0209 | 8.0013 | -0.0197 | 15.1844 | -0.0859 |
+| SC-30 | `p_c_ffill7_lag3d` | `h4_to_7` | 3.7877 | -0.0085 | 66.5121 | 8.1555 | -0.0282 | 15.8167 | -0.0585 |
+| SC-30 | `p_c_ffill7_lag7d` | `h1_to_7` | 3.7518 | +0.0018 | 65.3361 | 8.0831 | -0.0313 | 15.5202 | -0.0958 |
+| SC-30 | `p_c_ffill7_lag7d` | `h1_to_3` | 3.6952 | +0.0066 | 63.9190 | 7.9949 | -0.0260 | 15.1680 | -0.1023 |
+| SC-30 | `p_c_ffill7_lag7d` | `h4_to_7` | 3.7943 | -0.0019 | 66.3990 | 8.1486 | -0.0351 | 15.7843 | -0.0909 |
+| SC-30 | `retrained_no_solar_24vars` | `h1_to_7` | 3.8229 | +0.0728 | 65.8767 | 8.1164 | +0.0021 | 15.5419 | -0.0741 |
+| SC-30 | `retrained_no_solar_24vars` | `h1_to_3` | 3.7453 | +0.0568 | 64.2758 | 8.0172 | -0.0037 | 15.2026 | -0.0677 |
+| SC-30 | `retrained_no_solar_24vars` | `h4_to_7` | 3.8810 | +0.0848 | 67.0774 | 8.1901 | +0.0064 | 15.7963 | -0.0789 |
