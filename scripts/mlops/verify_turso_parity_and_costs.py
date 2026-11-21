@@ -47,6 +47,7 @@ from src.data.vintage_store import (  # noqa: E402
     DDL_V3_STATEMENTS,
     apply_migrations_v3_3,
     apply_migrations_v3_4,
+    apply_migrations_v3_5,
     clear_db_query_cache,
     connect_sqlite,
     finalize_db_for_read_only,
@@ -86,6 +87,7 @@ def _run_isolated_live_turso_tests_and_benchmark(platform: TursoPlatformClient, 
                 rw_conn.execute(stmt)
             apply_migrations_v3_3(rw_conn)
             apply_migrations_v3_4(rw_conn)
+            apply_migrations_v3_5(rw_conn)
 
             # Seed 1,000 days of HCMC observations in batched transactions for empirical row-scan measurement
             rw_conn.execute(
@@ -557,6 +559,7 @@ def main() -> None:
     local_prod_conn = connect_sqlite(PROD_DB_PATH, read_only=False)
     try:
         apply_migrations_v3_4(local_prod_conn, default_issued_by="automated_pipeline")
+        apply_migrations_v3_5(local_prod_conn)
         local_manual_cnt = int(
             local_prod_conn.execute(
                 "SELECT COUNT(*) FROM forecasts_ledger WHERE issued_by = 'manual_retrospective_backfill'"

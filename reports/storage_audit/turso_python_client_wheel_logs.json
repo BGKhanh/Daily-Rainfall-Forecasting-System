@@ -151,5 +151,11 @@
       }
     }
   },
-  "engineering_decision": "Retain zero-native-dependency Hrana HTTP v2 client (`requests` -> `POST /v2/pipeline`) for Turso because `libsql-experimental` ships source sdist only on Windows x64 (and lacks prebuilt Windows py3.12 binary wheels), `libsql` / native Rust crates add heavy native/wheel fragility, while `TursoHranaClient` works identically across Windows dev and Linux slim Docker."
+  "engineering_decision": "Retain zero-native-dependency Hrana HTTP v2 client (`requests` -> `POST /v2/pipeline`) for Turso because `libsql-experimental` lacks prebuilt Windows py3.12 binary wheels, while `libsql` (`0.1.11`) is a prebuilt native Rust FFI wrapper whose multi-statement DDL/trigger transaction semantics and wheel maintenance burden outweigh minimal HTTP overhead.",
+  "maintenance_tradeoff_and_review_milestone": {
+    "chosen_client": "TursoHranaClient (pure-Python requests HTTP/2 pipeline)",
+    "alternative_considered": "libsql==0.1.11",
+    "tradeoff_rationale": "Auditable 100% pure-Python SQL transport, zero C/Rust ABI fragility in python:3.12-slim Docker builds, deterministic hrana rows_read/written telemetry, and explicit retry/redaction hooks.",
+    "review_milestone": "Re-evaluate at Round 14 / Q1-2027 dependency review (or earlier if Turso deprecates Hrana /v2/pipeline HTTP transport)."
+  }
 }

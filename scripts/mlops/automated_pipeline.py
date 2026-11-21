@@ -321,11 +321,14 @@ def run_issue_forecasts_step(
     cfg_sha = compute_config_sha256()
     res_cfg_sha = compute_result_config_sha256()
     effective_end = end_date or today_hcmc().isoformat()
+    from src.data.vintage_store import METEO_24_VARS
+
     complete_anchors = list_complete_anchor_dates(
         conn,
         location_id=location_id,
         start_date=post_test_start,
         end_date=effective_end,
+        required_vars=METEO_24_VARS,
     )
     if not complete_anchors:
         logger.info("SKIPPED issue-forecasts: no COMPLETE_ALL_35 anchors found in [%s, %s].", post_test_start, effective_end)

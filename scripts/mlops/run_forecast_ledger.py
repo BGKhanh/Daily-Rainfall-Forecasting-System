@@ -82,7 +82,7 @@ def main() -> int:
         "--issued-by",
         type=str,
         default="manual_retrospective_backfill",
-        choices=("automated_pipeline", "manual_retrospective_backfill"),
+        choices=("automated_pipeline", "manual_retrospective_backfill", "manual_operational"),
         help="Provenance issuer label stamped on forecasts_ledger rows (Decision 1).",
     )
     parser.add_argument(
