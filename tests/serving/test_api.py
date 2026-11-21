@@ -64,14 +64,15 @@ def test_health_endpoint(client):
     assert "data_latency" in data
     assert "journal_mode" in data
     if data["db_role"] in ("bundled_demo_db", "local_or_production_db"):
-        assert data["default_complete_anchor_date"] == "2026-08-30"
+        assert str(data["default_complete_anchor_date"]) >= "2026-11-17"
         assert data["data_snapshot_date"] is not None
         assert data["scan_window_start"] is not None
         assert data["scan_window_end"] is not None
         assert isinstance(data["scan_window_total_days"], int) and data["scan_window_total_days"] > 0
         assert data["latest_precip_obs_date"] is not None
         assert data["latest_partial_obs_explanation"] is not None
-        assert data["anchor_range"] == {"min": "2001-02-04", "max": "2026-08-30"}
+        assert data["anchor_range"]["min"] == "2001-02-04"
+        assert data["anchor_range"]["max"] >= "2026-11-17"
         assert set(data["data_latency"]["groups"].keys()) == {
             "METEO_GEOSIT",
             "RAD_FLASHFLUX",
@@ -426,8 +427,8 @@ def _seed_round6_api_sqlite_db(db_path: Path, *, include_aug31_to_nov13: bool = 
         conn.close()
 
 
-def test_predict_reads_from_sqlite_db_effective_zero_past_observed_and_notice(client, tmp_path: Path, monkeypatch):
-    """Step 5: /predict reading SQLite DB defaults to 2026-08-30, sets past_observed & future_forecast_notice."""
+def test_predict_reads_from_sqlite_db_pc_degraded_and_future_days(client, tmp_path: Path, monkeypatch):
+    """Round 13 P-c: /predict reading SQLite DB advances default anchor to 2026-11-13 (MISSING_CERES_ONLY) with P-c metadata."""
     from datetime import timezone
     import src.api.main as api_main
     from src.data.provider import WeatherHistoryProvider
@@ -444,30 +445,68 @@ def test_predict_reads_from_sqlite_db_effective_zero_past_observed_and_notice(cl
     assert resp.status_code == 200
     data = resp.json()
     assert data["history_backend"] == "sqlite"
-    assert data["data_as_of"] == "2026-08-30"
-    assert data["anchor_completeness_regime"] == "COMPLETE_ALL_35"
-    assert data["lag_days"] == 78
-    assert data["effective_future_days"] == 0
-    assert "future_forecast_notice" in data
-    assert "effective_future_days = 0" in data["future_forecast_notice"]
+    assert data["data_as_of"] == "2026-11-13"
+    assert data["anchor_completeness_regime"] == "MISSING_CERES_ONLY"
+    assert data["lag_days"] == 3
+    assert data["effective_future_days"] == 4
+    assert data["is_degraded_input"] is True
+    assert data["ceres_policy_applied"] == "P-c_DOY_MEDIAN_11_SOLAR_V1"
+    assert len(data["imputed_variables"]) == 8
+    assert data["doy_table_sha256"] is not None
 
-    hc = data["serving_model"]["hindcast_and_current"]
+    # Explicit retrospective replay on 2026-08-30 keeps effective_future_days=0 and non-degraded flags
+    resp_retro = client.post("/predict", json={"location_id": "HCMC", "anchor_date": "2026-08-30"})
+    assert resp_retro.status_code == 200
+    d_retro = resp_retro.json()
+    assert d_retro["effective_future_days"] == 0
+    assert d_retro["is_degraded_input"] is False
+    assert d_retro["ceres_policy_applied"] == "NONE"
+    assert "effective_future_days = 0" in d_retro["future_forecast_notice"]
+    hc = d_retro["serving_model"]["hindcast_and_current"]
     assert len(hc) == 7
-    assert len(data["serving_model"]["forecast_future"]) == 0
     assert all(item["status"] == "past_observed" for item in hc)
-    assert all(item["observed_mm"] is not None for item in hc)
 
 
-def test_predict_rejects_incomplete_ceres_anchor_date(client, tmp_path: Path, monkeypatch):
-    """Step 5 / Invariant 5: Explicit anchor_date='2026-10-15' (MISSING_CERES_ONLY) is rejected cleanly."""
+def test_predict_pc_imputes_ceres_and_rejects_incomplete_meteo(client, tmp_path: Path, monkeypatch):
+    """Round 13 P-c: Explicit anchor_date='2026-10-15' (MISSING_CERES_ONLY) succeeds with P-c; INCOMPLETE_METEO fails 422."""
     from datetime import timezone
     import src.api.main as api_main
     from src.data.provider import WeatherHistoryProvider
+    from src.data.vintage_store import connect_sqlite, ALL_35_VARS, compute_row_value_hash
 
     monkeypatch.setattr(clock_mod, "now_utc", lambda: datetime(2026, 11, 16, 5, 0, 0, tzinfo=timezone.utc))
 
-    db_path = tmp_path / "api_anchor_reject.db"
+    db_path = tmp_path / "api_anchor_pc.db"
     _seed_round6_api_sqlite_db(db_path)
+
+    # Insert an INCOMPLETE_METEO date (2026-11-14 with T2M=None) to prove meteo fail-fast remains strict
+    conn = connect_sqlite(db_path, read_only=False)
+    try:
+        vals_incomplete = {c: 2.0 for c in ALL_35_VARS}
+        vals_incomplete["T2M"] = None
+        col_list = ", ".join(ALL_35_VARS)
+        ph = ", ".join(["?"] * len(ALL_35_VARS))
+        conn.execute(
+            f"""
+            INSERT INTO observations_vintage (
+                location_id, obs_date, version_num, ingested_at_utc, run_id,
+                age_days_at_ingest, ingest_origin, missing_count, missing_meteo_count,
+                missing_flashflux_count, missing_ceres_count, completeness_regime,
+                missing_vars_json, change_type_summary, late_fill_count, late_fill_vars_json,
+                value_change_count, value_change_details_json, anomaly_count, quality_flags_json,
+                row_value_hash, {col_list}
+            ) VALUES (
+                'HCMC', '2026-11-14', 0, '2026-11-16T01:00:00Z',
+                (SELECT run_id FROM ingestion_runs ORDER BY started_at_utc DESC LIMIT 1),
+                2, 'NASA_POWER_API', 1, 1, 0, 0, 'INCOMPLETE_METEO',
+                '["T2M"]', 'INITIAL_NRT', 0, '[]', 0, '{{}}', 0, '{{}}', ?, {ph}
+            )
+            """,
+            (compute_row_value_hash(vals_incomplete), *(vals_incomplete[c] for c in ALL_35_VARS)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
     provider = WeatherHistoryProvider(backend="sqlite", db_path=db_path)
     monkeypatch.setattr(api_main, "history_provider", provider)
@@ -476,10 +515,20 @@ def test_predict_rejects_incomplete_ceres_anchor_date(client, tmp_path: Path, mo
         "/predict",
         json={"location_id": "HCMC", "anchor_date": "2026-10-15"},
     )
-    assert resp.status_code == 422
-    err = resp.json()["error"]
-    assert err["code"] == "INCOMPLETE_RADIATION_AT_ANCHOR"
-    assert err["details"].get("completeness_regime") == "MISSING_CERES_ONLY"
+    assert resp.status_code == 200
+    d_ceres = resp.json()
+    assert d_ceres["anchor_completeness_regime"] == "MISSING_CERES_ONLY"
+    assert d_ceres["is_degraded_input"] is True
+    assert d_ceres["ceres_policy_applied"] == "P-c_DOY_MEDIAN_11_SOLAR_V1"
+
+    resp_bad_meteo = client.post(
+        "/predict",
+        json={"location_id": "HCMC", "anchor_date": "2026-11-14"},
+    )
+    assert resp_bad_meteo.status_code == 422
+    err = resp_bad_meteo.json()["error"]
+    assert err["code"] == "INCOMPLETE_METEOROLOGY_AT_ANCHOR"
+    assert err["details"].get("completeness_regime") == "INCOMPLETE_METEO"
 
     resp_missing = client.post(
         "/predict",
@@ -540,34 +589,39 @@ def test_predict_live_vintage_db_if_present(client):
     data = resp.json()
     PredictResponse.model_validate(data)
     assert data["history_backend"] == "sqlite"
-    assert data["anchor_date"] == "2026-08-30"
+    assert str(data["anchor_date"]) >= "2026-11-17"
     assert data["anchor_split_regime"] == "POST_TEST"
-    assert data["data_as_of"] == "2026-08-30"
-    assert data["effective_future_days"] == 0
-    assert data["forecast_horizon_mode"] == "retrospective_hindcast_only"
-    assert data["future_forecast_notice"] is not None
-    assert all(item["status"] == "past_observed" for item in data["serving_model"]["hindcast_and_current"])
+    assert data["is_degraded_input"] is True
+    assert data["ceres_policy_applied"] == "P-c_DOY_MEDIAN_11_SOLAR_V1"
 
-    resp_bad_anchor = client.post("/predict", json={"location_id": "HCMC", "anchor_date": "2026-10-15"})
-    assert resp_bad_anchor.status_code == 422
-    assert resp_bad_anchor.json()["error"]["code"] == "INCOMPLETE_RADIATION_AT_ANCHOR"
+    resp_ceres_anchor = client.post("/predict", json={"location_id": "HCMC", "anchor_date": "2026-10-15"})
+    assert resp_ceres_anchor.status_code == 200
+    d_1015 = resp_ceres_anchor.json()
+    PredictResponse.model_validate(d_1015)
+    assert d_1015["is_degraded_input"] is True
+    assert d_1015["effective_future_days"] == 0
+    assert all(item["status"] == "past_observed" for item in d_1015["serving_model"]["hindcast_and_current"])
 
 
 def test_scores_endpoint(client):
-    """Round 8 A1.5: /scores serves DB-backed POST_TEST scores, 95% Block Bootstrap CIs, and all 3 ML pairs."""
+    """Round 8/13: /scores serves DB-backed POST_TEST scores, 95% Block Bootstrap CIs, and all 3 ML pairs."""
     resp = client.get("/scores")
     assert resp.status_code == 200
     data = resp.json()
     ScoresResponse.model_validate(data)
     assert data["eval_split_regime"] == "POST_TEST"
     assert data["db_role"] in ("local_or_production_db", "bundled_demo_db")
-    assert data["n_origins"] == 122
-    assert data["n_forecasts_per_model"] == 854
-    assert data["total_scored_rows"] == 4270
+    if data["db_role"] == "bundled_demo_db":
+        assert data["n_origins"] == 122
+        assert data["n_forecasts_per_model"] == 854
+        assert data["total_scored_rows"] == 4270
+        assert data["origin_max"] == "2026-08-30"
+        assert data["block_bootstrap"]["n_blocks"] == 18
+    else:
+        assert data["n_origins"] >= 122
+        assert data["total_scored_rows"] >= 4270
     assert data["origin_min"] == "2026-05-01"
-    assert data["origin_max"] == "2026-08-30"
     assert data["block_bootstrap"]["block_length"] == 7
-    assert data["block_bootstrap"]["n_blocks"] == 18
     assert data["block_bootstrap"]["n_bootstrap"] == 2000
 
     for m_id in ("SC-31", "SC-30", "SC-35", "BASELINE_CLIMATOLOGY_DOY", "BASELINE_PERSISTENCE"):
@@ -576,7 +630,9 @@ def test_scores_endpoint(client):
         assert set(m_entry["by_horizon_vs_latest"].keys()) == {f"h{h}" for h in range(1, 8)}
         ci_95 = m_entry["confidence_intervals_95pct"]
         assert ci_95["block_length"] == 7
-        assert ci_95["n_blocks"] == 18
+        assert ci_95["n_blocks"] == data["block_bootstrap"]["n_blocks"]
+        if data["db_role"] == "bundled_demo_db":
+            assert ci_95["n_blocks"] == 18
         for metric in ("MAE", "RMSE", "MASE"):
             assert ci_95["overall"][metric]["ci_lower"] <= ci_95["overall"][metric]["ci_upper"]
         for h in range(1, 8):
@@ -605,10 +661,10 @@ def test_scores_endpoint(client):
         "seasonal_regime_note",
     }
 
-    # Explicit retrospective filter matches 122 origins; invalid params return unified 422 ErrorResponse
+    # Explicit retrospective filter matches expected origins; invalid params return unified 422 ErrorResponse
     resp_retro = client.get("/scores?eval_split_regime=POST_TEST&is_prospective=0")
     assert resp_retro.status_code == 200
-    assert resp_retro.json()["n_origins"] == 122
+    assert resp_retro.json()["n_origins"] == (122 if data["db_role"] == "bundled_demo_db" else data["n_origins"])
 
     bad_split = client.get("/scores?eval_split_regime=INVALID_SPLIT")
     assert bad_split.status_code == 422

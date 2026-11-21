@@ -154,7 +154,7 @@ def _seed_one_row_for_each_table(conn: sqlite3.Connection) -> tuple[str, str, st
             input_window_start, input_window_end, input_window_hash,
             input_vintage_manifest_json, input_provisional_days,
             meteo_missing_count, flashflux_max_ffill_days, ceres_policy_applied,
-            ceres_max_staleness_days, is_degraded_input, degraded_reason, git_sha
+            ceres_max_staleness_days, is_degraded_input, degraded_reason, git_sha, issued_by
         ) VALUES (
             ?, '2026-11-16T00:00:02Z', '2026-04-23', 'Asia/Ho_Chi_Minh', 'HCMC',
             'SC-35', 'ML_SERVING', 'serving', 1,
@@ -163,7 +163,7 @@ def _seed_one_row_for_each_table(conn: sqlite3.Connection) -> tuple[str, str, st
             '2026-03-22', '2026-04-20', 'winhash',
             '[]', 0,
             0, 0, 'NONE_COMPLETE',
-            0, 0, NULL, 'testsha'
+            0, 0, NULL, 'testsha', 'automated_pipeline'
         )
         """,
         (forecast_id,),
@@ -239,13 +239,13 @@ def test_30_immutability_trigger_matrix(recursive_triggers: bool):
                         horizon_day, target_date, temporal_status_at_issue, pred_mm,
                         input_window_start, input_window_end, input_window_hash,
                         input_vintage_manifest_json, input_provisional_days,
-                        ceres_policy_applied, git_sha
+                        ceres_policy_applied, git_sha, issued_by
                     ) VALUES (
                         ?, '2026-11-16T01:00:00Z', '2026-04-23', 'HCMC',
                         'SC-35', 'ML_SERVING', 'tampered', '2026-04-20', 'TEST',
                         1, '2026-04-21', 'future_forecast', 88.0,
                         '2026-03-22', '2026-04-20', 'winhash', '[]', 0,
-                        'NONE_COMPLETE', 'testsha'
+                        'NONE_COMPLETE', 'testsha', 'automated_pipeline'
                     )
                     """,
                     (forecast_id,),
@@ -259,13 +259,13 @@ def test_30_immutability_trigger_matrix(recursive_triggers: bool):
                         horizon_day, target_date, temporal_status_at_issue, pred_mm,
                         input_window_start, input_window_end, input_window_hash,
                         input_vintage_manifest_json, input_provisional_days,
-                        ceres_policy_applied, git_sha
+                        ceres_policy_applied, git_sha, issued_by
                     ) VALUES (
                         'new_fc_id_unique_collision', '2026-11-16T01:00:00Z', '2026-04-23', 'HCMC',
                         'SC-35', 'ML_SERVING', 'tampered', '2026-04-20', 'TEST',
                         1, '2026-04-21', 'future_forecast', 88.0,
                         '2026-03-22', '2026-04-20', 'winhash', '[]', 0,
-                        'NONE_COMPLETE', 'testsha'
+                        'NONE_COMPLETE', 'testsha', 'automated_pipeline'
                     )
                     """,
                     (),
@@ -279,13 +279,13 @@ def test_30_immutability_trigger_matrix(recursive_triggers: bool):
                         horizon_day, target_date, temporal_status_at_issue, pred_mm,
                         input_window_start, input_window_end, input_window_hash,
                         input_vintage_manifest_json, input_provisional_days,
-                        ceres_policy_applied, git_sha
+                        ceres_policy_applied, git_sha, issued_by
                     ) VALUES (
                         ?, '2026-11-16T01:00:00Z', '2026-04-23', 'HCMC',
                         'SC-35', 'ML_SERVING', 'tampered', '2026-04-20', 'TEST',
                         1, '2026-04-21', 'future_forecast', 88.0,
                         '2026-03-22', '2026-04-20', 'winhash', '[]', 0,
-                        'NONE_COMPLETE', 'testsha'
+                        'NONE_COMPLETE', 'testsha', 'automated_pipeline'
                     )
                     ON CONFLICT(forecast_id) DO UPDATE SET pred_mm = excluded.pred_mm
                     """,
@@ -505,7 +505,7 @@ def test_revision_as_of_hash_and_dual_scores():
                 horizon_day, target_date, temporal_status_at_issue, pred_mm,
                 input_window_start, input_window_end, input_window_hash,
                 input_vintage_manifest_json, input_provisional_days,
-                ceres_policy_applied, git_sha
+                ceres_policy_applied, git_sha, issued_by
             ) VALUES (
                 'fc_rev_001', ?, '2026-04-26', 'HCMC',
                 'SC-35', 'ML_SERVING', 'serving', 1,
@@ -513,7 +513,7 @@ def test_revision_as_of_hash_and_dual_scores():
                 1, '2026-04-25', 'past_unverified', 5.0,
                 '2026-03-26', '2026-04-24', ?,
                 '[]', 30,
-                'NONE_COMPLETE', 'testsha'
+                'NONE_COMPLETE', 'testsha', 'automated_pipeline'
             )
             """,
             (t1_ts, hash_at_t1),
@@ -710,6 +710,7 @@ def test_insert_forecasts_idempotent_skips_duplicates(caplog):
                 "input_provisional_days": 30,
                 "ceres_policy_applied": "NONE_COMPLETE",
                 "git_sha": "testsha",
+                "issued_by": "automated_pipeline",
             }
 
         ins1, skip1 = insert_forecasts_idempotent(conn, [_make_fc(h) for h in (1, 2, 3)])
@@ -890,6 +891,7 @@ def test_mock_nasa_api_revision_and_as_of_scores(tmp_path: Path):
                     "input_provisional_days": 30,
                     "ceres_policy_applied": "NONE_COMPLETE",
                     "git_sha": "testsha",
+                    "issued_by": "automated_pipeline",
                 }
             ],
         )
@@ -1041,6 +1043,7 @@ def test_ddl_v3_2_unpublished_skip_first_non_null_precip_and_temporal_status(tmp
                     "input_provisional_days": 30,
                     "ceres_policy_applied": "NONE_COMPLETE",
                     "git_sha": "testsha",
+                    "issued_by": "automated_pipeline",
                 }
             ],
         )
@@ -1126,6 +1129,7 @@ def test_timestamp_normalization_and_opposing_formats_is_prospective(tmp_path: P
                         "input_provisional_days": 30,
                         "ceres_policy_applied": "NONE_COMPLETE",
                         "git_sha": "sha",
+                        "issued_by": "automated_pipeline",
                     }
                 ],
             )
@@ -1201,11 +1205,11 @@ def test_timestamp_normalization_and_opposing_formats_is_prospective(tmp_path: P
                     artifact_sha256, data_as_of, eval_split_regime, horizon_day, target_date,
                     temporal_status_at_issue, pred_mm, input_window_start, input_window_end,
                     input_window_hash, input_vintage_manifest_json, input_provisional_days,
-                    ceres_policy_applied, git_sha
+                    ceres_policy_applied, git_sha, issued_by
                 ) VALUES (?, ?, '2026-11-16', 'HCMC', 'SC-35', 'ML_SERVING',
                           'art', ?, 'POST_TEST', 1, ?,
                           'future_forecast', 4.5, '2026-10-17', ?,
-                          'wh', '[]', 30, 'NONE_COMPLETE', 'sha')
+                          'wh', '[]', 30, 'NONE_COMPLETE', 'sha', 'automated_pipeline')
                 """,
                 (f"fc_{pid}", iss_raw, f"2026-11-{10 + idx:02d}", t_date, f"2026-11-{10 + idx:02d}"),
             )

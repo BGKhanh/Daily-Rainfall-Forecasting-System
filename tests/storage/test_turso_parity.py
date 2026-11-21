@@ -636,11 +636,11 @@ _HAS_LIVE_TURSO_CREDS = bool(
     reason="Intentional skip in stateless CI: requires live Turso secrets; verified report persisted at reports/storage_audit/turso_parity_and_cost_report.json",
 )
 def test_live_turso_credentials_parity_when_configured():
-    """Verify live Turso DDL V3.4 & Two-DB Option A policy when credentials are present."""
+    """Verify live Turso DDL V3.5 & Two-DB Option A policy when credentials are present."""
     conn = TursoRemoteConnection(read_only=True)
     try:
-        v34 = conn.execute("SELECT version FROM schema_migrations WHERE version = 'V3.4'").fetchone()
-        assert v34 is not None
+        v35 = conn.execute("SELECT version FROM schema_migrations WHERE version = 'V3.5'").fetchone()
+        assert v35 is not None
         backfill_cnt = int(
             conn.execute(
                 "SELECT COUNT(*) FROM forecasts_ledger WHERE issued_by = 'manual_retrospective_backfill'"

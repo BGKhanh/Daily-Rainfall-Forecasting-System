@@ -338,30 +338,33 @@ def test_predictor_registry_mode_mocked(sample_35d_df: pd.DataFrame, local_predi
     ],
 )
 def test_strict_validation_rejects_missing_or_nan_ceres_columns(ceres_col: str):
-    """T7: Zero silent mean imputation when any of the 8 CERES radiation columns is missing or NaN."""
+    """T7 / Round 13 P-c: Missing CERES column & -999 sentinel still reject fail-fast, while NaN CERES triggers selective P-c DOY fallback."""
     from fastapi.testclient import TestClient
     from src.api.main import app
     from src.inference.predictor import StandaloneRainfallPredictor
+    from src.inference.solar_imputation import PC_CERES_POLICY_NAME, SOLAR_VI_TO_EN
     from src.inference.validation import ServingValidationError
 
     sample_path = Path(__file__).resolve().parents[2] / "artifacts" / "models" / "sample_recent_history_35d.csv"
     df_base = pd.read_csv(sample_path)
     predictor = StandaloneRainfallPredictor(artifact_dir=sample_path.parent, mode="local")
+    valid_run_date = pd.to_datetime(df_base["Ngày"]).max().strftime("%Y-%m-%d")
 
-    # 1) NaN in latest row -> must raise ServingValidationError (zero silent fill)
+    # 1) NaN in latest row -> under Round 13 P-c, ONLY that CERES variable is selectively imputed in-memory
     df_nan = df_base.copy()
     df_nan.loc[df_nan.index[-1], ceres_col] = float("nan")
-    with pytest.raises(ServingValidationError) as exc_nan:
-        predictor.predict(df_nan)
-    assert exc_nan.value.code == "INVALID_OR_MISSING_METEO_INPUT"
+    res_pc = predictor.predict(df_nan, run_date=valid_run_date)
+    assert res_pc["is_degraded_input"] is True
+    assert res_pc["ceres_policy_applied"] == PC_CERES_POLICY_NAME
+    assert res_pc["imputed_variables"] == [SOLAR_VI_TO_EN[ceres_col]]
 
-    # 2) Dropped CERES column -> must raise ServingValidationError
+    # 2) Dropped CERES column -> must still raise ServingValidationError
     df_drop = df_base.drop(columns=[ceres_col])
     with pytest.raises(ServingValidationError) as exc_drop:
-        predictor.predict(df_drop)
+        predictor.predict(df_drop, run_date=valid_run_date)
     assert exc_drop.value.code == "INVALID_OR_MISSING_METEO_INPUT"
 
-    # 3) FastAPI /predict rejects NASA -999 sentinel or NaN with HTTP 400
+    # 3) FastAPI /predict rejects NASA -999 sentinel with HTTP 400
     with TestClient(app) as api_client:
         df_sentinel = df_base.copy()
         df_sentinel.loc[df_sentinel.index[-1], ceres_col] = -999.0

@@ -209,9 +209,12 @@ reports/storage_audit/*
 !reports/storage_audit/turso_parity_and_cost_report.json
 !reports/storage_audit/turso_python_client_wheel_logs.json
 !reports/storage_audit/SUMMARY_ROUND12.md
+!reports/storage_audit/SUMMARY_ROUND13.md
+!reports/storage_audit/immutable_ledger_migration_proof_v35.json
 !reports/ui_screenshots/
 reports/ui_screenshots/*
 !reports/ui_screenshots/r12_*.png
+!reports/ui_screenshots/r13_*.png
 
 # Office documents & texts
 *.docx
@@ -233,6 +236,7 @@ tests/*
 !tests/serving/**
 !tests/storage/
 !tests/storage/**
+!tests/test_pc_solar_imputation_contract.py
 scripts/*
 !scripts/audit/
 scripts/audit/*

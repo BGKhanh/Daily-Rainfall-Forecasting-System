@@ -176,13 +176,17 @@ def test_db_vs_npz_2184_origin_test_parity_and_demo_post_test():
     finally:
         conn.close()
 
-    # Round 8 Two-DB invariant: live production DB (if present locally) must hold observations only (ledger = 0)
+    # Round 8/13 Two-DB Option A invariant: live production DB (if present locally) must NEVER contain manual_retrospective_backfill rows
     if live_db.exists():
         conn_live = connect_sqlite(live_db, read_only=True)
         try:
             obs_count = int(conn_live.execute("SELECT COUNT(*) FROM observations_vintage").fetchone()[0])
-            ledger_count = int(conn_live.execute("SELECT COUNT(*) FROM forecasts_ledger").fetchone()[0])
+            backfill_count = int(
+                conn_live.execute(
+                    "SELECT COUNT(*) FROM forecasts_ledger WHERE issued_by = 'manual_retrospective_backfill'"
+                ).fetchone()[0]
+            )
             assert obs_count >= 9449
-            assert ledger_count == 0, f"Expected 0 retrospective ledger rows in live DB, got {ledger_count}"
+            assert backfill_count == 0, f"Expected 0 retrospective backfill ledger rows in live DB, got {backfill_count}"
         finally:
             conn_live.close()
