@@ -254,17 +254,37 @@ export const DataStatusSection: React.FC<DataStatusSectionProps> = ({
   const xAtIdx = (idx: number) =>
     series.length <= 1 ? padL + plotW / 2 : padL + (idx / (series.length - 1)) * plotW;
 
-  // Build non-gap segmented paths + contiguous NOT_PUBLISHED gap bands
+  // Build non-gap segmented paths + partial dotted connectors + contiguous NOT_PUBLISHED gap bands
   const segmentPaths = useMemo(() => {
     const paths: Array<{ status: "FINALIZED" | "PROVISIONAL"; d: string; key: string }> = [];
+    const dottedPaths: Array<{ status: "FINALIZED" | "PROVISIONAL"; d: string; key: string }> = [];
+    const partialMarkers: Array<{
+      key: string;
+      x: number;
+      y: number;
+      status: "FINALIZED" | "PROVISIONAL";
+      date: string;
+      val: number;
+      pub: number;
+      cal: number;
+    }> = [];
+    const completeMarkers: Array<{
+      key: string;
+      x: number;
+      y: number;
+      status: "FINALIZED" | "PROVISIONAL";
+      date: string;
+      val: number;
+    }> = [];
     const gapBands: Array<{ startIdx: number; endIdx: number; key: string }> = [];
 
     let curRunStatus: "FINALIZED" | "PROVISIONAL" | null = null;
     let curRunCoords: Array<{ x: number; y: number }> = [];
+    let prevValid: { x: number; y: number; status: "FINALIZED" | "PROVISIONAL"; isPartial: boolean } | null = null;
     let gapStart: number | null = null;
 
     const flushRun = (idxMarker: number) => {
-      if (curRunStatus && curRunCoords.length >= 1) {
+      if (curRunStatus && curRunCoords.length >= 2) {
         const d = curRunCoords
           .map((p, k) => `${k === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`)
           .join(" ");
@@ -279,6 +299,7 @@ export const DataStatusSection: React.FC<DataStatusSectionProps> = ({
       const val = getValue(pt);
       if (pt.status === "NOT_PUBLISHED" || val === null) {
         flushRun(i);
+        prevValid = null;
         if (gapStart === null) gapStart = i;
         continue;
       }
@@ -286,22 +307,70 @@ export const DataStatusSection: React.FC<DataStatusSectionProps> = ({
         gapBands.push({ startIdx: gapStart, endIdx: i - 1, key: `gap_${gapStart}` });
         gapStart = null;
       }
+      const st = pt.status as "FINALIZED" | "PROVISIONAL";
       const coord = { x: xAtIdx(i), y: yToPx(val) };
-      if (curRunStatus === pt.status) {
+      const isPartial =
+        pt.published_days_count > 0 && pt.published_days_count < pt.calendar_days_count;
+
+      if (isPartial) {
+        partialMarkers.push({
+          key: `partial_${i}`,
+          x: coord.x,
+          y: coord.y,
+          status: st,
+          date: pt.date,
+          val,
+          pub: pt.published_days_count,
+          cal: pt.calendar_days_count,
+        });
+        flushRun(i);
+        if (prevValid) {
+          dottedPaths.push({
+            status: st,
+            d: `M${prevValid.x.toFixed(1)},${prevValid.y.toFixed(1)} L${coord.x.toFixed(1)},${coord.y.toFixed(1)}`,
+            key: `dot_${i}`,
+          });
+        }
+        prevValid = { x: coord.x, y: coord.y, status: st, isPartial: true };
+        continue;
+      }
+
+      if (data?.granularity !== "daily") {
+        completeMarkers.push({
+          key: `pt_${i}`,
+          x: coord.x,
+          y: coord.y,
+          status: st,
+          date: pt.date,
+          val,
+        });
+      }
+
+      if (prevValid && prevValid.isPartial) {
+        dottedPaths.push({
+          status: st,
+          d: `M${prevValid.x.toFixed(1)},${prevValid.y.toFixed(1)} L${coord.x.toFixed(1)},${coord.y.toFixed(1)}`,
+          key: `dot_to_${i}`,
+        });
+        flushRun(i);
+        curRunStatus = st;
+        curRunCoords = [coord];
+      } else if (curRunStatus === st) {
         curRunCoords.push(coord);
       } else {
-        const prevValid = curRunCoords.length > 0 ? curRunCoords[curRunCoords.length - 1] : null;
+        const prevComplete = curRunCoords.length > 0 ? curRunCoords[curRunCoords.length - 1] : null;
         flushRun(i);
-        curRunStatus = pt.status;
-        curRunCoords = prevValid ? [prevValid, coord] : [coord];
+        curRunStatus = st;
+        curRunCoords = prevComplete ? [prevComplete, coord] : [coord];
       }
+      prevValid = { x: coord.x, y: coord.y, status: st, isPartial: false };
     }
     flushRun(series.length);
     if (gapStart !== null) {
       gapBands.push({ startIdx: gapStart, endIdx: series.length - 1, key: `gap_${gapStart}` });
     }
-    return { paths, gapBands };
-  }, [series, metricMode, yMax]);
+    return { paths, dottedPaths, partialMarkers, completeMarkers, gapBands };
+  }, [series, metricMode, yMax, data?.granularity]);
 
   const forecastOverlayPathD = useMemo(() => {
     if (data?.granularity !== "daily" || !overlay.length) return "";
@@ -368,6 +437,9 @@ export const DataStatusSection: React.FC<DataStatusSectionProps> = ({
               max={data?.valid_range.max_date ?? health?.scan_window_end ?? "2026-11-19"}
               onChange={(e) => setStartDate(e.target.value)}
             />
+            <div className="iso-date-hint" data-testid="obs-start-iso">
+              {EN.dataRetrieval.isoDateHint(startDate)}
+            </div>
           </div>
 
           <div className="control-field">
@@ -380,6 +452,9 @@ export const DataStatusSection: React.FC<DataStatusSectionProps> = ({
               max={data?.valid_range.max_date ?? health?.scan_window_end ?? "2026-11-19"}
               onChange={(e) => setEndDate(e.target.value)}
             />
+            <div className="iso-date-hint" data-testid="obs-end-iso">
+              {EN.dataRetrieval.isoDateHint(endDate)}
+            </div>
           </div>
 
           <div className="control-field">
@@ -535,6 +610,12 @@ export const DataStatusSection: React.FC<DataStatusSectionProps> = ({
                 <span className="legend-swatch legend-swatch--gap" />
                 {EN.dataRetrieval.legendNotPublished}
               </span>
+              {(data.granularity !== "daily" || segmentPaths.partialMarkers.length > 0) && (
+                <span className="legend-item" data-testid="legend-partial-period">
+                  <span className="line-swatch line-swatch--partial" />
+                  {EN.dataRetrieval.legendPartial}
+                </span>
+              )}
             </div>
 
             {data.granularity !== "daily" && (
@@ -600,6 +681,57 @@ export const DataStatusSection: React.FC<DataStatusSectionProps> = ({
                     strokeWidth={2.4}
                   />
                 ))}
+
+                {segmentPaths.dottedPaths.map((seg) => (
+                  <path
+                    key={seg.key}
+                    data-segment="PARTIAL"
+                    data-partial-connector="true"
+                    d={seg.d}
+                    fill="none"
+                    stroke={seg.status === "FINALIZED" ? FINALIZED_COLOR : PROVISIONAL_COLOR}
+                    strokeWidth={2.2}
+                    strokeDasharray="2 4"
+                  />
+                ))}
+
+                {segmentPaths.completeMarkers.map((cm) => (
+                  <circle
+                    key={cm.key}
+                    cx={cm.x}
+                    cy={cm.y}
+                    r={3.2}
+                    fill={cm.status === "FINALIZED" ? FINALIZED_COLOR : PROVISIONAL_COLOR}
+                  >
+                    <title>{`${formatReadableDate(cm.date)}: ${cm.val.toFixed(2)}`}</title>
+                  </circle>
+                ))}
+
+                {segmentPaths.partialMarkers.map((pm) => {
+                  const strokeCol = pm.status === "FINALIZED" ? FINALIZED_COLOR : PROVISIONAL_COLOR;
+                  return (
+                    <circle
+                      key={pm.key}
+                      cx={pm.x}
+                      cy={pm.y}
+                      r={5}
+                      fill="#ffffff"
+                      stroke={strokeCol}
+                      strokeWidth={2.5}
+                      data-partial-period="true"
+                      data-partial-status={pm.status}
+                    >
+                      <title>
+                        {EN.dataRetrieval.partialPointTooltip(
+                          formatReadableDate(pm.date),
+                          pm.val.toFixed(2),
+                          pm.pub,
+                          pm.cal
+                        )}
+                      </title>
+                    </circle>
+                  );
+                })}
 
                 {forecastOverlayPathD && (
                   <path

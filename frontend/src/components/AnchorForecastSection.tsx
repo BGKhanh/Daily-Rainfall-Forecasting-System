@@ -18,6 +18,7 @@ interface AnchorForecastSectionProps {
   locations: LocationItem[];
   selectedLocationIds: string[];
   focusedLocationId: string;
+  onFocusLocation: (locationId: string) => void;
   onToggleLocation: (locationId: string) => void;
   onRemoveLocation?: (locationId: string) => void;
   onClearSelection?: () => void;
@@ -63,6 +64,7 @@ export const AnchorForecastSection: React.FC<AnchorForecastSectionProps> = ({
   locations,
   selectedLocationIds,
   focusedLocationId,
+  onFocusLocation,
   onToggleLocation,
   onRemoveLocation,
   onClearSelection,
@@ -191,10 +193,48 @@ export const AnchorForecastSection: React.FC<AnchorForecastSectionProps> = ({
       />
 
       <section className="panel result-dock" aria-label={EN.forecast.chartHeading} data-testid="result-dock">
+        {selectedLocationIds.length > 1 && (
+          <div
+            className="forecast-tabs-bar"
+            role="tablist"
+            aria-label={EN.forecast.tabsAriaLabel}
+            data-testid="forecast-location-tabs"
+          >
+            {selectedLocationIds.map((locId) => {
+              const feat = geoJson?.features.find((f) => f.properties.location_id === locId);
+              const locMeta = locations.find((l) => l.location_id === locId);
+              const tabName = feat?.properties.display_name ?? locMeta?.display_name ?? locId;
+              const isAvail = Boolean(locMeta?.is_active);
+              const isSelectedTab = locId === focusedLocationId;
+              return (
+                <button
+                  key={locId}
+                  type="button"
+                  role="tab"
+                  aria-selected={isSelectedTab}
+                  data-location-id={locId}
+                  className={[
+                    "forecast-tab",
+                    isSelectedTab ? "forecast-tab--active" : "",
+                    isAvail ? "forecast-tab--supported" : "forecast-tab--unsupported",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  onClick={() => onFocusLocation(locId)}
+                >
+                  <span>{tabName}</span>
+                  <span className={`pill-badge ${isAvail ? "pill-badge--active" : ""}`}>
+                    {isAvail ? EN.map.statusAvailable : EN.map.statusNotAvailableYet}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {!isFocusedSupported ? (
           <div className="info-banner" role="status" data-testid="forecast-unavailable-panel">
             <h3>{EN.forecast.unavailableHeading(focusedDisplayName)}</h3>
-            <p className="unavailable-headline">{EN.forecast.unavailableMessage}</p>
             <p>{EN.forecast.unavailableDetail}</p>
           </div>
         ) : friendlyError ? (
@@ -225,6 +265,9 @@ export const AnchorForecastSection: React.FC<AnchorForecastSectionProps> = ({
                     {EN.forecast.selectedLocationLabel}: <strong>{focusedDisplayName}</strong>
                   </span>
                 </div>
+                <p className="dock-spatial-note" data-testid="forecast-spatial-note">
+                  {EN.forecast.spatialShortNote}
+                </p>
               </div>
               <label className="prior-toggle-label">
                 <input

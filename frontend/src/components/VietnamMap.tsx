@@ -165,7 +165,7 @@ export const VietnamMap: React.FC<VietnamMapProps> = ({
   onToggleLocation,
   onRemoveLocation,
   onClearSelection,
-  onResetSelection,
+  onResetSelection: _onResetSelection,
 }) => {
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [hoveredFeature, setHoveredFeature] = useState<ProvinceFeature | null>(null);
@@ -206,9 +206,48 @@ export const VietnamMap: React.FC<VietnamMapProps> = ({
     setPan({ x: 0, y: 0 });
   };
 
-  const handleResetAll = () => {
-    resetView();
-    onResetSelection();
+  const fitToSelection = () => {
+    const selectedFeats = features.filter((f) => selectedSet.has(f.properties.location_id));
+    if (selectedFeats.length === 0) {
+      resetView();
+      return;
+    }
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    const pushLonLat = (lon: number, lat: number) => {
+      const [px, py] = projectCoord(lon, lat);
+      if (px < minX) minX = px;
+      if (px > maxX) maxX = px;
+      if (py < minY) minY = py;
+      if (py > maxY) maxY = py;
+    };
+    for (const feat of selectedFeats) {
+      const polys =
+        feat.geometry.type === "Polygon"
+          ? [feat.geometry.coordinates as number[][][]]
+          : (feat.geometry.coordinates as number[][][][]);
+      for (const poly of polys) {
+        for (const ring of poly) {
+          for (const [lo, la] of ring) {
+            pushLonLat(lo, la);
+          }
+        }
+      }
+    }
+    if (!Number.isFinite(minX)) {
+      resetView();
+      return;
+    }
+    const bw = Math.max(24, maxX - minX);
+    const bh = Math.max(24, maxY - minY);
+    const fitZ = clampZoom(Math.max(1.2, Math.min(SVG_W / (bw * 1.4), SVG_H / (bh * 1.4))));
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const targetPan = clampPan(fitZ * (SVG_W / 2 - cx), fitZ * (SVG_H / 2 - cy), fitZ);
+    setZoom(fitZ);
+    setPan(targetPan);
   };
 
   const activeLocationsById = useMemo(() => {
@@ -288,11 +327,6 @@ export const VietnamMap: React.FC<VietnamMapProps> = ({
             />
             <span>{EN.map.toggleGridCells}</span>
           </label>
-          {selectedLocationIds.length > 1 || focusedLocationId !== "HCMC" || zoom > 1.0 ? (
-            <button type="button" className="btn-chip" onClick={handleResetAll}>
-              {EN.map.resetSelectionBtn}
-            </button>
-          ) : null}
         </div>
       </div>
 
@@ -386,6 +420,15 @@ export const VietnamMap: React.FC<VietnamMapProps> = ({
                   disabled={zoom <= MIN_ZOOM}
                 >
                   {EN.map.zoomOutLabel}
+                </button>
+                <button
+                  type="button"
+                  className="zoom-btn zoom-btn--fit"
+                  aria-label={EN.map.fitSelectionAria}
+                  onClick={fitToSelection}
+                  data-testid="map-fit-selection-btn"
+                >
+                  {EN.map.fitSelectionLabel}
                 </button>
                 <button
                   type="button"
@@ -578,49 +621,56 @@ export const VietnamMap: React.FC<VietnamMapProps> = ({
                 </button>
               )}
             </div>
-            <div className="selected-table-scroll">
-              <table className="data-table data-table--compact sticky-head-table">
-                <thead>
-                  <tr>
-                    <th>{EN.map.selectedColLocation}</th>
-                    <th>{EN.map.selectedColStatus}</th>
-                    <th className="num">{EN.map.selectedColCells}</th>
-                    <th aria-label={EN.map.clearSelectionBtn} />
-                  </tr>
-                </thead>
-                <tbody>
-                  {selectedLocationIds.map((locId) => {
-                    const feat = featureByLocId.get(locId);
-                    const disp = feat?.properties.display_name ?? activeLocationsById.get(locId)?.display_name ?? locId;
-                    const isAvail = activeLocationsById.has(locId);
-                    const cellCount = cellKeysByLocId.get(locId)?.size ?? 0;
-                    return (
-                      <tr
-                        key={locId}
-                        className={locId === focusedLocationId ? "row-focused" : ""}
-                      >
-                        <td>{disp}</td>
-                        <td>
-                          <span className={`pill-badge ${isAvail ? "pill-badge--active" : ""}`}>
-                            {isAvail ? EN.map.statusAvailable : EN.map.statusNotAvailableYet}
-                          </span>
-                        </td>
-                        <td className="num">{cellCount}</td>
-                        <td className="num">
-                          <button
-                            type="button"
-                            className="deselect-x-btn"
-                            aria-label={EN.map.deselectBtnLabel(disp)}
-                            onClick={() => (onRemoveLocation ? onRemoveLocation(locId) : onToggleLocation(locId))}
-                          >
-                            {EN.map.deselectSymbol}
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            <div className="selected-table-wrap">
+              <div className="selected-table-scroll">
+                <table className="data-table data-table--compact sticky-head-table">
+                  <thead>
+                    <tr>
+                      <th>{EN.map.selectedColLocation}</th>
+                      <th>{EN.map.selectedColStatus}</th>
+                      <th className="num">{EN.map.selectedColCells}</th>
+                      <th aria-label={EN.map.clearSelectionBtn} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedLocationIds.map((locId) => {
+                      const feat = featureByLocId.get(locId);
+                      const disp = feat?.properties.display_name ?? activeLocationsById.get(locId)?.display_name ?? locId;
+                      const isAvail = activeLocationsById.has(locId);
+                      const cellCount = cellKeysByLocId.get(locId)?.size ?? 0;
+                      return (
+                        <tr
+                          key={locId}
+                          className={locId === focusedLocationId ? "row-focused" : ""}
+                        >
+                          <td>{disp}</td>
+                          <td>
+                            <span className={`pill-badge ${isAvail ? "pill-badge--active" : ""}`}>
+                              {isAvail ? EN.map.statusAvailable : EN.map.statusNotAvailableYet}
+                            </span>
+                          </td>
+                          <td className="num">{cellCount}</td>
+                          <td className="num">
+                            <button
+                              type="button"
+                              className="deselect-x-btn"
+                              aria-label={EN.map.deselectBtnLabel(disp)}
+                              onClick={() => (onRemoveLocation ? onRemoveLocation(locId) : onToggleLocation(locId))}
+                            >
+                              {EN.map.deselectSymbol}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {selectedLocationIds.length > 5 && (
+                <div className="selected-scroll-more-hint" data-testid="selected-scroll-more-badge">
+                  {EN.map.selectedScrollMore(selectedLocationIds.length - 5)}
+                </div>
+              )}
             </div>
           </div>
 

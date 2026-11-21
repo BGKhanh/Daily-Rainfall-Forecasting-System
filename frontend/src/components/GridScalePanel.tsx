@@ -66,6 +66,57 @@ function getBboxFromFeatureAndCells(
   };
 }
 
+interface GridCellLike {
+  cell_id: string;
+  lat_min: number;
+  lat_max: number;
+  lon_min: number;
+  lon_max: number;
+}
+
+function assignDirectionalLabels(
+  cells: ReadonlyArray<GridCellLike>,
+  prefix: "M" | "C"
+): Map<string, string> {
+  const labels = new Map<string, string>();
+  if (!cells.length) return labels;
+  const uniqueLats = Array.from(new Set(cells.map((c) => Number(c.lat_min.toFixed(4))))).sort(
+    (a, b) => b - a
+  );
+  const uniqueLons = Array.from(new Set(cells.map((c) => Number(c.lon_min.toFixed(4))))).sort(
+    (a, b) => a - b
+  );
+  const rows = uniqueLats.length;
+  const cols = uniqueLons.length;
+
+  for (const cell of cells) {
+    const r = uniqueLats.indexOf(Number(cell.lat_min.toFixed(4)));
+    const col = uniqueLons.indexOf(Number(cell.lon_min.toFixed(4)));
+    const ns =
+      rows === 1 ? "" : rows === 2 ? (r === 0 ? "N" : "S") : r === 0 ? "N" : r === rows - 1 ? "S" : `R${r + 1}`;
+    const ew =
+      cols === 1 ? "" : cols === 2 ? (col === 0 ? "W" : "E") : col === 0 ? "W" : col === cols - 1 ? "E" : `C${col + 1}`;
+    const code = ns || ew ? `${ns}${ew}` : "C";
+    labels.set(cell.cell_id, `${prefix}-${code}`);
+  }
+  return labels;
+}
+
+function pickNiceScaleKm(kmSpanX: number, svgW: number): { scaleKm: number; barPx: number } {
+  const candidates = [200, 100, 50, 25, 10, 5];
+  const safeSpan = Math.max(1, kmSpanX);
+  let chosen = 10;
+  for (const c of candidates) {
+    const px = (c / safeSpan) * svgW;
+    if (px >= 38 && px <= svgW * 0.34) {
+      chosen = c;
+      break;
+    }
+  }
+  const barPx = Math.max(24, Math.min(svgW * 0.38, (chosen / safeSpan) * svgW));
+  return { scaleKm: chosen, barPx };
+}
+
 function projectRingsToPath(
   feature: ProvinceFeature,
   project: (lon: number, lat: number) => [number, number]
@@ -138,6 +189,10 @@ export const GridScalePanel: React.FC<GridScalePanelProps> = ({
 
     const svgW = 460;
     const svgH = Math.max(240, Math.min(440, Math.round(svgW * (spanY / Math.max(0.1, spanX)))));
+    const kmSpanX = Math.max(1, (bbox.lonMax - bbox.lonMin) * 111.3195 * cosPhi);
+    const { scaleKm, barPx } = pickNiceScaleKm(kmSpanX, svgW);
+    const merraLabels = assignDirectionalLabels(merraCells, "M");
+    const ceresLabels = assignDirectionalLabels(ceresCells, "C");
     const project = (lon: number, lat: number): [number, number] => [
       ((lon - bbox.lonMin) / Math.max(1e-6, bbox.lonMax - bbox.lonMin)) * svgW,
       svgH - ((lat - bbox.latMin) / Math.max(1e-6, bbox.latMax - bbox.latMin)) * svgH,
@@ -147,6 +202,10 @@ export const GridScalePanel: React.FC<GridScalePanelProps> = ({
       svgW,
       svgH,
       cosPhi,
+      scaleKm,
+      barPx,
+      merraLabels,
+      ceresLabels,
       polyPath: feature ? projectRingsToPath(feature, project) : "",
       merraCells,
       ceresCells,
@@ -165,13 +224,19 @@ export const GridScalePanel: React.FC<GridScalePanelProps> = ({
 
   const combinedCells = useMemo(() => {
     if (!unitOverlap) return [];
+    const mLabels = assignDirectionalLabels(unitOverlap.merra2_grid.intersecting_cells, "M");
+    const cLabels = assignDirectionalLabels(unitOverlap.ceres_grid.intersecting_cells, "C");
     return [
       ...unitOverlap.merra2_grid.intersecting_cells.map((c) => ({
-        gridLabel: "MERRA-2 / GEOS-IT (0.5° × 0.625°)",
+        gridType: "merra2" as const,
+        dirLabel: mLabels.get(c.cell_id) ?? "M",
+        gridLabel: c.contains_representative_point ? EN.gridScale.merraFeedLabel : EN.gridScale.merraOtherLabel,
         ...c,
       })),
       ...unitOverlap.ceres_grid.intersecting_cells.map((c) => ({
-        gridLabel: "CERES / FLASHFlux (1.0° × 1.0°)",
+        gridType: "ceres" as const,
+        dirLabel: cLabels.get(c.cell_id) ?? "C",
+        gridLabel: c.contains_representative_point ? EN.gridScale.ceresFeedLabel : EN.gridScale.ceresOtherLabel,
         ...c,
       })),
     ];
@@ -235,48 +300,69 @@ export const GridScalePanel: React.FC<GridScalePanelProps> = ({
                 {svgGeometry.ceresCells.map((cell) => {
                   const [x1, y1] = svgGeometry.project(cell.lon_min, cell.lat_max);
                   const [x2, y2] = svgGeometry.project(cell.lon_max, cell.lat_min);
+                  const dirCode = svgGeometry.ceresLabels.get(cell.cell_id) ?? "C";
                   return (
-                    <rect
-                      key={cell.cell_id}
-                      data-grid-type="ceres"
-                      x={x1}
-                      y={y1}
-                      width={Math.max(1, x2 - x1)}
-                      height={Math.max(1, y2 - y1)}
-                      vectorEffect="non-scaling-stroke"
-                      className={[
-                        "overlay-ceres-cell",
-                        cell.contains_representative_point ? "overlay-ceres-cell--rep" : "",
-                      ]
-                        .filter(Boolean)
-                        .join(" ")}
-                    >
-                      <title>{`CERES 1.0x1.0 [${cell.lat_min}N..${cell.lat_max}N] x [${cell.lon_min}E..${cell.lon_max}E] (${cell.pct_of_province_area.toFixed(1)}%)`}</title>
-                    </rect>
+                    <g key={cell.cell_id}>
+                      <rect
+                        data-grid-type="ceres"
+                        data-rep={cell.contains_representative_point ? "true" : "false"}
+                        x={x1}
+                        y={y1}
+                        width={Math.max(1, x2 - x1)}
+                        height={Math.max(1, y2 - y1)}
+                        vectorEffect="non-scaling-stroke"
+                        className={[
+                          "overlay-ceres-cell",
+                          cell.contains_representative_point ? "overlay-ceres-cell--rep" : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
+                      >
+                        <title>{`${dirCode} · CERES 1.0x1.0 [${cell.lat_min}N..${cell.lat_max}N] x [${cell.lon_min}E..${cell.lon_max}E] (${cell.pct_of_province_area.toFixed(1)}%)`}</title>
+                      </rect>
+                      <text
+                        x={Math.max(8, x1 + 6)}
+                        y={Math.max(16, y1 + 14)}
+                        className="cell-dir-label cell-dir-label--ceres"
+                      >
+                        {dirCode}
+                      </text>
+                    </g>
                   );
                 })}
 
                 {svgGeometry.merraCells.map((cell) => {
                   const [x1, y1] = svgGeometry.project(cell.lon_min, cell.lat_max);
                   const [x2, y2] = svgGeometry.project(cell.lon_max, cell.lat_min);
+                  const dirCode = svgGeometry.merraLabels.get(cell.cell_id) ?? "M";
                   return (
-                    <rect
-                      key={cell.cell_id}
-                      data-grid-type="merra2"
-                      x={x1}
-                      y={y1}
-                      width={Math.max(1, x2 - x1)}
-                      height={Math.max(1, y2 - y1)}
-                      vectorEffect="non-scaling-stroke"
-                      className={[
-                        "overlay-merra-cell",
-                        cell.contains_representative_point ? "overlay-merra-cell--rep" : "",
-                      ]
-                        .filter(Boolean)
-                        .join(" ")}
-                    >
-                      <title>{`MERRA-2 0.5x0.625 [${cell.lat_min}N..${cell.lat_max}N] x [${cell.lon_min}E..${cell.lon_max}E] (${cell.pct_of_province_area.toFixed(1)}%)`}</title>
-                    </rect>
+                    <g key={cell.cell_id}>
+                      <rect
+                        data-grid-type="merra2"
+                        data-rep={cell.contains_representative_point ? "true" : "false"}
+                        x={x1}
+                        y={y1}
+                        width={Math.max(1, x2 - x1)}
+                        height={Math.max(1, y2 - y1)}
+                        vectorEffect="non-scaling-stroke"
+                        className={[
+                          "overlay-merra-cell",
+                          cell.contains_representative_point ? "overlay-merra-cell--rep" : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
+                      >
+                        <title>{`${dirCode} · MERRA-2 0.5x0.625 [${cell.lat_min}N..${cell.lat_max}N] x [${cell.lon_min}E..${cell.lon_max}E] (${cell.pct_of_province_area.toFixed(1)}%)`}</title>
+                      </rect>
+                      <text
+                        x={Math.min(svgGeometry.svgW - 42, Math.max(8, x2 - 8))}
+                        y={Math.min(svgGeometry.svgH - 8, Math.max(18, y2 - 8))}
+                        textAnchor="end"
+                        className="cell-dir-label cell-dir-label--merra"
+                      >
+                        {dirCode}
+                      </text>
+                    </g>
                   );
                 })}
 
@@ -300,6 +386,44 @@ export const GridScalePanel: React.FC<GridScalePanelProps> = ({
                     </g>
                   );
                 })()}
+
+                <g data-testid="grid-scale-decorations" className="grid-scale-decorations">
+                  <g transform={`translate(14, ${svgGeometry.svgH - 16})`}>
+                    <rect
+                      x={-4}
+                      y={-18}
+                      width={svgGeometry.barPx + 8}
+                      height={24}
+                      rx={3}
+                      className="scale-bar-backdrop"
+                    />
+                    <line
+                      x1={0}
+                      y1={0}
+                      x2={svgGeometry.barPx}
+                      y2={0}
+                      className="grid-scale-scalebar"
+                    />
+                    <line x1={0} y1={-4} x2={0} y2={4} className="grid-scale-scalebar" />
+                    <line
+                      x1={svgGeometry.barPx}
+                      y1={-4}
+                      x2={svgGeometry.barPx}
+                      y2={4}
+                      className="grid-scale-scalebar"
+                    />
+                    <text x={svgGeometry.barPx / 2} y={-6} textAnchor="middle" className="grid-scale-bar-text">
+                      {EN.gridScale.scaleBarText(svgGeometry.scaleKm)}
+                    </text>
+                  </g>
+
+                  <g transform={`translate(${svgGeometry.svgW - 24}, 24)`} className="grid-scale-north">
+                    <circle cx={0} cy={-2} r={14} className="scale-bar-backdrop" />
+                    <text x={0} y={2} textAnchor="middle" className="grid-scale-north-text">
+                      {EN.gridScale.northArrowLabel}
+                    </text>
+                  </g>
+                </g>
               </svg>
 
               <div className="map-legend">
@@ -314,6 +438,10 @@ export const GridScalePanel: React.FC<GridScalePanelProps> = ({
                 <span className="legend-item">
                   <span className="legend-swatch legend-swatch--merra-all" />
                   {EN.gridScale.legendMerraAll}
+                </span>
+                <span className="legend-item">
+                  <span className="legend-swatch legend-swatch--ceres-rep" />
+                  {EN.gridScale.legendCeresRep}
                 </span>
                 <span className="legend-item">
                   <span className="legend-swatch legend-swatch--ceres-all" />
@@ -355,45 +483,6 @@ export const GridScalePanel: React.FC<GridScalePanelProps> = ({
                 </div>
               </div>
 
-              {showOverlapPct && (
-                <div className="subpanel overlap-breakdown-panel" data-testid="overlap-breakdown-table">
-                  <h4>{EN.gridScale.overlapTableHeading}</h4>
-                  <div className="table-scroll overlap-table-scroll">
-                    <table className="data-table data-table--compact">
-                      <thead>
-                        <tr>
-                          <th>{EN.gridScale.overlapColGrid}</th>
-                          <th>{EN.gridScale.overlapColBounds}</th>
-                          <th className="num">{EN.gridScale.overlapColInterKm2}</th>
-                          <th className="num">{EN.gridScale.overlapColPctProv}</th>
-                          <th className="num">{EN.gridScale.overlapColPctCell}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {combinedCells.map((c) => (
-                          <tr key={c.cell_id}>
-                            <td>
-                              {c.gridLabel}
-                              {c.contains_representative_point && (
-                                <span className="pill-badge pill-badge--active inline-badge">
-                                  {EN.gridScale.repYesBadge}
-                                </span>
-                              )}
-                            </td>
-                            <td className="mono">
-                              {`[${c.lat_min.toFixed(2)}, ${c.lat_max.toFixed(2)}] × [${c.lon_min.toFixed(4)}, ${c.lon_max.toFixed(4)}]`}
-                            </td>
-                            <td className="num">{c.intersection_area_km2.toFixed(1)}</td>
-                            <td className="num">{`${c.pct_of_province_area.toFixed(2)}%`}</td>
-                            <td className="num">{`${c.pct_of_cell_area.toFixed(2)}%`}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-
               <div className="subpanel timeline-notes-panel">
                 <h4>{EN.gridScale.timelineHeading}</h4>
                 <ul className="timeline-list">
@@ -404,6 +493,60 @@ export const GridScalePanel: React.FC<GridScalePanelProps> = ({
               </div>
             </div>
           </div>
+
+          {showOverlapPct && (
+            <div className="subpanel overlap-breakdown-panel overlap-breakdown-panel--full" data-testid="overlap-breakdown-table">
+              <h4>{EN.gridScale.overlapTableHeading}</h4>
+              <div className="table-scroll overlap-table-scroll">
+                <table className="data-table data-table--compact">
+                  <thead>
+                    <tr>
+                      <th>{EN.gridScale.overlapColDir}</th>
+                      <th>{EN.gridScale.overlapColGrid}</th>
+                      <th>{EN.gridScale.overlapColBounds}</th>
+                      <th className="num">{EN.gridScale.overlapColInterKm2}</th>
+                      <th className="num">{EN.gridScale.overlapColPctProv}</th>
+                      <th className="num">{EN.gridScale.overlapColPctCell}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {combinedCells.map((c) => {
+                      const swatchClass =
+                        c.gridType === "merra2"
+                          ? c.contains_representative_point
+                            ? "dir-swatch--merra-rep"
+                            : "dir-swatch--merra"
+                          : c.contains_representative_point
+                            ? "dir-swatch--ceres-rep"
+                            : "dir-swatch--ceres";
+                      return (
+                        <tr key={c.cell_id}>
+                          <td className="mono dir-cell">
+                            <span className={`dir-swatch ${swatchClass}`} />
+                            {c.dirLabel}
+                          </td>
+                          <td>
+                            {c.gridLabel}
+                            {c.contains_representative_point && (
+                              <span className="pill-badge pill-badge--active inline-badge">
+                                {EN.gridScale.repYesBadge}
+                              </span>
+                            )}
+                          </td>
+                          <td className="mono">
+                            {`[${c.lat_min.toFixed(2)}, ${c.lat_max.toFixed(2)}] × [${c.lon_min.toFixed(4)}, ${c.lon_max.toFixed(4)}]`}
+                          </td>
+                          <td className="num">{c.intersection_area_km2.toFixed(1)}</td>
+                          <td className="num">{`${c.pct_of_province_area.toFixed(2)}%`}</td>
+                          <td className="num">{`${c.pct_of_cell_area.toFixed(2)}%`}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           <details className="catalog-details" data-testid="variable-catalog-section">
             <summary>{EN.gridScale.catalogHeading}</summary>

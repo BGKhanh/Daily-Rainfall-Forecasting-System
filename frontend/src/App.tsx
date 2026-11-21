@@ -142,13 +142,23 @@ export const App: React.FC<AppProps> = ({ initialGeoJson, initialGridOverlap }) 
   }, [initialGeoJson, initialGridOverlap]);
 
   const getDefaultLocId = () => locations.find((l) => l.is_active)?.location_id ?? "HCMC";
+  const isActiveLoc = (locId: string) =>
+    locations.some((l) => l.location_id === locId && l.is_active);
 
   const applySelectionChange = (nextIds: string[], nextFocusedId: string) => {
+    const focusChanged = nextFocusedId !== focusedLocationId;
     setSelectedLocationIds(nextIds);
     setFocusedLocationId(nextFocusedId);
-    const activeLoc = locations.find((l) => l.location_id === nextFocusedId && l.is_active);
-    if (activeLoc) {
+    if (isActiveLoc(nextFocusedId) && focusChanged) {
       void loadPrediction(nextFocusedId, health?.default_complete_anchor_date ?? undefined);
+    }
+  };
+
+  const handleFocusLocation = (locationId: string) => {
+    const focusChanged = locationId !== focusedLocationId;
+    setFocusedLocationId(locationId);
+    if (isActiveLoc(locationId) && (focusChanged || !prediction)) {
+      void loadPrediction(locationId, health?.default_complete_anchor_date ?? undefined);
     }
   };
 
@@ -156,7 +166,13 @@ export const App: React.FC<AppProps> = ({ initialGeoJson, initialGridOverlap }) 
     const isAlreadySelected = selectedLocationIds.includes(locationId);
     if (!isAlreadySelected) {
       const nextIds = [...selectedLocationIds, locationId];
-      applySelectionChange(nextIds, locationId);
+      // When selecting an unsupported province while an active/supported location (HCMC) is selected,
+      // default the forecast focus tab to the supported location until the user switches tabs.
+      const existingSupportedId = nextIds.find((id) => isActiveLoc(id));
+      const nextFocus = isActiveLoc(locationId)
+        ? locationId
+        : existingSupportedId ?? locationId;
+      applySelectionChange(nextIds, nextFocus);
       return;
     }
     const remaining = selectedLocationIds.filter((id) => id !== locationId);
@@ -165,7 +181,9 @@ export const App: React.FC<AppProps> = ({ initialGeoJson, initialGridOverlap }) 
       applySelectionChange([defLoc], defLoc);
       return;
     }
-    const nextFocus = focusedLocationId === locationId ? remaining[remaining.length - 1] : focusedLocationId;
+    const fallbackFocus =
+      remaining.find((id) => isActiveLoc(id)) ?? remaining[remaining.length - 1];
+    const nextFocus = focusedLocationId === locationId ? fallbackFocus : focusedLocationId;
     applySelectionChange(remaining, nextFocus);
   };
 
@@ -176,7 +194,9 @@ export const App: React.FC<AppProps> = ({ initialGeoJson, initialGridOverlap }) 
       applySelectionChange([defLoc], defLoc);
       return;
     }
-    const nextFocus = focusedLocationId === locationId ? remaining[remaining.length - 1] : focusedLocationId;
+    const fallbackFocus =
+      remaining.find((id) => isActiveLoc(id)) ?? remaining[remaining.length - 1];
+    const nextFocus = focusedLocationId === locationId ? fallbackFocus : focusedLocationId;
     applySelectionChange(remaining, nextFocus);
   };
 
@@ -315,6 +335,7 @@ export const App: React.FC<AppProps> = ({ initialGeoJson, initialGridOverlap }) 
               locations={locations}
               selectedLocationIds={selectedLocationIds}
               focusedLocationId={focusedLocationId}
+              onFocusLocation={handleFocusLocation}
               onToggleLocation={handleToggleLocation}
               onRemoveLocation={handleRemoveLocation}
               onClearSelection={handleClearSelection}
@@ -335,7 +356,7 @@ export const App: React.FC<AppProps> = ({ initialGeoJson, initialGridOverlap }) 
             <DataStatusSection health={health} locations={locations} geoJson={geoJson} />
           )}
 
-          {activeTab === "governance" && <AboutLimitationsSection />}
+          {activeTab === "governance" && <AboutLimitationsSection health={health} />}
         </main>
       </div>
     </div>

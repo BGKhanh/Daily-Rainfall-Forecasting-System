@@ -79,6 +79,15 @@ export interface HealthResponse {
   anchor_range: { min: string; max: string } | null;
   data_latency: DataLatencyInfo | null;
   journal_mode: string | null;
+  degraded_reason?: string | null;
+  turso_quota_warning?: boolean;
+  replica_sync_count?: number | null;
+  replica_last_sync_at_utc?: string | null;
+  replica_last_sync_duration_ms?: number | null;
+  replica_sync_lag_sec?: number | null;
+  replica_hash_verified?: boolean | null;
+  replica_consecutive_failures?: number | null;
+  replica_last_sync_error?: string | null;
 }
 
 export interface DailyForecastItem {
