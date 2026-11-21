@@ -56,6 +56,7 @@ from src.config.clock import HCMC_TIMEZONE_NAME, today_hcmc
 from src.config.settings import load_settings
 from src.data.provider import (
     DEFAULT_DEMO_VINTAGE_DB_PATH,
+    IncompleteMeteorologyAtAnchorError,
     IncompleteRadiationAtAnchorError,
     WeatherHistoryProvider,
     resolve_sqlite_db_path_and_role,
@@ -74,6 +75,7 @@ from src.data.vintage_store import (
     HCMC_LATITUDE,
     HCMC_LOCATION_ID,
     HCMC_LONGITUDE,
+    METEO_24_VARS,
     cached_db_query,
     connect_sqlite,
     derive_eval_split_regime,
@@ -779,9 +781,16 @@ def get_health():
                 state_key = get_db_state_cache_key(conn, str(cache_id or db_role))
 
                 def _compute_health_db_stats() -> Dict[str, Any]:
-                    d_anchor = get_default_complete_anchor_date(conn, location_id=CANONICAL_LOCATION_ID)
+                    d_anchor = get_default_complete_anchor_date(
+                        conn, location_id=CANONICAL_LOCATION_ID, required_vars=METEO_24_VARS
+                    )
                     d_snap = get_data_snapshot_date(conn, location_id=CANONICAL_LOCATION_ID)
-                    a_range = get_complete_anchor_range(conn, location_id=CANONICAL_LOCATION_ID, window_days=35)
+                    a_range = get_complete_anchor_range(
+                        conn,
+                        location_id=CANONICAL_LOCATION_ID,
+                        window_days=35,
+                        required_vars=METEO_24_VARS,
+                    )
                     lat = get_latest_ingest_latency(conn, location_id=CANONICAL_LOCATION_ID)
                     s_start = lat.get("scan_window_start") if isinstance(lat, dict) else None
                     s_end = lat.get("scan_window_end") if isinstance(lat, dict) else None
@@ -831,6 +840,7 @@ def get_health():
     rt_status = get_turso_runtime_status()
     degraded_reason = rt_status.get("degraded_reason") or mgr_degraded_reason
     turso_quota_warning = bool(rt_status.get("quota_warning", False))
+    turso_usage_source = rt_status.get("usage_source")
 
     return {
         "status": "degraded" if degraded_reason else "healthy",
@@ -852,6 +862,7 @@ def get_health():
         "journal_mode": journal_mode,
         "degraded_reason": degraded_reason,
         "turso_quota_warning": turso_quota_warning,
+        "turso_usage_source": turso_usage_source,
         "replica_sync_count": replica_sync_count,
         "replica_last_sync_at_utc": replica_last_sync_at_utc,
         "replica_last_sync_duration_ms": replica_last_sync_duration_ms,
@@ -997,7 +1008,7 @@ def _compute_baseline_predictions_for_anchor(
             "model": ErrorResponse,
             "description": (
                 "Unprocessable Entity — Invalid JSON/Pydantic schema types, unsupported `location_id`/`province` "
-                "outside Ho Chi Minh City, OR `anchor_date` missing/violating `COMPLETE_ALL_35` radiation completeness."
+                "outside Ho Chi Minh City, OR `anchor_date` missing/violating 24-variable meteorology completeness."
             ),
         },
         503: {
@@ -1049,7 +1060,7 @@ def predict_rainfall(request: PredictionRequest):
             if history_res.is_static_sample:
                 effective_run_date = (history_res.data_as_of + timedelta(days=3)).strftime("%Y-%m-%d")
             enforce_lag_limit = bool(history_res.is_static_sample)
-        except IncompleteRadiationAtAnchorError as e:
+        except (IncompleteMeteorologyAtAnchorError, IncompleteRadiationAtAnchorError) as e:
             if e.completeness_regime is None:
                 raise _api_error(
                     422,
@@ -1057,9 +1068,14 @@ def predict_rainfall(request: PredictionRequest):
                     f"[ANCHOR_DATE_NOT_FOUND] {e}",
                     {"anchor_date": e.anchor_date},
                 ) from e
+            err_code_anchor: ErrorCode = (
+                "INCOMPLETE_METEOROLOGY_AT_ANCHOR"
+                if isinstance(e, IncompleteMeteorologyAtAnchorError)
+                else "INCOMPLETE_RADIATION_AT_ANCHOR"
+            )
             raise _api_error(
                 422,
-                "INCOMPLETE_RADIATION_AT_ANCHOR",
+                err_code_anchor,
                 str(e),
                 {"anchor_date": e.anchor_date, "completeness_regime": e.completeness_regime},
             ) from e
@@ -1076,23 +1092,24 @@ def predict_rainfall(request: PredictionRequest):
             enforce_lag_limit=enforce_lag_limit,
         )
     except ServingValidationError as e:
+        safe_msg = redact_secrets(str(e))
         if history_backend != "request_payload":
             raise _api_error(
                 503,
                 "SERVER_DB_DATA_ERROR",
-                f"[SERVER_DB_DATA_ERROR] Server observation store failed validation: {e}",
+                f"[SERVER_DB_DATA_ERROR] Server observation store failed validation: {safe_msg}",
                 {"validation_code": e.code, **(e.details or {})},
             ) from e
         raise _api_error(
             400,
             "INVALID_CLIENT_HISTORY",
-            str(e),
+            safe_msg,
             {"validation_code": e.code, **(e.details or {})},
         ) from e
     except Exception as e:
         status_code = 503 if history_backend != "request_payload" else 400
         err_code: ErrorCode = "SERVER_DB_DATA_ERROR" if status_code == 503 else "INVALID_CLIENT_HISTORY"
-        raise _api_error(status_code, err_code, str(e)) from e
+        raise _api_error(status_code, err_code, redact_secrets(str(e))) from e
 
     if observed_precip_by_date:
         for item in prediction_result.get("serving_model", {}).get("hindcast_and_current", []):
@@ -1112,8 +1129,8 @@ def predict_rainfall(request: PredictionRequest):
     if prediction_result.get("effective_future_days") == 0:
         prediction_result["forecast_horizon_mode"] = "retrospective_hindcast_only"
         prediction_result["future_forecast_notice"] = (
-            "This is a retrospective replay (effective_future_days = 0): the latest complete anchor date "
-            "(COMPLETE_ALL_35) is more than 7 days before the current Ho Chi Minh City operational date."
+            "This is a retrospective replay (effective_future_days = 0): the selected anchor date "
+            "(24-variable meteorology contract) is more than 7 days before the current Ho Chi Minh City operational date."
         )
     else:
         prediction_result["forecast_horizon_mode"] = "operational_forecast"

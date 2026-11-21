@@ -236,7 +236,7 @@
             }
           },
           "400": {
-            "description": "Bad Request — Client-supplied `request.history` payload violates business or physical rules (<30 continuous days, calendar date gap, NaN/-999.0 sentinel, physical bound violation, or stale radiation lag).",
+            "description": "Bad Request \u2014 Client-supplied `request.history` payload violates business or physical rules (<30 continuous days, calendar date gap, NaN/-999.0 sentinel, physical bound violation, or stale radiation lag).",
             "content": {
               "application/json": {
                 "schema": {
@@ -246,7 +246,7 @@
             }
           },
           "422": {
-            "description": "Unprocessable Entity — Invalid JSON/Pydantic schema types, unsupported `location_id`/`province` outside Ho Chi Minh City, OR `anchor_date` missing/violating `COMPLETE_ALL_35` radiation completeness.",
+            "description": "Unprocessable Entity \u2014 Invalid JSON/Pydantic schema types, unsupported `location_id`/`province` outside Ho Chi Minh City, OR `anchor_date` missing/violating 24-variable meteorology completeness.",
             "content": {
               "application/json": {
                 "schema": {
@@ -256,7 +256,7 @@
             }
           },
           "503": {
-            "description": "Service Unavailable — Predictor not initialized, OR server-side DB/history provider failed or returned incomplete/NaN meteorological records when `request.history` is omitted.",
+            "description": "Service Unavailable \u2014 Predictor not initialized, OR server-side DB/history provider failed or returned incomplete/NaN meteorological records when `request.history` is omitted.",
             "content": {
               "application/json": {
                 "schema": {
@@ -320,7 +320,7 @@
             }
           },
           "422": {
-            "description": "Unprocessable Entity — Invalid `eval_split_regime` or `is_prospective` query parameter.",
+            "description": "Unprocessable Entity \u2014 Invalid `eval_split_regime` or `is_prospective` query parameter.",
             "content": {
               "application/json": {
                 "schema": {
@@ -330,7 +330,7 @@
             }
           },
           "503": {
-            "description": "Service Unavailable — SQLite vintage database unavailable or corrupted.",
+            "description": "Service Unavailable \u2014 SQLite vintage database unavailable or corrupted.",
             "content": {
               "application/json": {
                 "schema": {
@@ -771,6 +771,7 @@
             "enum": [
               "UNSUPPORTED_LOCATION",
               "INCOMPLETE_RADIATION_AT_ANCHOR",
+              "INCOMPLETE_METEOROLOGY_AT_ANCHOR",
               "ANCHOR_DATE_NOT_FOUND",
               "INVALID_CLIENT_HISTORY",
               "SERVER_DB_DATA_ERROR",
@@ -1035,6 +1036,17 @@
             "type": "boolean",
             "title": "Turso Quota Warning",
             "default": false
+          },
+          "turso_usage_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Turso Usage Source"
           },
           "replica_sync_count": {
             "anyOf": [
@@ -1881,6 +1893,41 @@
               }
             ],
             "title": "Anchor Completeness Regime"
+          },
+          "is_degraded_input": {
+            "type": "boolean",
+            "title": "Is Degraded Input",
+            "default": false
+          },
+          "ceres_policy_applied": {
+            "type": "string",
+            "title": "Ceres Policy Applied",
+            "default": "NONE"
+          },
+          "imputed_values": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Imputed Values"
+          },
+          "imputed_variables": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Imputed Variables"
+          },
+          "doy_table_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Doy Table Sha256"
           },
           "serving_model": {
             "$ref": "#/components/schemas/PredictServingModel"

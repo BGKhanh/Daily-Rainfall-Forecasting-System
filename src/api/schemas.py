@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 ErrorCode = Literal[
     "UNSUPPORTED_LOCATION",
     "INCOMPLETE_RADIATION_AT_ANCHOR",
+    "INCOMPLETE_METEOROLOGY_AT_ANCHOR",
     "ANCHOR_DATE_NOT_FOUND",
     "INVALID_CLIENT_HISTORY",
     "SERVER_DB_DATA_ERROR",
@@ -134,6 +135,7 @@ class HealthResponse(BaseModel):
     journal_mode: Optional[str] = None
     degraded_reason: Optional[str] = None
     turso_quota_warning: bool = False
+    turso_usage_source: Optional[str] = None
     replica_sync_count: Optional[int] = None
     replica_last_sync_at_utc: Optional[str] = None
     replica_last_sync_duration_ms: Optional[float] = None
@@ -250,6 +252,11 @@ class PredictResponse(BaseModel):
     lag_days: int
     forecast_horizon_mode: Literal["operational_forecast", "retrospective_hindcast_only"]
     anchor_completeness_regime: Optional[str] = None
+    is_degraded_input: bool = False
+    ceres_policy_applied: str = "NONE"
+    imputed_values: Dict[str, float] = Field(default_factory=dict)
+    imputed_variables: List[str] = Field(default_factory=list)
+    doy_table_sha256: Optional[str] = None
     serving_model: PredictServingModel
     shadow_models: Dict[str, PredictShadowModel]
     shadow_model: PredictShadowModel
