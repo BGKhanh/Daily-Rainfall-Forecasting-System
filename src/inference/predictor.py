@@ -165,6 +165,7 @@ class StandaloneRainfallPredictor:
             target_col=target_col,
             feature_builder=self.fb_f3,
             enforce_lag_limit=enforce_lag_limit,
+            allow_solar_doy_imputation=True,
         )
         from src.data.vintage_store import align_and_validate_canonical_raw_df
 
@@ -173,6 +174,7 @@ class StandaloneRainfallPredictor:
         run_d = ctx.effective_run_date.date()
         lag_days = ctx.lag_days
         effective_future_days = ctx.effective_future_days
+        imp = ctx.imputation_outcome
 
         # 1. Feature Extraction via build_single_step
         feat_df3 = self.fb_f3.build_single_step(df)
@@ -235,6 +237,11 @@ class StandaloneRainfallPredictor:
             "data_as_of": data_as_of.strftime("%Y-%m-%d"),
             "lag_days": lag_days,
             "effective_future_days": effective_future_days,
+            "is_degraded_input": bool(imp.is_degraded_input) if imp is not None else False,
+            "ceres_policy_applied": str(imp.ceres_policy_applied) if imp is not None else "NONE",
+            "imputed_values": dict(imp.imputed_values) if imp is not None else {},
+            "imputed_variables": list(imp.imputed_variables) if imp is not None else [],
+            "doy_table_sha256": imp.doy_table_sha256 if imp is not None else None,
             "serving_model": {
                 "scenario_id": "SC-35",
                 "model_name": "xgboost_tweedie_F3",

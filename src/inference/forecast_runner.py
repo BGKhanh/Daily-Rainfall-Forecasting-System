@@ -242,18 +242,25 @@ def issue_forecasts_for_anchors(
     model_ids: Sequence[str] = ALL_RUNNER_MODEL_IDS,
     git_sha: Optional[str] = None,
     issued_by: str = "automated_pipeline",
+    allow_solar_doy_imputation: bool = True,
 ) -> Dict[str, Any]:
     """
     Generate and idempotently insert 7-horizon forecasts into `forecasts_ledger`
-    for each validated `COMPLETE_ALL_35` anchor date across selected models.
+    for each validated meteo-complete anchor date across selected models.
+    When solar variables are missing while 24 GEOS-IT meteorology vars are intact
+    (`allow_solar_doy_imputation=True`), applies P-c circular DOY medians in-memory
+    while computing `input_window_hash` from pre-imputation `observations_vintage`.
     """
     if not anchor_dates:
         return {"anchors_processed": 0, "rows_inserted": 0, "rows_skipped": 0}
+
+    from src.inference.solar_imputation import apply_serving_solar_doy_fallback, load_solar_doy_climatology
 
     bundle = _load_runner_bundle(Path(artifact_dir))
     fb_f3 = bundle["feature_builders"]["F3"]
     fb_f2 = bundle["feature_builders"]["F2"]
     shas = bundle["sha256"]
+    doy_solar_table, doy_solar_sha = load_solar_doy_climatology()
 
     doy_table, clim_sha = compute_dev_train_doy_climatology(conn, location_id=location_id)
     loc_row = conn.execute(
@@ -287,12 +294,18 @@ def issue_forecasts_for_anchors(
                 f"Anchor {win_end} expected 30 continuous days in [{win_start}, {win_end}] at {issue_ts}, "
                 f"got {len(win_rows)}."
             )
+        incomplete_meteo = [r["obs_date"] for r in win_rows if int(r["missing_meteo_count"] or 0) > 0]
+        if incomplete_meteo:
+            raise ValueError(
+                f"Anchor {win_end} violates 24-meteo completeness invariant on dates: {incomplete_meteo}"
+            )
         incomplete_rows = [r["obs_date"] for r in win_rows if r["completeness_regime"] != "COMPLETE_ALL_35"]
-        if incomplete_rows:
+        if incomplete_rows and not allow_solar_doy_imputation:
             raise ValueError(
                 f"Anchor {win_end} violates COMPLETE_ALL_35 invariant on input window dates: {incomplete_rows}"
             )
 
+        # CRITICAL: input_window_hash hashes raw pre-imputation observations_vintage rows!
         win_hash = compute_input_window_hash(win_rows)
         anchor_hashes[win_end] = win_hash
         manifest = [
@@ -314,7 +327,23 @@ def issue_forecasts_for_anchors(
         )
         prov_days = max(0, min(30, prov_days))
 
-        win_df = _rows_to_vietnamese_df(win_rows)
+        win_df_raw = _rows_to_vietnamese_df(win_rows)
+        imp_outcome = apply_serving_solar_doy_fallback(
+            win_df_raw,
+            doy_table=doy_solar_table,
+            doy_table_sha256=doy_solar_sha,
+        )
+        win_df = imp_outcome.filled_df
+        ml_is_degraded = 1 if imp_outcome.is_degraded_input else 0
+        ml_ceres_policy = imp_outcome.ceres_policy_applied if imp_outcome.is_degraded_input else "NONE_COMPLETE"
+        ml_imputed_json = json.dumps(imp_outcome.imputed_values, sort_keys=True, separators=(",", ":"))
+        ml_doy_sha = imp_outcome.doy_table_sha256
+        ml_degraded_reason = (
+            f"P-c circular DOY median applied across {len(imp_outcome.imputed_variables)} solar vars at anchor"
+            if imp_outcome.is_degraded_input
+            else None
+        )
+
         preds_by_model: Dict[str, List[float]] = {}
 
         if "SC-35" in selected_models or "SC-31" in selected_models:
@@ -344,11 +373,11 @@ def issue_forecasts_for_anchors(
             ]
 
         model_meta = {
-            "SC-35": ("ML_SERVING", "serving", 1, shas["sc35_model"], shas["fb_f3"], "NONE_COMPLETE"),
-            "SC-30": ("ML_SHADOW", "shadow_val_champ", 2, shas["sc30_model"], shas["fb_f2"], "NONE_COMPLETE"),
-            "SC-31": ("ML_SHADOW", "shadow_test_contender", 3, shas["sc31_model"], shas["fb_f3"], "NONE_COMPLETE"),
-            "BASELINE_PERSISTENCE": ("BASELINE", None, None, PERSISTENCE_SPEC_SHA256, None, "NOT_APPLICABLE_BASELINE"),
-            "BASELINE_CLIMATOLOGY_DOY": ("BASELINE", None, None, clim_sha, None, "NOT_APPLICABLE_BASELINE"),
+            "SC-35": ("ML_SERVING", "serving", 1, shas["sc35_model"], shas["fb_f3"], ml_ceres_policy, ml_is_degraded, ml_degraded_reason, ml_imputed_json, ml_doy_sha),
+            "SC-30": ("ML_SHADOW", "shadow_val_champ", 2, shas["sc30_model"], shas["fb_f2"], ml_ceres_policy, ml_is_degraded, ml_degraded_reason, ml_imputed_json, ml_doy_sha),
+            "SC-31": ("ML_SHADOW", "shadow_test_contender", 3, shas["sc31_model"], shas["fb_f3"], ml_ceres_policy, ml_is_degraded, ml_degraded_reason, ml_imputed_json, ml_doy_sha),
+            "BASELINE_PERSISTENCE": ("BASELINE", None, None, PERSISTENCE_SPEC_SHA256, None, "NOT_APPLICABLE_BASELINE", 0, None, "{}", None),
+            "BASELINE_CLIMATOLOGY_DOY": ("BASELINE", None, None, clim_sha, None, "NOT_APPLICABLE_BASELINE", 0, None, "{}", None),
         }
 
         eval_regime = derive_eval_split_regime(win_end)
@@ -375,7 +404,7 @@ def issue_forecasts_for_anchors(
             for m_id in ALL_RUNNER_MODEL_IDS:
                 if m_id not in selected_models:
                     continue
-                m_kind, r_alias, r_ver, art_sha, fb_sha, ceres_policy = model_meta[m_id]
+                m_kind, r_alias, r_ver, art_sha, fb_sha, ceres_policy, m_deg, m_deg_reason, m_imp_json, m_doy_sha = model_meta[m_id]
                 all_forecast_rows.append(
                     {
                         "issued_at_utc": issue_ts,
@@ -403,10 +432,12 @@ def issue_forecasts_for_anchors(
                         "flashflux_max_ffill_days": 0,
                         "ceres_policy_applied": ceres_policy,
                         "ceres_max_staleness_days": 0,
-                        "is_degraded_input": 0,
-                        "degraded_reason": None,
+                        "is_degraded_input": m_deg,
+                        "degraded_reason": m_deg_reason,
                         "git_sha": sha,
                         "issued_by": issued_by,
+                        "imputed_values_json": m_imp_json,
+                        "doy_table_sha256": m_doy_sha,
                     }
                 )
 
@@ -627,7 +658,10 @@ def _query_forecast_score_rows(
     eval_split_regime: str,
     is_prospective_filter: Optional[int] = None,
 ) -> List[sqlite3.Row]:
-    where_sql = "location_id = ? AND eval_split_regime = ?"
+    where_sql = (
+        "location_id = ? AND eval_split_regime = ? "
+        "AND obs_first_mm IS NOT NULL AND obs_latest_mm IS NOT NULL"
+    )
     params: List[Any] = [location_id, eval_split_regime]
     if is_prospective_filter is not None:
         where_sql += " AND is_prospective = ?"

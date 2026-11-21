@@ -91,6 +91,7 @@ class ValidatedServingContext:
     effective_run_date: pd.Timestamp
     lag_days: int
     effective_future_days: int
+    imputation_outcome: Optional[Any] = None
 
 
 def resolve_required_numeric_columns(
@@ -160,7 +161,7 @@ def _validate_numeric_column(series: pd.Series, col_name: str) -> None:
 
 
 def _validate_radiation_freshness(df: pd.DataFrame) -> None:
-    """Reject frozen radiation sensors where trailing 5 days share a single constant value."""
+    """Reject frozen radiation sensors where trailing 5 non-null days share a single constant value."""
     tail_df = df.tail(RADIATION_STALENESS_WINDOW)
     if len(tail_df) < RADIATION_STALENESS_WINDOW:
         return
@@ -169,8 +170,8 @@ def _validate_radiation_freshness(df: pd.DataFrame) -> None:
         if col not in tail_df.columns:
             continue
         series = pd.to_numeric(tail_df[col], errors="coerce")
-        if series.nunique(dropna=True) <= 1:
-            const_val = float(series.iloc[-1]) if not series.isna().all() else None
+        if int(series.notna().sum()) >= RADIATION_STALENESS_WINDOW and series.nunique(dropna=True) <= 1:
+            const_val = float(series.iloc[-1])
             raise ServingValidationError(
                 "STALE_RADIATION_OR_LAG",
                 (
@@ -179,6 +180,49 @@ def _validate_radiation_freshness(df: pd.DataFrame) -> None:
                 ),
                 {"column": col, "window": RADIATION_STALENESS_WINDOW, "value": const_val},
             )
+
+
+def _validate_solar_pre_imputation(series: pd.Series, col_name: str) -> bool:
+    """Validate non-null solar cells (no non-numeric strings, Inf, -999 sentinel, or out-of-bounds); return True if any NaN exists."""
+    raw_notna = series.notna()
+    numeric = pd.to_numeric(series, errors="coerce")
+    coerced_bad = raw_notna & numeric.isna()
+    if coerced_bad.any():
+        bad_count = int(coerced_bad.sum())
+        raise ServingValidationError(
+            "INVALID_OR_MISSING_METEO_INPUT",
+            f"Column '{col_name}' contains {bad_count} non-numeric value(s).",
+            {"column": col_name, "invalid_count": bad_count},
+        )
+
+    non_null_vals = numeric.dropna().to_numpy(dtype=np.float64)
+    if non_null_vals.size > 0:
+        if not np.isfinite(non_null_vals).all():
+            raise ServingValidationError(
+                "INVALID_OR_MISSING_METEO_INPUT",
+                f"Column '{col_name}' contains non-finite (Inf/-Inf) values.",
+                {"column": col_name},
+            )
+        if (non_null_vals <= SENTINEL_THRESHOLD).any():
+            bad_val = float(non_null_vals[non_null_vals <= SENTINEL_THRESHOLD][0])
+            raise ServingValidationError(
+                "INVALID_OR_MISSING_METEO_INPUT",
+                f"Column '{col_name}' contains sentinel fill value ({bad_val}).",
+                {"column": col_name, "value": bad_val},
+            )
+        bounds = PHYSICAL_METEO_BOUNDS.get(col_name)
+        if bounds is not None:
+            low, high = bounds
+            out_of_bounds = (non_null_vals < low) | (non_null_vals > high)
+            if out_of_bounds.any():
+                bad_val = float(non_null_vals[out_of_bounds][0])
+                raise ServingValidationError(
+                    "INVALID_OR_MISSING_METEO_INPUT",
+                    f"Column '{col_name}' value {bad_val} violates physical bounds [{low}, {high}].",
+                    {"column": col_name, "value": bad_val, "bounds": [low, high]},
+                )
+
+    return bool(numeric.isna().any())
 
 
 def validate_serving_input(
@@ -192,6 +236,7 @@ def validate_serving_input(
     min_rows: int = MIN_HISTORY_ROWS,
     max_lag_days: int = MAX_OPERATIONAL_LAG_DAYS,
     enforce_lag_limit: bool = True,
+    allow_solar_doy_imputation: bool = True,
 ) -> ValidatedServingContext:
     """
     Validate raw meteorological history before feature construction or inference.
@@ -277,6 +322,33 @@ def validate_serving_input(
             {"missing_columns": missing_cols},
         )
 
+    imputation_outcome = None
+    if allow_solar_doy_imputation and required_columns is None:
+        from src.inference.solar_imputation import (
+            SOLAR_11_VI_COLS,
+            apply_serving_solar_doy_fallback,
+        )
+
+        solar_set = set(SOLAR_11_VI_COLS)
+        # 1. Fail-fast on all 24 meteorological variables (never imputed)
+        for col in req_cols:
+            if col not in solar_set:
+                _validate_numeric_column(df[col], col)
+
+        # 2. Check non-null solar cells for sentinels/bounds and detect missing solar cells
+        has_missing_solar = False
+        for col in req_cols:
+            if col in solar_set and _validate_solar_pre_imputation(df[col], col):
+                has_missing_solar = True
+
+        # 3. Reject frozen non-null constant radiation sensors BEFORE filling missing solar cells
+        _validate_radiation_freshness(df)
+
+        # 4. Selectively apply P-c (Dev_Train 366-day DOY median) ONLY to missing solar cells
+        if has_missing_solar:
+            imputation_outcome = apply_serving_solar_doy_fallback(df, date_col=date_col)
+            df = imputation_outcome.filled_df
+
     for col in req_cols:
         _validate_numeric_column(df[col], col)
 
@@ -332,5 +404,6 @@ def validate_serving_input(
         effective_run_date=effective_run_date,
         lag_days=lag_days,
         effective_future_days=max(0, 7 - lag_days),
+        imputation_outcome=imputation_outcome,
     )
 
