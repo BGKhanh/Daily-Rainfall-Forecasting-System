@@ -399,11 +399,31 @@ const MOCK_OBS_WEEKLY: ObservationsQueryResponse = {
   end_date: "2026-11-19",
   series: [
     {
-      date: "2024-11-18",
+      date: "2024-11-20",
       period_end: "2024-11-24",
+      precip_mm: null,
+      precip_total_mm: 14.0,
+      precip_daily_mean_mm: 2.8,
+      published_days_count: 5,
+      calendar_days_count: 7,
+      status: "FINALIZED",
+    },
+    {
+      date: "2024-11-25",
+      period_end: "2024-12-01",
       precip_mm: null,
       precip_total_mm: 24.5,
       precip_daily_mean_mm: 3.5,
+      published_days_count: 7,
+      calendar_days_count: 7,
+      status: "FINALIZED",
+    },
+    {
+      date: "2024-12-02",
+      period_end: "2024-12-08",
+      precip_mm: null,
+      precip_total_mm: 28.0,
+      precip_daily_mean_mm: 4.0,
       published_days_count: 7,
       calendar_days_count: 7,
       status: "FINALIZED",
@@ -425,7 +445,7 @@ const MOCK_OBS_WEEKLY: ObservationsQueryResponse = {
       precip_total_mm: null,
       precip_daily_mean_mm: null,
       published_days_count: 0,
-      calendar_days_count: 4,
+      calendar_days_count: 7,
       status: "NOT_PUBLISHED",
     },
   ],
@@ -568,6 +588,7 @@ describe("Round 10 English SPA, Single-Model Main, 2-Layer Map & Data Retrieval"
 
     await waitFor(() => {
       expect(screen.getByTestId("selected-locations-table")).toBeInTheDocument();
+      expect(screen.getByTestId("forecast-line-chart")).toBeInTheDocument();
     });
     const baselinePredicts = predictCalls.length;
 
@@ -588,12 +609,23 @@ describe("Round 10 English SPA, Single-Model Main, 2-Layer Map & Data Retrieval"
     expect(screen.queryByTestId("map-grid-layer")).not.toBeInTheDocument();
     fireEvent.click(gridToggle);
 
-    // Click Ha Noi (unsupported) -> zero new /predict calls, shows "Forecast not available yet", adds to Selected locations
+    // Click Ha Noi (unsupported) -> keeps HCMC forecast active by default, shows forecast tabs,
+    // switching to Ha Noi tab shows deduplicated heading "{DisplayName} — Forecast not available yet" with zero new /predict calls
     const hanoiPoly = document.querySelector('path[data-location-id="HANOI"]');
     expect(hanoiPoly).not.toBeNull();
     fireEvent.click(hanoiPoly!);
 
-    expect(screen.getByTestId("forecast-unavailable-panel")).toHaveTextContent("Forecast not available yet");
+    const tabsBar = screen.getByTestId("forecast-location-tabs");
+    expect(tabsBar).toBeInTheDocument();
+    expect(screen.getByTestId("forecast-line-chart")).toBeInTheDocument();
+    expect(screen.getByTestId("forecast-spatial-note")).toHaveTextContent("29.11%");
+
+    const hanoiTab = within(tabsBar).getByRole("tab", { name: /Ha Noi/i });
+    fireEvent.click(hanoiTab);
+
+    const unavailable = screen.getByTestId("forecast-unavailable-panel");
+    expect(unavailable).toHaveTextContent("Ha Noi — Forecast not available yet");
+    expect(unavailable.querySelectorAll("p").length).toBe(1);
     expect(predictCalls.length).toBe(baselinePredicts);
     const selectedTbl = screen.getByTestId("selected-locations-table");
     expect(selectedTbl).toHaveTextContent("Ho Chi Minh City");
@@ -643,6 +675,10 @@ describe("Round 10 English SPA, Single-Model Main, 2-Layer Map & Data Retrieval"
     fireEvent.click(screen.getByRole("button", { name: EN.tabs.governance }));
 
     expect(screen.getByText("Spatial representativeness")).toBeInTheDocument();
+    expect(document.body.textContent).toContain("29.11%");
+    expect(document.body.textContent).toContain("16.12%");
+    expect(document.body.textContent).toContain("90.30%");
+    expect(screen.getByTestId("dynamic-snapshot-mode")).toHaveTextContent("Bundled Demo SQLite DB");
     const hrefs = screen.getAllByRole("link").map((el) => el.getAttribute("href") ?? "");
     expect(hrefs.some((h) => h.includes("power.larc.nasa.gov/docs/services"))).toBe(true);
     expect(hrefs.some((h) => h.includes("power.larc.nasa.gov/docs/faqs/solar"))).toBe(true);
@@ -706,11 +742,12 @@ describe("Round 10 English SPA, Single-Model Main, 2-Layer Map & Data Retrieval"
       expect(screen.getByTestId("map-zoom-controls")).toBeInTheDocument();
     });
 
-    expect(screen.getByTestId("map-zoom-level")).toHaveTextContent("1.0×");
+    expect(screen.getByTestId("map-zoom-level")).toHaveTextContent("1×");
+    expect(screen.getByTestId("map-fit-selection-btn")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: EN.map.zoomInAria }));
     expect(screen.getByTestId("map-zoom-level")).toHaveTextContent("1.3×");
     fireEvent.click(screen.getByRole("button", { name: EN.map.zoomResetLabel }));
-    expect(screen.getByTestId("map-zoom-level")).toHaveTextContent("1.0×");
+    expect(screen.getByTestId("map-zoom-level")).toHaveTextContent("1×");
 
     const hanoiPoly = document.querySelector('path[data-location-id="HANOI"]');
     const canThoPoly = document.querySelector('path[data-location-id="CAN_THO"]');
@@ -747,15 +784,26 @@ describe("Round 10 English SPA, Single-Model Main, 2-Layer Map & Data Retrieval"
     const svg = screen.getByTestId("grid-scale-svg");
     expect(svg.querySelectorAll('rect[data-grid-type="merra2"]').length).toBeGreaterThanOrEqual(1);
     expect(svg.querySelectorAll('rect[data-grid-type="ceres"]').length).toBeGreaterThanOrEqual(1);
+    expect(svg.querySelector('rect[data-grid-type="ceres"][data-rep="true"]')).not.toBeNull();
+    expect(screen.getByTestId("grid-scale-decorations")).toHaveTextContent("N ↑");
+    expect(screen.getByTestId("grid-scale-decorations")).toHaveTextContent("km");
 
     const dropdown = screen.getByLabelText(EN.gridScale.provinceSelectAria);
     fireEvent.change(dropdown, { target: { value: "HANOI" } });
     expect(dropdown).toHaveValue("HANOI");
 
     fireEvent.click(screen.getByLabelText(EN.gridScale.showOverlapToggle));
-    expect(screen.getByTestId("overlap-breakdown-table")).toBeInTheDocument();
+    const overlapPanel = screen.getByTestId("overlap-breakdown-table");
+    expect(overlapPanel).toBeInTheDocument();
+    expect(overlapPanel.closest(".grid-scale-workspace")).toBeNull();
+    expect(overlapPanel).toHaveTextContent("Representative MERRA-2 cell (meteo input feed)");
+    expect(overlapPanel).toHaveTextContent("Representative CERES cell (radiation input feed)");
+
+    const catalogDetails = screen.getByTestId("variable-catalog-section") as HTMLDetailsElement;
+    expect(catalogDetails.open).toBe(false);
 
     const panel = screen.getByTestId("grid-scale-panel");
+    expect(panel).toHaveTextContent("Polygon area (from simplified boundary data)");
     expect(panel).toHaveTextContent("TOA_SW_DWN");
     expect(panel.textContent).not.toMatch(/\bCLOUD_AMT\b|\bALB\b/);
   });
@@ -779,6 +827,12 @@ describe("Round 10 English SPA, Single-Model Main, 2-Layer Map & Data Retrieval"
     await waitFor(() => {
       expect(screen.getAllByText("Partial period (2/7 days)").length).toBeGreaterThanOrEqual(1);
     });
+    expect(screen.getByTestId("obs-start-iso")).toHaveTextContent("ISO:");
+    expect(screen.getByTestId("obs-end-iso")).toHaveTextContent("ISO:");
+    const obsSvg = screen.getByTestId("observations-chart");
+    expect(obsSvg.querySelectorAll('circle[data-partial-period="true"]').length).toBe(2);
+    expect(obsSvg.querySelectorAll('path[data-partial-connector="true"]').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByTestId("legend-partial-period")).toHaveTextContent("Partial period (dotted connector");
     expect(screen.getByText(EN.dataRetrieval.overlayDailyOnlyNote)).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText(EN.dataRetrieval.locationLabel), { target: { value: "HANOI" } });

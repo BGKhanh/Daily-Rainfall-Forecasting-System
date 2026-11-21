@@ -216,3 +216,43 @@ def test_automated_pipeline_cli_dry_run_and_refresh_cache(tmp_path: Path, capsys
     ref = run_refresh_cache_step(backend="local", db_path=db_path)
     assert ref["status"] == "SUCCESS"
     assert ref["state_key"][0] == "local"
+
+
+def test_automated_pipeline_deferred_on_quota_blocked(tmp_path: Path, monkeypatch, capsys):
+    """Verify HTTP 402/403/429 BLOCKED defers CLI pipeline cleanly with DEFERRED_QUOTA_BLOCKED and redacted secrets."""
+    import requests
+
+    secret_tok = "tok_pipeline_secret_555666"
+
+    class _BlockedResp:
+        status_code = 402
+        text = f'{{"error":"BLOCKED: quota exceeded Bearer {secret_tok}"}}'
+
+        @staticmethod
+        def json():
+            return {"error": "BLOCKED: quota exceeded"}
+
+    monkeypatch.setenv("TURSO_DB_URL", "libsql://blocked-cli.turso.io")
+    monkeypatch.setenv("TURSO_DB_TOKEN", secret_tok)
+    monkeypatch.setattr(
+        requests.Session,
+        "post",
+        lambda sess, url, json=None, timeout=None: _BlockedResp(),
+    )
+
+    out_json = tmp_path / "blocked.json"
+    rc = pipeline_main(
+        [
+            "--backend",
+            "turso_remote",
+            "--json-out",
+            str(out_json),
+            "issue-forecasts",
+        ]
+    )
+    assert rc == 0
+    payload = json.loads(out_json.read_text(encoding="utf-8"))
+    assert payload["status"] == "DEFERRED_QUOTA_BLOCKED"
+    assert payload["degraded_reason"] == "TURSO_REMOTE_BLOCKED"
+    assert secret_tok not in json.dumps(payload)
+    assert secret_tok not in capsys.readouterr().out

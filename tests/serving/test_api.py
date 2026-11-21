@@ -702,3 +702,36 @@ def test_fresh_process_imports_have_no_circular_dependency(import_stmt: str):
         timeout=30,
     )
     assert proc.returncode == 0, f"{import_stmt} failed:\n{proc.stderr}"
+
+
+def test_observations_leading_and_trailing_partial_periods_weekly_and_monthly(monkeypatch):
+    """Priority 1: verify leading and trailing incomplete periods preserve true calendar_days_count."""
+    from datetime import datetime as _dt, timezone as _tz
+    import src.config.clock as clock_mod
+
+    monkeypatch.setattr(clock_mod, "now_utc", lambda: _dt(2026, 11, 19, 8, 0, tzinfo=_tz.utc))
+    with TestClient(app) as client:
+        # Start Wednesday 2026-08-26 -> leading week has 5 published days out of 7 calendar days;
+        # end Thursday 2026-11-19 -> trailing week has 0 < pub < 7 (or unpublished after 11-15).
+        w_res = client.get("/observations?granularity=weekly&start_date=2026-08-26&end_date=2026-11-12")
+        assert w_res.status_code == 200
+        w_series = w_res.json()["series"]
+        lead_w = w_series[0]
+        trail_w = w_series[-1]
+        assert lead_w["calendar_days_count"] == 7
+        assert 0 < lead_w["published_days_count"] < lead_w["calendar_days_count"]
+        assert lead_w["published_days_count"] == 5
+        assert trail_w["calendar_days_count"] == 7
+        assert 0 < trail_w["published_days_count"] < trail_w["calendar_days_count"]
+        assert trail_w["published_days_count"] == 4
+
+        # Monthly: 2026-08-26..2026-11-12 -> leading August has 6/31 days, trailing November has 12/30 days.
+        m_res = client.get("/observations?granularity=monthly&start_date=2026-08-26&end_date=2026-11-12")
+        assert m_res.status_code == 200
+        m_series = m_res.json()["series"]
+        lead_m = m_series[0]
+        trail_m = m_series[-1]
+        assert lead_m["calendar_days_count"] == 31
+        assert lead_m["published_days_count"] == 6
+        assert trail_m["calendar_days_count"] == 30
+        assert trail_m["published_days_count"] == 12

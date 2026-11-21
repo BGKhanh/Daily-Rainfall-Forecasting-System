@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 from pathlib import Path
 import sqlite3
 import sys
@@ -21,7 +22,9 @@ from src.data.turso_backend import (  # noqa: E402
     TursoRemoteConnection,
     TursoReplicaManager,
     _clear_replica_registry_for_tests,
+    evaluate_turso_quota_warning,
     open_store_connection,
+    redact_secrets,
     resolve_store_backend,
 )
 from src.data.vintage_store import (  # noqa: E402
@@ -485,3 +488,164 @@ def test_turso_api_integration_across_modes(tmp_path: Path, monkeypatch):
         _clear_replica_registry_for_tests()
         clear_db_query_cache()
         load_serving_models()
+
+
+def test_turso_quota_blocked_local_fallback_health_degraded_and_secret_redaction(tmp_path: Path, monkeypatch):
+    """Verify HTTP 402/403/429 BLOCKED triggers local fallback, /health degraded state, >=70% quota warning & secret redaction."""
+    from fastapi.testclient import TestClient
+    import requests
+    import src.api.main as api_main
+    from src.api.main import app, load_serving_models
+    from src.api.schemas import HealthResponse
+
+    _clear_replica_registry_for_tests()
+    clear_db_query_cache()
+
+    fake_secret = "tok_live_turso_secret_987654321"
+    sample_redacted = redact_secrets(
+        f"Authorization: Bearer {fake_secret} TURSO_DB_TOKEN={fake_secret}",
+        extra_secrets=[fake_secret],
+    )
+    assert fake_secret not in sample_redacted
+    assert "[REDACTED]" in sample_redacted
+
+    local_fallback_db = tmp_path / "fallback_local.db"
+    _seed_minimal_store(local_fallback_db)
+
+    class _BlockedResp:
+        def __init__(self, code: int):
+            self.status_code = code
+            self.text = f'{{"error":"BLOCKED: reads_blocked quota exceeded Bearer {fake_secret}"}}'
+
+        def json(self):
+            return {"error": self.text}
+
+    monkeypatch.setenv("TURSO_DB_URL", "libsql://blocked-probe.turso.io")
+    monkeypatch.setenv("TURSO_DB_TOKEN", fake_secret)
+    monkeypatch.setenv("VINTAGE_DB_PATH", str(local_fallback_db))
+    monkeypatch.setenv("STORE_BACKEND", "turso_remote")
+    monkeypatch.setattr(
+        requests.Session,
+        "post",
+        lambda sess, url, json=None, timeout=None: _BlockedResp(402),
+    )
+
+    orig_provider = api_main.history_provider
+    try:
+        api_main.history_provider = None
+        load_serving_models()
+        with TestClient(app) as client:
+            # Read path seamlessly falls back to local DB and returns HTTP 200
+            r_obs = client.get("/observations?location_id=HCMC&start_date=2026-08-30&end_date=2026-08-31")
+            assert r_obs.status_code == 200, r_obs.text
+            assert r_obs.json()["summary"]["published_days"] == 1
+
+            # /health transitions to status="degraded" with explicit reason & zero leaked secrets
+            r_health = client.get("/health")
+            assert r_health.status_code == 200
+            h_json = r_health.json()
+            HealthResponse.model_validate(h_json)
+            assert h_json["status"] == "degraded"
+            assert h_json["degraded_reason"] == "TURSO_REMOTE_BLOCKED_FALLBACK_LOCAL"
+            assert fake_secret not in json.dumps(h_json)
+
+            # Monthly 500M quota >= 70% flips turso_quota_warning=True on /health
+            q_warn = evaluate_turso_quota_warning(350_000_000)
+            assert q_warn["turso_quota_warning"] is True
+            r_health2 = client.get("/health")
+            assert r_health2.json()["turso_quota_warning"] is True
+    finally:
+        monkeypatch.delenv("STORE_BACKEND", raising=False)
+        monkeypatch.delenv("VINTAGE_DB_PATH", raising=False)
+        api_main.history_provider = orig_provider
+        _clear_replica_registry_for_tests()
+        clear_db_query_cache()
+        load_serving_models()
+
+
+def test_atomic_replica_staging_integrity_and_three_failures_degraded(tmp_path: Path, monkeypatch):
+    """Verify atomic staging/swap cleans up on error, preserves replica integrity, and sets degraded after 3 failures."""
+    import requests
+
+    _clear_replica_registry_for_tests()
+    backing = tmp_path / "backing_atomic.db"
+    replica_db = tmp_path / "replica_atomic.db"
+    _seed_minimal_store(backing)
+    sim = _FakeHranaServer(backing)
+
+    monkeypatch.setattr(
+        requests.Session,
+        "post",
+        lambda sess, url, json=None, timeout=None: sim.handle_post(url, dict(sess.headers), json or {}),
+    )
+    mgr = TursoReplicaManager(
+        replica_path=replica_db,
+        db_url="libsql://atomic-test.turso.io",
+        auth_token="tok_rw_atomic_123456",
+    )
+    res1 = mgr.sync_now(verify_hashes=True)
+    assert res1["table_counts"]["observations_vintage"] == 1
+    assert mgr.consecutive_failures == 0
+    assert mgr.is_degraded is False
+    assert not list(tmp_path.glob("*.staging.*"))
+
+    # Simulate 3 consecutive sync errors (503 exhausted) -> replica DB must stay intact and clean
+    monkeypatch.setattr(
+        requests.Session,
+        "post",
+        lambda *a, **kw: (_ for _ in ()).throw(requests.ConnectionError("transient network drop tok_rw_atomic_123456")),
+    )
+    for expected_fail in (1, 2, 3):
+        with pytest.raises(sqlite3.OperationalError):
+            mgr.sync_now()
+        assert mgr.consecutive_failures == expected_fail
+        assert not list(tmp_path.glob("*.staging.*"))
+        assert "tok_rw_atomic_123456" not in (mgr.last_sync_error or "")
+        assert mgr.is_degraded is (expected_fail >= 3)
+    assert mgr.degraded_reason == "REPLICA_SYNC_CONSECUTIVE_FAILURES"
+
+    # Existing replica remains readable with intact original row
+    ro = connect_sqlite(replica_db, read_only=True)
+    try:
+        assert ro.execute("SELECT COUNT(*) FROM observations_vintage").fetchone()[0] == 1
+    finally:
+        ro.close()
+
+    # Subsequent successful sync resets degraded state & counter
+    monkeypatch.setattr(
+        requests.Session,
+        "post",
+        lambda sess, url, json=None, timeout=None: sim.handle_post(url, dict(sess.headers), json or {}),
+    )
+    mgr.sync_now()
+    assert mgr.consecutive_failures == 0
+    assert mgr.is_degraded is False
+    assert mgr.degraded_reason is None
+    _clear_replica_registry_for_tests()
+
+
+_HAS_LIVE_TURSO_CREDS = bool(
+    os.environ.get("CI") != "true"
+    and os.environ.get("TURSO_DB_URL")
+    and (os.environ.get("TURSO_DB_TOKEN") or os.environ.get("TURSO_READONLY_AUTH_TOKEN"))
+)
+
+
+@pytest.mark.skipif(
+    not _HAS_LIVE_TURSO_CREDS,
+    reason="Intentional skip in stateless CI: requires live Turso secrets; verified report persisted at reports/storage_audit/turso_parity_and_cost_report.json",
+)
+def test_live_turso_credentials_parity_when_configured():
+    """Verify live Turso DDL V3.4 & Two-DB Option A policy when credentials are present."""
+    conn = TursoRemoteConnection(read_only=True)
+    try:
+        v34 = conn.execute("SELECT version FROM schema_migrations WHERE version = 'V3.4'").fetchone()
+        assert v34 is not None
+        backfill_cnt = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM forecasts_ledger WHERE issued_by = 'manual_retrospective_backfill'"
+            ).fetchone()[0]
+        )
+        assert backfill_cnt == 0
+    finally:
+        conn.close()
