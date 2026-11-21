@@ -318,6 +318,7 @@ DDL_V3_STATEMENTS: Tuple[str, ...] = (
         flashflux_max_ffill_days    INTEGER NOT NULL DEFAULT 0 CHECK (flashflux_max_ffill_days BETWEEN 0 AND 7),
         ceres_policy_applied        TEXT NOT NULL CHECK (ceres_policy_applied IN (
                                         'NONE_COMPLETE',
+                                        'P-c_DOY_MEDIAN_11_SOLAR_V1',
                                         'POLICY_A_CLIMATOLOGY_DOY',
                                         'POLICY_B_LAG_90',
                                         'POLICY_B_LAG_120',
@@ -329,8 +330,10 @@ DDL_V3_STATEMENTS: Tuple[str, ...] = (
         degraded_reason             TEXT,
         git_sha                     TEXT NOT NULL,
         config_sha256               TEXT,
-        issued_by                   TEXT NOT NULL DEFAULT 'automated_pipeline' CHECK (issued_by IN ('automated_pipeline', 'manual_retrospective_backfill')),
+        issued_by                   TEXT NOT NULL CHECK (issued_by IN ('automated_pipeline', 'manual_retrospective_backfill', 'manual_operational')),
         result_config_sha256        TEXT,
+        imputed_values_json         TEXT NOT NULL DEFAULT '{}',
+        doy_table_sha256            TEXT,
         UNIQUE (location_id, model_id, data_as_of, horizon_day),
         CHECK (
             is_degraded_input = CASE
@@ -481,6 +484,9 @@ DDL_V3_STATEMENTS: Tuple[str, ...] = (
         f.temporal_status_at_issue,
         f.is_degraded_input,
         f.ceres_policy_applied,
+        f.imputed_values_json,
+        f.doy_table_sha256,
+        f.issued_by,
         f.pred_mm,
         fst.version_num                           AS obs_first_version_num,
         fst.ingest_origin                         AS obs_first_ingest_origin,
@@ -625,7 +631,7 @@ def finalize_db_for_read_only(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA journal_mode = DELETE;")
 
 
-VALID_ISSUED_BY: Tuple[str, ...] = ("automated_pipeline", "manual_retrospective_backfill")
+VALID_ISSUED_BY: Tuple[str, ...] = ("automated_pipeline", "manual_retrospective_backfill", "manual_operational")
 
 
 def _safe_compute_config_sha256() -> str:
@@ -844,8 +850,292 @@ def apply_migrations_v3_4(
     )
 
 
+_FORECASTS_LEDGER_V35_CREATE_SQL = """
+CREATE TABLE forecasts_ledger (
+    forecast_id                 TEXT PRIMARY KEY,
+    issued_at_utc               TEXT NOT NULL,
+    issued_run_date             TEXT NOT NULL,
+    run_timezone                TEXT NOT NULL DEFAULT 'Asia/Ho_Chi_Minh',
+    location_id                 TEXT NOT NULL REFERENCES locations(location_id),
+    model_id                    TEXT NOT NULL,
+    model_kind                  TEXT NOT NULL CHECK (model_kind IN ('ML_SERVING', 'ML_SHADOW', 'BASELINE')),
+    registry_alias              TEXT,
+    registry_model_version      INTEGER,
+    artifact_sha256             TEXT NOT NULL,
+    feature_builder_sha256      TEXT,
+    data_as_of                  TEXT NOT NULL,
+    eval_split_regime           TEXT NOT NULL CHECK (eval_split_regime IN ('DEV_TRAIN', 'VALIDATION', 'TEST', 'POST_TEST')),
+    horizon_day                 INTEGER NOT NULL CHECK (horizon_day BETWEEN 1 AND 7),
+    target_date                 TEXT NOT NULL,
+    temporal_status_at_issue    TEXT NOT NULL CHECK (temporal_status_at_issue IN ('past_observed', 'past_unverified', 'today', 'future_forecast')),
+    pred_mm                     REAL NOT NULL CHECK (pred_mm >= 0.0),
+    input_window_start          TEXT NOT NULL,
+    input_window_end            TEXT NOT NULL,
+    input_window_hash           TEXT NOT NULL,
+    input_vintage_manifest_json TEXT NOT NULL,
+    input_provisional_days      INTEGER NOT NULL CHECK (input_provisional_days BETWEEN 0 AND 30),
+    meteo_missing_count         INTEGER NOT NULL DEFAULT 0 CHECK (meteo_missing_count = 0),
+    flashflux_max_ffill_days    INTEGER NOT NULL DEFAULT 0 CHECK (flashflux_max_ffill_days BETWEEN 0 AND 7),
+    ceres_policy_applied        TEXT NOT NULL CHECK (ceres_policy_applied IN (
+                                    'NONE_COMPLETE',
+                                    'P-c_DOY_MEDIAN_11_SOLAR_V1',
+                                    'POLICY_A_CLIMATOLOGY_DOY',
+                                    'POLICY_B_LAG_90',
+                                    'POLICY_B_LAG_120',
+                                    'POLICY_C_NATIVE_NAN',
+                                    'NOT_APPLICABLE_BASELINE'
+                                )),
+    ceres_max_staleness_days    INTEGER NOT NULL DEFAULT 0 CHECK (ceres_max_staleness_days >= 0),
+    is_degraded_input           INTEGER NOT NULL DEFAULT 0 CHECK (is_degraded_input IN (0, 1)),
+    degraded_reason             TEXT,
+    git_sha                     TEXT NOT NULL,
+    config_sha256               TEXT,
+    issued_by                   TEXT NOT NULL CHECK (issued_by IN ('automated_pipeline', 'manual_retrospective_backfill', 'manual_operational')),
+    result_config_sha256        TEXT,
+    imputed_values_json         TEXT NOT NULL DEFAULT '{}',
+    doy_table_sha256            TEXT,
+    UNIQUE (location_id, model_id, data_as_of, horizon_day),
+    CHECK (
+        is_degraded_input = CASE
+            WHEN flashflux_max_ffill_days > 0
+              OR ceres_policy_applied NOT IN ('NONE_COMPLETE', 'NOT_APPLICABLE_BASELINE')
+            THEN 1
+            ELSE 0
+        END
+    )
+);
+"""
+
+_V_FORECAST_SCORES_V35_CREATE_SQL = """
+CREATE VIEW v_forecast_scores AS
+SELECT
+    f.forecast_id,
+    f.location_id,
+    f.model_id,
+    f.model_kind,
+    f.registry_alias,
+    f.registry_model_version,
+    f.issued_at_utc,
+    f.issued_run_date,
+    f.data_as_of,
+    f.eval_split_regime,
+    f.horizon_day,
+    f.target_date,
+    f.temporal_status_at_issue,
+    f.is_degraded_input,
+    f.ceres_policy_applied,
+    f.imputed_values_json,
+    f.doy_table_sha256,
+    f.issued_by,
+    f.pred_mm,
+    fst.version_num                           AS obs_first_version_num,
+    fst.ingest_origin                         AS obs_first_ingest_origin,
+    fst.ingested_at_utc                       AS obs_first_ingested_at_utc,
+    fst.age_days_at_ingest                    AS obs_first_age_days_at_ingest,
+    fst.completeness_regime                   AS obs_first_completeness,
+    fst.PRECTOTCORR                           AS obs_first_mm,
+    CASE
+        WHEN fst.ingested_at_utc IS NULL THEN NULL
+        WHEN julianday(fst.ingested_at_utc) > julianday(f.issued_at_utc) THEN 1
+        ELSE 0
+    END                                       AS is_prospective,
+    ABS(f.pred_mm - fst.PRECTOTCORR)          AS abs_error_vs_first_mm,
+    (f.pred_mm - fst.PRECTOTCORR)             AS signed_error_vs_first_mm,
+    lat.version_num                           AS obs_latest_version_num,
+    lat.ingest_origin                         AS obs_latest_ingest_origin,
+    lat.ingested_at_utc                       AS obs_latest_ingested_at_utc,
+    lat.age_days_at_ingest                    AS obs_latest_age_days_at_ingest,
+    lat.completeness_regime                   AS obs_latest_completeness,
+    lat.is_provisional                        AS obs_latest_is_provisional,
+    lat.PRECTOTCORR                           AS obs_latest_mm,
+    ABS(f.pred_mm - lat.PRECTOTCORR)          AS abs_error_vs_latest_mm,
+    (f.pred_mm - lat.PRECTOTCORR)             AS signed_error_vs_latest_mm,
+    (lat.PRECTOTCORR - fst.PRECTOTCORR)       AS obs_revision_delta_mm
+FROM forecasts_ledger f
+LEFT JOIN (
+    SELECT o.*
+    FROM observations_vintage o
+    INNER JOIN (
+        SELECT location_id, obs_date, MIN(version_num) AS first_precip_ver
+        FROM observations_vintage
+        WHERE PRECTOTCORR IS NOT NULL
+        GROUP BY location_id, obs_date
+    ) fp ON o.location_id = fp.location_id
+        AND o.obs_date = fp.obs_date
+        AND o.version_num = fp.first_precip_ver
+) fst ON f.location_id = fst.location_id AND f.target_date = fst.obs_date
+LEFT JOIN v_observations_latest lat
+       ON f.location_id = lat.location_id AND f.target_date = lat.obs_date;
+"""
+
+FORECASTS_LEDGER_29_ORIGINAL_COLS: Tuple[str, ...] = (
+    "forecast_id",
+    "issued_at_utc",
+    "issued_run_date",
+    "run_timezone",
+    "location_id",
+    "model_id",
+    "model_kind",
+    "registry_alias",
+    "registry_model_version",
+    "artifact_sha256",
+    "feature_builder_sha256",
+    "data_as_of",
+    "eval_split_regime",
+    "horizon_day",
+    "target_date",
+    "temporal_status_at_issue",
+    "pred_mm",
+    "input_window_start",
+    "input_window_end",
+    "input_window_hash",
+    "input_vintage_manifest_json",
+    "input_provisional_days",
+    "meteo_missing_count",
+    "flashflux_max_ffill_days",
+    "ceres_policy_applied",
+    "ceres_max_staleness_days",
+    "is_degraded_input",
+    "degraded_reason",
+    "git_sha",
+)
+
+
+def apply_migrations_v3_5(
+    conn: sqlite3.Connection,
+    *,
+    result_config_sha256: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Idempotently migrate `forecasts_ledger` and `v_forecast_scores` to DDL V3.5:
+    - Adds `imputed_values_json` (`DEFAULT '{}'`), `doy_table_sha256` (`TEXT`),
+      `'P-c_DOY_MEDIAN_11_SOLAR_V1'` in `ceres_policy_applied`,
+      and strict non-default `issued_by` allowing `'manual_operational'`.
+    - Updates `result_config_sha256` only when explicitly passed via `result_config_sha256`
+      or if previously NULL/empty; leaves all historical forecast columns untouched.
+    """
+    fl_cols_info = conn.execute("PRAGMA table_info(forecasts_ledger)").fetchall()
+    fl_cols = {str(r[1]): r for r in fl_cols_info}
+    tbl_sql_row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='forecasts_ledger'"
+    ).fetchone()
+    tbl_sql = str(tbl_sql_row[0]) if tbl_sql_row and tbl_sql_row[0] else ""
+    v35_mig = conn.execute("SELECT 1 FROM schema_migrations WHERE version = 'V3.5'").fetchone()
+
+    has_v35_schema = (
+        "imputed_values_json" in fl_cols
+        and "doy_table_sha256" in fl_cols
+        and "P-c_DOY_MEDIAN_11_SOLAR_V1" in tbl_sql
+        and "manual_operational" in tbl_sql
+        and "DEFAULT 'automated_pipeline'" not in tbl_sql
+        and v35_mig is not None
+    )
+    if has_v35_schema:
+        return {"migrated": False, "already_v35": True}
+
+    existing_cols = set(fl_cols.keys())
+    col_29_list = ", ".join(FORECASTS_LEDGER_29_ORIGINAL_COLS)
+    cfg_sha_expr = "config_sha256" if "config_sha256" in existing_cols else f"'{_safe_compute_config_sha256()}'"
+    issued_by_expr = "issued_by" if "issued_by" in existing_cols else "'manual_retrospective_backfill'"
+    if result_config_sha256 is not None:
+        raw_res_sha = str(result_config_sha256).strip()
+        if raw_res_sha != "unknown" and (len(raw_res_sha) != 64 or any(c not in "0123456789abcdefABCDEF" for c in raw_res_sha)):
+            raise ValueError(f"Invalid result_config_sha256 format: {result_config_sha256!r}")
+        res_sha_expr = f"'{raw_res_sha}'"
+    else:
+        res_sha_expr = "result_config_sha256" if "result_config_sha256" in existing_cols else f"'{_safe_compute_result_config_sha256()}'"
+    imp_expr = "COALESCE(imputed_values_json, '{}')" if "imputed_values_json" in existing_cols else "'{}'"
+    doy_expr = "doy_table_sha256" if "doy_table_sha256" in existing_cols else "NULL"
+
+    in_tx = bool(getattr(conn, "in_transaction", False)) or bool(getattr(conn, "_baton", None))
+    if in_tx:
+        conn.commit()
+    conn.execute("BEGIN IMMEDIATE;")
+    try:
+        conn.execute("DROP TRIGGER IF EXISTS trg_forecasts_ledger_no_replace;")
+        conn.execute("DROP TRIGGER IF EXISTS trg_forecasts_ledger_no_update;")
+        conn.execute("DROP TRIGGER IF EXISTS trg_forecasts_ledger_no_delete;")
+        conn.execute("DROP VIEW IF EXISTS v_forecast_scores;")
+
+        create_tmp_sql = _FORECASTS_LEDGER_V35_CREATE_SQL.replace(
+            "CREATE TABLE forecasts_ledger",
+            "CREATE TABLE forecasts_ledger_v35_tmp",
+            1,
+        )
+        conn.execute("DROP TABLE IF EXISTS forecasts_ledger_v35_tmp;")
+        conn.execute(create_tmp_sql)
+        conn.execute(
+            f"""
+            INSERT INTO forecasts_ledger_v35_tmp (
+                {col_29_list}, config_sha256, issued_by, result_config_sha256,
+                imputed_values_json, doy_table_sha256
+            )
+            SELECT
+                {col_29_list}, {cfg_sha_expr}, {issued_by_expr}, {res_sha_expr},
+                {imp_expr}, {doy_expr}
+            FROM forecasts_ledger;
+            """
+        )
+        conn.execute("DROP TABLE forecasts_ledger;")
+        conn.execute("ALTER TABLE forecasts_ledger_v35_tmp RENAME TO forecasts_ledger;")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_forecasts_ledger_target ON forecasts_ledger (location_id, target_date, model_id);"
+        )
+        conn.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS trg_forecasts_ledger_no_replace
+            BEFORE INSERT ON forecasts_ledger
+            WHEN EXISTS (
+                SELECT 1 FROM forecasts_ledger
+                WHERE forecast_id = NEW.forecast_id
+                   OR (location_id = NEW.location_id
+                       AND model_id = NEW.model_id
+                       AND data_as_of = NEW.data_as_of
+                       AND horizon_day = NEW.horizon_day)
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'IMMUTABLE_VIOLATION: forecast already issued for (location_id, model_id, data_as_of, horizon_day); overwrite/REPLACE is prohibited.');
+            END;
+            """
+        )
+        conn.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS trg_forecasts_ledger_no_update
+            BEFORE UPDATE ON forecasts_ledger
+            BEGIN
+                SELECT RAISE(ABORT, 'IMMUTABLE_VIOLATION: forecasts_ledger is immutable; UPDATE is prohibited.');
+            END;
+            """
+        )
+        conn.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS trg_forecasts_ledger_no_delete
+            BEFORE DELETE ON forecasts_ledger
+            BEGIN
+                SELECT RAISE(ABORT, 'IMMUTABLE_VIOLATION: forecasts_ledger is immutable; DELETE is prohibited.');
+            END;
+            """
+        )
+        conn.execute(_V_FORECAST_SCORES_V35_CREATE_SQL)
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO schema_migrations (version, description, applied_at_utc)
+            VALUES ('V3.5', 'Rebuild forecasts_ledger with imputed_values_json, doy_table_sha256, P-c policy, strict no-default issued_by (+manual_operational)', ?)
+            """,
+            (utc_now_iso(),),
+        )
+        conn.execute("COMMIT;")
+    except Exception:
+        try:
+            conn.execute("ROLLBACK;")
+        except sqlite3.Error:
+            pass
+        raise
+    return {"migrated": True, "already_v35": False}
+
+
 def init_schema(conn: sqlite3.Connection, *, seed_hcmc_location: bool = True) -> None:
-    """Apply DDL V3.4 tables, indexes, 9 triggers, views, and idempotent migrations cleanly, then finalize WAL."""
+    """Apply DDL V3.5 tables, indexes, 9 triggers, views, and idempotent migrations cleanly, then finalize WAL."""
     for stmt in DDL_V3_STATEMENTS:
         conn.execute(stmt)
     if seed_hcmc_location:
@@ -868,6 +1158,7 @@ def init_schema(conn: sqlite3.Connection, *, seed_hcmc_location: bool = True) ->
         )
     apply_migrations_v3_3(conn)
     apply_migrations_v3_4(conn)
+    apply_migrations_v3_5(conn)
     finalize_db_for_read_only(conn)
 
 
@@ -1719,9 +2010,20 @@ def insert_forecasts_idempotent(
         else:
             temp_status = str(temp_status)
 
-        issued_by_val = str(row.get("issued_by") or "automated_pipeline")
+        raw_issued_by = row.get("issued_by")
+        if raw_issued_by is None or not str(raw_issued_by).strip():
+            raise ValueError(f"Missing required explicit 'issued_by'; expected one of {VALID_ISSUED_BY}.")
+        issued_by_val = str(raw_issued_by).strip()
         if issued_by_val not in VALID_ISSUED_BY:
             raise ValueError(f"Invalid issued_by={issued_by_val!r}; expected one of {VALID_ISSUED_BY}.")
+        raw_imputed = row.get("imputed_values_json")
+        if raw_imputed is None:
+            imputed_json_val = "{}"
+        elif isinstance(raw_imputed, Mapping):
+            imputed_json_val = json.dumps({k: raw_imputed[k] for k in sorted(raw_imputed.keys())}, separators=(",", ":"))
+        else:
+            imputed_json_val = str(raw_imputed)
+        doy_sha_val = row.get("doy_table_sha256")
         to_insert.append(
             (
                 forecast_id,
@@ -1756,6 +2058,8 @@ def insert_forecasts_idempotent(
                 str(row.get("config_sha256") or _safe_compute_config_sha256()),
                 issued_by_val,
                 str(row.get("result_config_sha256") or _safe_compute_result_config_sha256()),
+                imputed_json_val,
+                doy_sha_val,
             )
         )
 
@@ -1773,7 +2077,7 @@ def insert_forecasts_idempotent(
                     input_vintage_manifest_json, input_provisional_days,
                     meteo_missing_count, flashflux_max_ffill_days, ceres_policy_applied,
                     ceres_max_staleness_days, is_degraded_input, degraded_reason, git_sha, config_sha256,
-                    issued_by, result_config_sha256
+                    issued_by, result_config_sha256, imputed_values_json, doy_table_sha256
                 ) VALUES (
                     ?, ?, ?, ?, ?,
                     ?, ?, ?, ?,
@@ -1783,7 +2087,7 @@ def insert_forecasts_idempotent(
                     ?, ?,
                     ?, ?, ?,
                     ?, ?, ?, ?, ?,
-                    ?, ?
+                    ?, ?, ?, ?
                 )
                 """,
                 to_insert,

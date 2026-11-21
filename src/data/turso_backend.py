@@ -58,10 +58,18 @@ _COMMIT_RE = re.compile(r"^\s*(?:COMMIT|END)(?:\s+TRANSACTION)?\b", re.IGNORECAS
 _ROLLBACK_RE = re.compile(r"^\s*ROLLBACK(?:\s+TRANSACTION)?\b", re.IGNORECASE)
 _READ_ONLY_SQL_RE = re.compile(r"^\s*(?:SELECT|WITH|EXPLAIN|PRAGMA\s+(?:table_info|index_list|foreign_key_check|database_list|query_only|foreign_keys)\b)", re.IGNORECASE)
 
-STARTER_MONTHLY_ROWS_READ_LIMIT = 500_000_000
-STARTER_MONTHLY_ROWS_WRITTEN_LIMIT = 10_000_000
-STARTER_MONTHLY_SYNC_BYTES_LIMIT = 3 * 1024 * 1024 * 1024
-QUOTA_WARNING_RATIO = 0.70
+def _load_turso_quota_config() -> Dict[str, Any]:
+    """Load Turso plan & monthly quota thresholds dynamically from Layer 3 runtime_config.toml."""
+    app_cfg = load_settings(env_path=None).application
+    return {
+        "plan_name": str(app_cfg.turso_plan_name),
+        "rows_read_limit": int(app_cfg.turso_monthly_read_quota),
+        "rows_written_limit": int(app_cfg.turso_monthly_write_quota),
+        "sync_bytes_limit": int(app_cfg.turso_monthly_sync_bytes_quota),
+        "storage_bytes_limit": int(app_cfg.turso_storage_bytes_quota),
+        "warn_ratio": float(app_cfg.turso_quota_warn_ratio),
+    }
+
 
 _BEARER_TOKEN_RE = re.compile(r"(Bearer\s+)[A-Za-z0-9._\-+/=]+", re.IGNORECASE)
 _JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\b")
@@ -80,6 +88,7 @@ _TURSO_RUNTIME_STATE: Dict[str, Any] = {
     "last_error": None,
     "quota_warning": False,
     "quota_rows_read_pct": 0.0,
+    "usage_source": "in_process_hrana_counter_only",
 }
 
 
@@ -145,35 +154,47 @@ def evaluate_turso_quota_warning(
     *,
     rows_written_used: int = 0,
     sync_bytes_used: int = 0,
-    rows_read_limit: int = STARTER_MONTHLY_ROWS_READ_LIMIT,
-    rows_written_limit: int = STARTER_MONTHLY_ROWS_WRITTEN_LIMIT,
-    sync_bytes_limit: int = STARTER_MONTHLY_SYNC_BYTES_LIMIT,
+    rows_read_limit: Optional[int] = None,
+    rows_written_limit: Optional[int] = None,
+    sync_bytes_limit: Optional[int] = None,
+    warn_ratio: Optional[float] = None,
+    usage_source: str = "in_process_hrana_counter_only",
 ) -> Dict[str, Any]:
-    """Evaluate 500M monthly reads / 10M writes / 3GB sync quota against 70% warning threshold."""
-    read_ratio = float(rows_read_used) / float(max(1, rows_read_limit))
-    write_ratio = float(rows_written_used) / float(max(1, rows_written_limit))
-    sync_ratio = float(sync_bytes_used) / float(max(1, sync_bytes_limit))
+    """Evaluate monthly Turso quota against Layer 3 `runtime_config.toml` plan thresholds."""
+    cfg = _load_turso_quota_config()
+    eff_read_limit = int(rows_read_limit if rows_read_limit is not None else cfg["rows_read_limit"])
+    eff_write_limit = int(rows_written_limit if rows_written_limit is not None else cfg["rows_written_limit"])
+    eff_sync_limit = int(sync_bytes_limit if sync_bytes_limit is not None else cfg["sync_bytes_limit"])
+    eff_warn_ratio = float(warn_ratio if warn_ratio is not None else cfg["warn_ratio"])
+
+    read_ratio = float(rows_read_used) / float(max(1, eff_read_limit))
+    write_ratio = float(rows_written_used) / float(max(1, eff_write_limit))
+    sync_ratio = float(sync_bytes_used) / float(max(1, eff_sync_limit))
     max_ratio = max(read_ratio, write_ratio, sync_ratio)
-    warning = max_ratio >= QUOTA_WARNING_RATIO
+    warning = max_ratio >= eff_warn_ratio
     read_pct = round(read_ratio * 100.0, 4)
     with _TURSO_RUNTIME_LOCK:
         _TURSO_RUNTIME_STATE["quota_rows_read_pct"] = read_pct
+        _TURSO_RUNTIME_STATE["usage_source"] = usage_source
         if warning:
             _TURSO_RUNTIME_STATE["quota_warning"] = True
     if warning:
         logger.warning(
-            "Turso monthly quota warning triggered (>= %.0f%%): rows_read=%.2f%% (%d/%d).",
-            QUOTA_WARNING_RATIO * 100.0,
+            "Turso monthly quota warning triggered (>= %.0f%% on %s plan): rows_read=%.2f%% (%d/%d).",
+            eff_warn_ratio * 100.0,
+            cfg["plan_name"],
             read_pct,
             rows_read_used,
-            rows_read_limit,
+            eff_read_limit,
         )
     return {
+        "plan_name": cfg["plan_name"],
         "turso_quota_warning": warning,
         "rows_read_pct": read_pct,
         "rows_written_pct": round(write_ratio * 100.0, 4),
         "sync_bytes_pct": round(sync_ratio * 100.0, 4),
-        "threshold_pct": QUOTA_WARNING_RATIO * 100.0,
+        "threshold_pct": eff_warn_ratio * 100.0,
+        "usage_source": usage_source,
     }
 
 
@@ -196,6 +217,7 @@ def clear_turso_runtime_status() -> None:
                 "last_error": None,
                 "quota_warning": False,
                 "quota_rows_read_pct": 0.0,
+                "usage_source": "in_process_hrana_counter_only",
             }
         )
 
@@ -511,6 +533,16 @@ class TursoHranaClient:
                     self.total_rows_written += req_written
                     self.last_query_duration_ms = req_dur
                 clear_turso_blocked_state()
+                with _TURSO_RUNTIME_LOCK:
+                    cur_src = str(_TURSO_RUNTIME_STATE.get("usage_source") or "in_process_hrana_counter_only")
+                    hrana_r = self.total_rows_read
+                    hrana_w = self.total_rows_written
+                if cur_src == "in_process_hrana_counter_only":
+                    evaluate_turso_quota_warning(
+                        hrana_r,
+                        rows_written_used=hrana_w,
+                        usage_source="in_process_hrana_counter_only",
+                    )
                 return body
             except TursoQuotaBlockedError:
                 raise
@@ -902,6 +934,8 @@ _FORECASTS_LEDGER_META_COLS = (
     "config_sha256",
     "issued_by",
     "result_config_sha256",
+    "imputed_values_json",
+    "doy_table_sha256",
 )
 
 
@@ -1427,6 +1461,7 @@ class TursoPlatformClient:
         tok = (api_token or secrets.turso_api_token).strip()
         if not tok:
             raise RuntimeError("TURSO_API_TOKEN is required for Turso Platform API calls.")
+        self._token = tok
         self.timeout_sec = timeout_sec
         self._session = requests.Session()
         self._session.headers.update({"Authorization": f"Bearer {tok}"})
@@ -1481,6 +1516,7 @@ class TursoPlatformClient:
                 int(total.get("rows_read") or 0),
                 rows_written_used=int(total.get("rows_written") or 0),
                 sync_bytes_used=int(total.get("bytes_synced") or 0),
+                usage_source="turso_platform_api_snapshot_plus_in_process_hrana_counter",
             )
         return data
 
@@ -1500,7 +1536,7 @@ def compute_table_content_sha256(conn: Any, table_name: str) -> Tuple[int, str]:
         cols = "location_id, obs_date, version_num, run_id, ingest_origin, missing_count, completeness_regime, row_value_hash, PRECTOTCORR, " + ", ".join(ALL_35_VARS[:3])
     elif table_name == "forecasts_ledger":
         order = "location_id, model_id, data_as_of, horizon_day, target_date"
-        cols = "location_id, model_id, eval_split_regime, data_as_of, horizon_day, target_date, ROUND(pred_mm, 8), input_window_hash, config_sha256, issued_by, result_config_sha256"
+        cols = "location_id, model_id, eval_split_regime, data_as_of, horizon_day, target_date, ROUND(pred_mm, 8), input_window_hash, config_sha256, issued_by, result_config_sha256, ceres_policy_applied, is_degraded_input, imputed_values_json, doy_table_sha256"
     else:
         raise ValueError(f"Unsupported verification table: {table_name!r}")
 
@@ -1530,16 +1566,18 @@ def migrate_sqlite_to_turso(
         DDL_V3_STATEMENTS,
         apply_migrations_v3_3,
         apply_migrations_v3_4,
+        apply_migrations_v3_5,
         connect_sqlite,
     )
 
     src_conn = connect_sqlite(source_sqlite_path, read_only=True)
     try:
-        # 1. Ensure schema V3.2..V3.4 + triggers + views exist on remote Turso
+        # 1. Ensure schema V3.2..V3.5 + triggers + views exist on remote Turso
         for stmt in DDL_V3_STATEMENTS:
             target_conn.execute(stmt)
         apply_migrations_v3_3(target_conn)
         apply_migrations_v3_4(target_conn)
+        apply_migrations_v3_5(target_conn)
 
         stats: Dict[str, Any] = {
             "source_db": str(source_sqlite_path),

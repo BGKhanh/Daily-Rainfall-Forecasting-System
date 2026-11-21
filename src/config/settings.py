@@ -75,6 +75,12 @@ class ApplicationConfig(BaseModel):
     map_max_selected_visible_rows: int = Field(default=5, ge=1, le=65)
     map_zoom_min: float = Field(default=1.0, ge=0.5, le=2.0)
     map_zoom_max: float = Field(default=6.0, ge=2.0, le=20.0)
+    turso_plan_name: str = "Free"
+    turso_monthly_read_quota: int = Field(default=500000000, ge=1)
+    turso_monthly_write_quota: int = Field(default=10000000, ge=1)
+    turso_monthly_sync_bytes_quota: int = Field(default=3221225472, ge=1)
+    turso_storage_bytes_quota: int = Field(default=5368709120, ge=1)
+    turso_quota_warn_ratio: float = Field(default=0.70, gt=0.0, le=1.0)
 
 
 class ModelContractConfig(BaseModel):
@@ -91,6 +97,9 @@ class ModelContractConfig(BaseModel):
     canonical_latitude: float
     canonical_longitude: float
     completeness_policy: str
+    radiation_imputation_policy: str = "P-c_DOY_MEDIAN_11_SOLAR_V1"
+    leap_day_doy_policy: str = "EXPLICIT_366_CIRCULAR_MEDIAN_R7"
+    solar_doy_table_sha256: str = ""
 
     @field_validator("required_input_variables")
     @classmethod
@@ -421,6 +430,20 @@ def verify_model_contract_on_startup(
             raise RuntimeError(
                 f"[MODEL_CONTRACT_MISMATCH] FeatureBuilder[{idx}] fitted input vars mismatch: "
                 f"missing={sorted(contract_vars - fb_vars)}, extra={sorted(fb_vars - contract_vars)}."
+            )
+
+    if contract.solar_doy_table_sha256:
+        from src.inference.solar_imputation import DEFAULT_SOLAR_DOY_CLIMATOLOGY_PATH, load_solar_doy_climatology
+
+        if not DEFAULT_SOLAR_DOY_CLIMATOLOGY_PATH.exists():
+            raise RuntimeError(
+                f"[MODEL_CONTRACT_MISMATCH] Missing solar DOY climatology artifact at {DEFAULT_SOLAR_DOY_CLIMATOLOGY_PATH}."
+            )
+        _, actual_doy_sha = load_solar_doy_climatology(DEFAULT_SOLAR_DOY_CLIMATOLOGY_PATH)
+        if actual_doy_sha != contract.solar_doy_table_sha256:
+            raise RuntimeError(
+                f"[MODEL_CONTRACT_MISMATCH] solar_doy_table_sha256 mismatch: expected {contract.solar_doy_table_sha256}, "
+                f"got {actual_doy_sha}."
             )
 
     return contract

@@ -32,6 +32,7 @@ from src.data.turso_backend import open_store_connection, resolve_store_backend
 from src.data.vintage_store import (
     ALL_35_VARS,
     HCMC_LOCATION_ID,
+    METEO_24_VARS,
     align_and_validate_canonical_raw_df,
     connect_sqlite,
     get_default_complete_anchor_date,
@@ -66,10 +67,20 @@ def resolve_sqlite_db_path_and_role(explicit_db_path: Optional[Path] = None) -> 
 
 
 class IncompleteRadiationAtAnchorError(ValueError):
-    """Raised when an anchor date lacks COMPLETE_ALL_35 radiation/meteo completeness (Invariant #5)."""
+    """Legacy exception kept for backwards compatibility when radiation completeness is violated."""
 
     def __init__(self, message: str, *, anchor_date: str, completeness_regime: Optional[str] = None) -> None:
         self.code = "INCOMPLETE_RADIATION_AT_ANCHOR"
+        self.anchor_date = anchor_date
+        self.completeness_regime = completeness_regime
+        super().__init__(f"[{self.code}] {message}")
+
+
+class IncompleteMeteorologyAtAnchorError(ValueError):
+    """Raised when an anchor date lacks 24-variable GEOS-IT meteorological completeness."""
+
+    def __init__(self, message: str, *, anchor_date: str, completeness_regime: Optional[str] = None) -> None:
+        self.code = "INCOMPLETE_METEOROLOGY_AT_ANCHOR"
         self.anchor_date = anchor_date
         self.completeness_regime = completeness_regime
         super().__init__(f"[{self.code}] {message}")
@@ -166,7 +177,7 @@ class SQLiteVintageHistoryAdapter(BaseWeatherHistoryAdapter):
             if anchor_date is not None:
                 parsed_anchor = pd.to_datetime(anchor_date, errors="coerce")
                 if pd.isna(parsed_anchor):
-                    raise IncompleteRadiationAtAnchorError(
+                    raise IncompleteMeteorologyAtAnchorError(
                         f"Invalid anchor_date format {anchor_date!r}; expected YYYY-MM-DD.",
                         anchor_date=str(anchor_date),
                     )
@@ -183,19 +194,18 @@ class SQLiteVintageHistoryAdapter(BaseWeatherHistoryAdapter):
                     (self.location_id, chosen_anchor),
                 ).fetchone()
                 if anchor_row is None:
-                    raise IncompleteRadiationAtAnchorError(
+                    raise IncompleteMeteorologyAtAnchorError(
                         f"Requested anchor_date={chosen_anchor} has no published observations in SQLite vintage store.",
                         anchor_date=chosen_anchor,
                         completeness_regime=None,
                     )
-                if str(anchor_row["completeness_regime"]) != "COMPLETE_ALL_35":
-                    raise IncompleteRadiationAtAnchorError(
+                if int(anchor_row["missing_meteo_count"] or 0) > 0:
+                    raise IncompleteMeteorologyAtAnchorError(
                         (
-                            f"Requested anchor_date={chosen_anchor} has completeness_regime="
-                            f"{anchor_row['completeness_regime']!r} (missing_meteo={anchor_row['missing_meteo_count']}, "
-                            f"missing_flashflux={anchor_row['missing_flashflux_count']}, "
-                            f"missing_ceres={anchor_row['missing_ceres_count']}); "
-                            "operational ML inference requires COMPLETE_ALL_35."
+                            f"Requested anchor_date={chosen_anchor} has missing_meteo_count="
+                            f"{anchor_row['missing_meteo_count']} (completeness_regime="
+                            f"{anchor_row['completeness_regime']!r}); operational ML inference requires "
+                            "all 24 GEOS-IT meteorology variables (solar gaps are filled via P-c DOY climatology)."
                         ),
                         anchor_date=chosen_anchor,
                         completeness_regime=str(anchor_row["completeness_regime"]),
@@ -206,20 +216,32 @@ class SQLiteVintageHistoryAdapter(BaseWeatherHistoryAdapter):
                     conn,
                     location_id=self.location_id,
                     max_date=run_date,
+                    required_vars=METEO_24_VARS,
                 )
                 if chosen_anchor is None:
                     raise RuntimeError(
-                        f"[SERVER_DB_DATA_ERROR] No valid COMPLETE_ALL_35 anchor date with continuous 30-day window "
+                        f"[SERVER_DB_DATA_ERROR] No valid 24-meteo anchor date with continuous 30-day window "
                         f"found in {source_detail} (max_date={run_date})."
                     )
-                anchor_regime = "COMPLETE_ALL_35"
+                anchor_regime_row = conn.execute(
+                    """
+                    SELECT completeness_regime
+                    FROM observations_vintage
+                    WHERE location_id = ? AND obs_date = ?
+                    ORDER BY version_num DESC
+                    LIMIT 1
+                    """,
+                    (self.location_id, chosen_anchor),
+                ).fetchone()
+                anchor_regime = str(anchor_regime_row["completeness_regime"]) if anchor_regime_row else "COMPLETE_ALL_35"
 
             anchor_dt = pd.to_datetime(chosen_anchor).normalize()
             win_start = (anchor_dt - timedelta(days=days - 1)).strftime("%Y-%m-%d")
 
             rows = conn.execute(
                 f"""
-                SELECT o.obs_date, o.completeness_regime, {', '.join(f'o.{c}' for c in ALL_35_VARS)}
+                SELECT o.obs_date, o.completeness_regime, o.missing_meteo_count,
+                       {', '.join(f'o.{c}' for c in ALL_35_VARS)}
                 FROM observations_vintage o
                 WHERE o.location_id = ?
                   AND o.obs_date BETWEEN ? AND ?
@@ -240,16 +262,16 @@ class SQLiteVintageHistoryAdapter(BaseWeatherHistoryAdapter):
                     f"got {len(rows)}."
                 )
 
-            incomplete_in_win = [
+            incomplete_meteo_in_win = [
                 (str(r["obs_date"]), str(r["completeness_regime"]))
                 for r in rows
-                if str(r["completeness_regime"]) != "COMPLETE_ALL_35"
+                if int(r["missing_meteo_count"] or 0) > 0
             ]
-            if anchor_date is not None and incomplete_in_win:
-                bad_date, bad_reg = incomplete_in_win[-1]
-                raise IncompleteRadiationAtAnchorError(
+            if anchor_date is not None and incomplete_meteo_in_win:
+                bad_date, bad_reg = incomplete_meteo_in_win[-1]
+                raise IncompleteMeteorologyAtAnchorError(
                     (
-                        f"35-day window ending {chosen_anchor} contains incomplete observation on {bad_date} "
+                        f"{days}-day operational window ending {chosen_anchor} contains missing meteorology on {bad_date} "
                         f"(completeness_regime={bad_reg!r})."
                     ),
                     anchor_date=chosen_anchor,
@@ -279,8 +301,10 @@ class SQLiteVintageHistoryAdapter(BaseWeatherHistoryAdapter):
         finally:
             conn.close()
 
-        row_cols = ["obs_date", "completeness_regime", *ALL_35_VARS]
-        df = pd.DataFrame([dict(zip(row_cols, r)) for r in rows]).drop(columns=["completeness_regime"])
+        row_cols = ["obs_date", "completeness_regime", "missing_meteo_count", *ALL_35_VARS]
+        df = pd.DataFrame([dict(zip(row_cols, r)) for r in rows]).drop(
+            columns=["completeness_regime", "missing_meteo_count"]
+        )
         df = df.rename(columns={"obs_date": "DATE"})
         df["DATE"] = pd.to_datetime(df["DATE"]).dt.normalize()
         en_to_vi = {k: v for k, v in Config.COLUMN_MAPPING.items() if k == "DATE" or k in ALL_35_VARS}
