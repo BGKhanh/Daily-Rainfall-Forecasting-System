@@ -236,7 +236,7 @@
             }
           },
           "400": {
-            "description": "Bad Request \u2014 Client-supplied `request.history` payload violates business or physical rules (<30 continuous days, calendar date gap, NaN/-999.0 sentinel, physical bound violation, or stale radiation lag).",
+            "description": "Bad Request — Client-supplied `request.history` payload violates business or physical rules (<30 continuous days, calendar date gap, NaN/-999.0 sentinel, physical bound violation, or stale radiation lag).",
             "content": {
               "application/json": {
                 "schema": {
@@ -246,7 +246,7 @@
             }
           },
           "422": {
-            "description": "Unprocessable Entity \u2014 Invalid JSON/Pydantic schema types, unsupported `location_id`/`province` outside Ho Chi Minh City, OR `anchor_date` missing/violating `COMPLETE_ALL_35` radiation completeness.",
+            "description": "Unprocessable Entity — Invalid JSON/Pydantic schema types, unsupported `location_id`/`province` outside Ho Chi Minh City, OR `anchor_date` missing/violating `COMPLETE_ALL_35` radiation completeness.",
             "content": {
               "application/json": {
                 "schema": {
@@ -256,7 +256,7 @@
             }
           },
           "503": {
-            "description": "Service Unavailable \u2014 Predictor not initialized, OR server-side DB/history provider failed or returned incomplete/NaN meteorological records when `request.history` is omitted.",
+            "description": "Service Unavailable — Predictor not initialized, OR server-side DB/history provider failed or returned incomplete/NaN meteorological records when `request.history` is omitted.",
             "content": {
               "application/json": {
                 "schema": {
@@ -320,7 +320,7 @@
             }
           },
           "422": {
-            "description": "Unprocessable Entity \u2014 Invalid `eval_split_regime` or `is_prospective` query parameter.",
+            "description": "Unprocessable Entity — Invalid `eval_split_regime` or `is_prospective` query parameter.",
             "content": {
               "application/json": {
                 "schema": {
@@ -330,7 +330,7 @@
             }
           },
           "503": {
-            "description": "Service Unavailable \u2014 SQLite vintage database unavailable or corrupted.",
+            "description": "Service Unavailable — SQLite vintage database unavailable or corrupted.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1019,6 +1019,99 @@
               }
             ],
             "title": "Journal Mode"
+          },
+          "degraded_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Degraded Reason"
+          },
+          "turso_quota_warning": {
+            "type": "boolean",
+            "title": "Turso Quota Warning",
+            "default": false
+          },
+          "replica_sync_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replica Sync Count"
+          },
+          "replica_last_sync_at_utc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replica Last Sync At Utc"
+          },
+          "replica_last_sync_duration_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replica Last Sync Duration Ms"
+          },
+          "replica_sync_lag_sec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replica Sync Lag Sec"
+          },
+          "replica_hash_verified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replica Hash Verified"
+          },
+          "replica_consecutive_failures": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replica Consecutive Failures"
+          },
+          "replica_last_sync_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replica Last Sync Error"
           },
           "serving_model": {
             "$ref": "#/components/schemas/HealthServingModel"
