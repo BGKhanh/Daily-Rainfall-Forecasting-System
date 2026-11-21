@@ -1,0 +1,6082 @@
+{
+  "audit_version": "round12_ceres8_vs_11_v1",
+  "generated_at_utc": "2026-11-21T10:04:49Z",
+  "dataset_and_splits": {
+    "source_db": "artifacts\\models\\demo_rainfall_vintage.db",
+    "location_id": "HCMC",
+    "dev_train_range": [
+      "2001-01-01",
+      "2018-04-30"
+    ],
+    "dev_train_purged_origins": 6293,
+    "val_range": [
+      "2018-05-01",
+      "2020-04-30"
+    ],
+    "val_purged_origins": 724,
+    "test_range": [
+      "2020-05-01",
+      "2026-04-30"
+    ],
+    "test_purged_origins": 2184,
+    "canonical_mase_scale_dev_train": 3.7015424361567635,
+    "dev_train_p90_mm": 11.086,
+    "audit_gap_length_days": 80,
+    "short_gap_check_days": 7
+  },
+  "radiation_feature_scope": {
+    "flashflux_3_codes": [
+      "ALLSKY_SFC_SW_DWN",
+      "TOA_SW_DWN",
+      "ALLSKY_SFC_LW_DWN"
+    ],
+    "ceres_only_8_codes": [
+      "CLRSKY_SFC_SW_DWN",
+      "ALLSKY_SFC_SW_DNI",
+      "ALLSKY_SFC_SW_DIFF",
+      "ALLSKY_SFC_PAR_TOT",
+      "CLRSKY_SFC_PAR_TOT",
+      "ALLSKY_SFC_UVA",
+      "ALLSKY_SFC_UVB",
+      "ALLSKY_SFC_UV_INDEX"
+    ],
+    "syn1deg_11_codes": [
+      "ALLSKY_SFC_SW_DWN",
+      "TOA_SW_DWN",
+      "ALLSKY_SFC_LW_DWN",
+      "CLRSKY_SFC_SW_DWN",
+      "ALLSKY_SFC_SW_DNI",
+      "ALLSKY_SFC_SW_DIFF",
+      "ALLSKY_SFC_PAR_TOT",
+      "CLRSKY_SFC_PAR_TOT",
+      "ALLSKY_SFC_UVA",
+      "ALLSKY_SFC_UVB",
+      "ALLSKY_SFC_UV_INDEX"
+    ],
+    "radiation_derived_lag_or_rolling_cols": [],
+    "empirical_changed_f3_cols_under_all_11_perturbation": [
+      "Bức xạ sóng ngắn bề mặt",
+      "Bức xạ sóng ngắn trời quang",
+      "Bức xạ trực tiếp pháp tuyến",
+      "Bức xạ khuếch tán",
+      "Bức xạ đỉnh khí quyển",
+      "Bức xạ quang hợp tổng",
+      "Bức xạ quang hợp trời quang",
+      "Bức xạ UVA",
+      "Bức xạ UVB",
+      "Chỉ số UV",
+      "Bức xạ sóng dài xuống"
+    ],
+    "conclusion": "Zero lag, rolling, or std features are built on any of the 11 solar radiation variables; all 11 enter SC-35/SC-31/SC-30 strictly as contemporaneous origin-day (F0) predictors."
+  },
+  "retrain_35vars_parity": {
+    "SC-35": {
+      "frozen_test_mae": 3.733345,
+      "retrained_35_test_mae": 3.733345,
+      "max_pred_diff_test": 0.0
+    },
+    "SC-31": {
+      "frozen_test_mae": 3.724641,
+      "retrained_35_test_mae": 3.724641,
+      "max_pred_diff_test": 0.0
+    },
+    "SC-30": {
+      "frozen_test_mae": 3.750072,
+      "retrained_35_test_mae": 3.750072,
+      "max_pred_diff_test": 0.0
+    }
+  },
+  "spot_wrapper_parity_checks": {
+    "A-8_val_724_L80": {
+      "max_diff_mode1_mm": 0.0,
+      "max_diff_mode2_wmed_mm": 0.0,
+      "max_diff_mode2_wmean_mm": 0.0
+    },
+    "A-8_test_2184_L80": {
+      "max_diff_mode1_mm": 0.0,
+      "max_diff_mode2_wmed_mm": 0.0,
+      "max_diff_mode2_wmean_mm": 0.0
+    },
+    "A-11_val_724_L80": {
+      "max_diff_mode1_mm": 0.0,
+      "max_diff_mode2_wmed_mm": 0.0,
+      "max_diff_mode2_wmean_mm": 0.0
+    },
+    "A-11_test_2184_L80": {
+      "max_diff_mode1_mm": 0.0,
+      "max_diff_mode2_wmed_mm": 0.0,
+      "max_diff_mode2_wmean_mm": 0.0
+    }
+  },
+  "mt_q1_reconciliation": {
+    "mt_q1_flashflux_lag2d_val_test": {
+      "flashflux_lag_days": 2,
+      "policies": {
+        "SC-35": {
+          "validation": {
+            "CLIMATOLOGY_DOY": {
+              "MAE": 3.179746,
+              "MSE": 44.127242,
+              "RMSE": 6.642834,
+              "MASE": 0.859033,
+              "delta_MAE": 0.011434,
+              "abs_delta_MAE": 0.011434,
+              "delta_pct": 0.3609,
+              "passes_002_gate": true,
+              "passes_abs_002_gate": true
+            },
+            "STALE_LAG_90D": {
+              "MAE": 3.20712,
+              "MSE": 44.529094,
+              "RMSE": 6.673012,
+              "MASE": 0.866428,
+              "delta_MAE": 0.038808,
+              "abs_delta_MAE": 0.038808,
+              "delta_pct": 1.2249,
+              "passes_002_gate": false,
+              "passes_abs_002_gate": false
+            },
+            "STALE_LAG_120D": {
+              "MAE": 3.212554,
+              "MSE": 45.027479,
+              "RMSE": 6.710252,
+              "MASE": 0.867896,
+              "delta_MAE": 0.044242,
+              "abs_delta_MAE": 0.044242,
+              "delta_pct": 1.3964,
+              "passes_002_gate": false,
+              "passes_abs_002_gate": false
+            },
+            "NATIVE_NAN": {
+              "MAE": 3.16409,
+              "MSE": 46.156908,
+              "RMSE": 6.793888,
+              "MASE": 0.854803,
+              "delta_MAE": -0.004222,
+              "abs_delta_MAE": 0.004222,
+              "delta_pct": -0.1333,
+              "passes_002_gate": true,
+              "passes_abs_002_gate": true
+            },
+            "TRAIN_MEAN": {
+              "MAE": 3.19454,
+              "MSE": 44.243686,
+              "RMSE": 6.651593,
+              "MASE": 0.863029,
+              "delta_MAE": 0.026228,
+              "abs_delta_MAE": 0.026228,
+              "delta_pct": 0.8278,
+              "passes_002_gate": false,
+              "passes_abs_002_gate": false
+            }
+          },
+          "test": {
+            "CLIMATOLOGY_DOY": {
+              "MAE": 3.731155,
+              "MSE": 65.34319,
+              "RMSE": 8.083513,
+              "MASE": 1.008,
+              "delta_MAE": -0.00219,
+              "abs_delta_MAE": 0.00219,
+              "delta_pct": -0.0587,
+              "passes_002_gate": true,
+              "passes_abs_002_gate": true
+            },
+            "STALE_LAG_90D": {
+              "MAE": 3.743878,
+              "MSE": 65.953558,
+              "RMSE": 8.12118,
+              "MASE": 1.011437,
+              "delta_MAE": 0.010533,
+              "abs_delta_MAE": 0.010533,
+              "delta_pct": 0.2821,
+              "passes_002_gate": true,
+              "passes_abs_002_gate": true
+            },
+            "STALE_LAG_120D": {
+              "MAE": 3.740794,
+              "MSE": 66.202089,
+              "RMSE": 8.136467,
+              "MASE": 1.010604,
+              "delta_MAE": 0.007449,
+              "abs_delta_MAE": 0.007449,
+              "delta_pct": 0.1995,
+              "passes_002_gate": true,
+              "passes_abs_002_gate": true
+            },
+            "NATIVE_NAN": {
+              "MAE": 3.755566,
+              "MSE": 68.861251,
+              "RMSE": 8.298268,
+              "MASE": 1.014595,
+              "delta_MAE": 0.022221,
+              "abs_delta_MAE": 0.022221,
+              "delta_pct": 0.5952,
+              "passes_002_gate": false,
+              "passes_abs_002_gate": false
+            },
+            "TRAIN_MEAN": {
+              "MAE": 3.742412,
+              "MSE": 65.48931,
+              "RMSE": 8.092547,
+              "MASE": 1.011041,
+              "delta_MAE": 0.009067,
+              "abs_delta_MAE": 0.009067,
+              "delta_pct": 0.2429,
+              "passes_002_gate": true,
+              "passes_abs_002_gate": true
+            }
+          }
+        },
+        "SC-30": {
+          "validation": {
+            "CLIMATOLOGY_DOY": {
+              "MAE": 3.163948,
+              "MSE": 44.766107,
+              "RMSE": 6.690748,
+              "MASE": 0.854765,
+              "delta_MAE": 0.015455,
+              "abs_delta_MAE": 0.015455,
+              "delta_pct": 0.4909,
+              "passes_002_gate": true,
+              "passes_abs_002_gate": true
+            },
+            "STALE_LAG_90D": {
+              "MAE": 3.202568,
+              "MSE": 45.12853,
+              "RMSE": 6.717777,
+              "MASE": 0.865198,
+              "delta_MAE": 0.054075,
+              "abs_delta_MAE": 0.054075,
+              "delta_pct": 1.7175,
+              "passes_002_gate": false,
+              "passes_abs_002_gate": false
+            },
+            "STALE_LAG_120D": {
+              "MAE": 3.214025,
+              "MSE": 45.768966,
+              "RMSE": 6.765277,
+              "MASE": 0.868294,
+              "delta_MAE": 0.065532,
+              "abs_delta_MAE": 0.065532,
+              "delta_pct": 2.0814,
+              "passes_002_gate": false,
+              "passes_abs_002_gate": false
+            },
+            "NATIVE_NAN": {
+              "MAE": 3.106153,
+              "MSE": 46.782547,
+              "RMSE": 6.839777,
+              "MASE": 0.839151,
+              "delta_MAE": -0.04234,
+              "abs_delta_MAE": 0.04234,
+              "delta_pct": -1.3448,
+              "passes_002_gate": true,
+              "passes_abs_002_gate": false
+            },
+            "TRAIN_MEAN": {
+              "MAE": 3.186247,
+              "MSE": 44.755574,
+              "RMSE": 6.689961,
+              "MASE": 0.860789,
+              "delta_MAE": 0.037754,
+              "abs_delta_MAE": 0.037754,
+              "delta_pct": 1.1991,
+              "passes_002_gate": false,
+              "passes_abs_002_gate": false
+            }
+          },
+          "test": {
+            "CLIMATOLOGY_DOY": {
+              "MAE": 3.747021,
+              "MSE": 65.510131,
+              "RMSE": 8.093833,
+              "MASE": 1.012286,
+              "delta_MAE": -0.003051,
+              "abs_delta_MAE": 0.003051,
+              "delta_pct": -0.0814,
+              "passes_002_gate": true,
+              "passes_abs_002_gate": true
+            },
+            "STALE_LAG_90D": {
+              "MAE": 3.771731,
+              "MSE": 66.219898,
+              "RMSE": 8.137561,
+              "MASE": 1.018962,
+              "delta_MAE": 0.021659,
+              "abs_delta_MAE": 0.021659,
+              "delta_pct": 0.5776,
+              "passes_002_gate": false,
+              "passes_abs_002_gate": false
+            },
+            "STALE_LAG_120D": {
+              "MAE": 3.771084,
+              "MSE": 66.620184,
+              "RMSE": 8.162119,
+              "MASE": 1.018787,
+              "delta_MAE": 0.021012,
+              "abs_delta_MAE": 0.021012,
+              "delta_pct": 0.5603,
+              "passes_002_gate": false,
+              "passes_abs_002_gate": false
+            },
+            "NATIVE_NAN": {
+              "MAE": 3.737272,
+              "MSE": 69.33744,
+              "RMSE": 8.326911,
+              "MASE": 1.009653,
+              "delta_MAE": -0.0128,
+              "abs_delta_MAE": 0.0128,
+              "delta_pct": -0.3413,
+              "passes_002_gate": true,
+              "passes_abs_002_gate": true
+            },
+            "TRAIN_MEAN": {
+              "MAE": 3.771663,
+              "MSE": 65.554827,
+              "RMSE": 8.096594,
+              "MASE": 1.018944,
+              "delta_MAE": 0.021591,
+              "abs_delta_MAE": 0.021591,
+              "delta_pct": 0.5758,
+              "passes_002_gate": false,
+              "passes_abs_002_gate": false
+            }
+          }
+        },
+        "SC-31": {
+          "validation": {
+            "CLIMATOLOGY_DOY": {
+              "MAE": 3.201487,
+              "MSE": 45.107796,
+              "RMSE": 6.716234,
+              "MASE": 0.864906,
+              "delta_MAE": 0.007566,
+              "abs_delta_MAE": 0.007566,
+              "delta_pct": 0.2369,
+              "passes_002_gate": true,
+              "passes_abs_002_gate": true
+            },
+            "STALE_LAG_90D": {
+              "MAE": 3.245101,
+              "MSE": 45.457379,
+              "RMSE": 6.742209,
+              "MASE": 0.876689,
+              "delta_MAE": 0.05118,
+              "abs_delta_MAE": 0.05118,
+              "delta_pct": 1.6024,
+              "passes_002_gate": false,
+              "passes_abs_002_gate": false
+            },
+            "STALE_LAG_120D": {
+              "MAE": 3.252973,
+              "MSE": 46.137996,
+              "RMSE": 6.792496,
+              "MASE": 0.878815,
+              "delta_MAE": 0.059052,
+              "abs_delta_MAE": 0.059052,
+              "delta_pct": 1.8489,
+              "passes_002_gate": false,
+              "passes_abs_002_gate": false
+            },
+            "NATIVE_NAN": {
+              "MAE": 3.137985,
+              "MSE": 46.889162,
+              "RMSE": 6.847566,
+              "MASE": 0.847751,
+              "delta_MAE": -0.055936,
+              "abs_delta_MAE": 0.055936,
+              "delta_pct": -1.7513,
+              "passes_002_gate": true,
+              "passes_abs_002_gate": false
+            },
+            "TRAIN_MEAN": {
+              "MAE": 3.217819,
+              "MSE": 45.216556,
+              "RMSE": 6.724326,
+              "MASE": 0.869318,
+              "delta_MAE": 0.023898,
+              "abs_delta_MAE": 0.023898,
+              "delta_pct": 0.7482,
+              "passes_002_gate": false,
+              "passes_abs_002_gate": false
+            }
+          },
+          "test": {
+            "CLIMATOLOGY_DOY": {
+              "MAE": 3.721786,
+              "MSE": 65.736579,
+              "RMSE": 8.10781,
+              "MASE": 1.005469,
+              "delta_MAE": -0.002855,
+              "abs_delta_MAE": 0.002855,
+              "delta_pct": -0.0767,
+              "passes_002_gate": true,
+              "passes_abs_002_gate": true
+            },
+            "STALE_LAG_90D": {
+              "MAE": 3.73744,
+              "MSE": 66.207918,
+              "RMSE": 8.136825,
+              "MASE": 1.009698,
+              "delta_MAE": 0.012799,
+              "abs_delta_MAE": 0.012799,
+              "delta_pct": 0.3436,
+              "passes_002_gate": true,
+              "passes_abs_002_gate": true
+            },
+            "STALE_LAG_120D": {
+              "MAE": 3.73922,
+              "MSE": 66.676246,
+              "RMSE": 8.165552,
+              "MASE": 1.010179,
+              "delta_MAE": 0.014579,
+              "abs_delta_MAE": 0.014579,
+              "delta_pct": 0.3914,
+              "passes_002_gate": true,
+              "passes_abs_002_gate": true
+            },
+            "NATIVE_NAN": {
+              "MAE": 3.735971,
+              "MSE": 69.575961,
+              "RMSE": 8.341221,
+              "MASE": 1.009301,
+              "delta_MAE": 0.01133,
+              "abs_delta_MAE": 0.01133,
+              "delta_pct": 0.3042,
+              "passes_002_gate": true,
+              "passes_abs_002_gate": true
+            },
+            "TRAIN_MEAN": {
+              "MAE": 3.730359,
+              "MSE": 65.887284,
+              "RMSE": 8.117098,
+              "MASE": 1.007785,
+              "delta_MAE": 0.005718,
+              "abs_delta_MAE": 0.005718,
+              "delta_pct": 0.1535,
+              "passes_002_gate": true,
+              "passes_abs_002_gate": true
+            }
+          }
+        }
+      },
+      "validation_policy_selection": {
+        "SC-35": {
+          "selected_policy_on_val": "NATIVE_NAN",
+          "passes_002_gate_on_val": true,
+          "val_delta_MAE": -0.004222,
+          "test_delta_MAE": 0.022221,
+          "test_passes_002_gate": false
+        },
+        "SC-30": {
+          "selected_policy_on_val": "NATIVE_NAN",
+          "passes_002_gate_on_val": true,
+          "val_delta_MAE": -0.04234,
+          "test_delta_MAE": -0.0128,
+          "test_passes_002_gate": true
+        },
+        "SC-31": {
+          "selected_policy_on_val": "NATIVE_NAN",
+          "passes_002_gate_on_val": true,
+          "val_delta_MAE": -0.055936,
+          "test_delta_MAE": 0.01133,
+          "test_passes_002_gate": true
+        }
+      }
+    },
+    "audit_clean_mae_by_model": {
+      "SC-35": {
+        "validation_MAE": 3.168312,
+        "test_MAE": 3.733345
+      },
+      "SC-31": {
+        "validation_MAE": 3.193921,
+        "test_MAE": 3.724641
+      },
+      "SC-30": {
+        "validation_MAE": 3.148493,
+        "test_MAE": 3.750072
+      }
+    },
+    "npz_test_max_abs_diff": {
+      "SC-35": 0.0,
+      "SC-31": 0.0,
+      "SC-30": 0.0
+    },
+    "scope_difference": "mt_q1.json evaluated masking only the 3 FlashFlux radiation cols (lag_2d -> day T & T-1) on frozen models at SC-35/SC-30/SC-31; this Round 12 audit evaluates the 8 missing CERES-only cols (A-8) AND all 11 SYN1deg radiation cols (A-11) at L=80 trailing outage across the exact same 724 Val and 2,184 Test purged origins, plus custom OU/Analog/Hybrid and Dev_Train-retrained 27-var baselines."
+  },
+  "intrinsic_vr_scope": {
+    "A-8": {
+      "n_test_anchors": 24,
+      "gap_length_days": 80,
+      "methods": {
+        "doy_climatology": {
+          "nrmse_scen": 0.775265,
+          "nrmse_mean": 0.775265,
+          "vr_scen": 0.200229,
+          "vr_mean": 0.200229,
+          "cross_corr_err_scen": 0.364793,
+          "cross_corr_err_mean": 0.364793,
+          "domain_violation_pct": 0.0
+        },
+        "custom_mode1_ou": {
+          "nrmse_scen": 0.773893,
+          "nrmse_mean": 0.773893,
+          "vr_scen": 0.202637,
+          "vr_mean": 0.202637,
+          "cross_corr_err_scen": 0.347831,
+          "cross_corr_err_mean": 0.347831,
+          "domain_violation_pct": 0.0
+        },
+        "custom_mode2_k10": {
+          "nrmse_scen": 1.056474,
+          "nrmse_mean": 0.812358,
+          "vr_scen": 1.022315,
+          "vr_mean": 0.346697,
+          "cross_corr_err_scen": 0.113574,
+          "cross_corr_err_mean": 0.168325,
+          "domain_violation_pct": 0.0
+        }
+      },
+      "custom_mode2_per_variable_vr": {
+        "Bức xạ sóng ngắn trời quang": {
+          "vr_scen": 1.0318,
+          "vr_mean": 0.617
+        },
+        "Bức xạ trực tiếp pháp tuyến": {
+          "vr_scen": 1.096,
+          "vr_mean": 0.2697
+        },
+        "Bức xạ khuếch tán": {
+          "vr_scen": 1.0108,
+          "vr_mean": 0.1501
+        },
+        "Bức xạ quang hợp tổng": {
+          "vr_scen": 1.0847,
+          "vr_mean": 0.2936
+        },
+        "Bức xạ quang hợp trời quang": {
+          "vr_scen": 1.1175,
+          "vr_mean": 0.6015
+        },
+        "Bức xạ UVA": {
+          "vr_scen": 1.0527,
+          "vr_mean": 0.2876
+        },
+        "Bức xạ UVB": {
+          "vr_scen": 0.7149,
+          "vr_mean": 0.2223
+        },
+        "Chỉ số UV": {
+          "vr_scen": 1.0702,
+          "vr_mean": 0.3317
+        }
+      }
+    },
+    "A-11": {
+      "n_test_anchors": 24,
+      "gap_length_days": 80,
+      "methods": {
+        "doy_climatology": {
+          "nrmse_scen": 0.719794,
+          "nrmse_mean": 0.719794,
+          "vr_scen": 0.263975,
+          "vr_mean": 0.263975,
+          "cross_corr_err_scen": 0.393556,
+          "cross_corr_err_mean": 0.393556,
+          "domain_violation_pct": 0.0
+        },
+        "custom_mode1_ou": {
+          "nrmse_scen": 0.717724,
+          "nrmse_mean": 0.717724,
+          "vr_scen": 0.269207,
+          "vr_mean": 0.269207,
+          "cross_corr_err_scen": 0.368773,
+          "cross_corr_err_mean": 0.368773,
+          "domain_violation_pct": 0.0
+        },
+        "custom_mode2_k10": {
+          "nrmse_scen": 0.966619,
+          "nrmse_mean": 0.756887,
+          "vr_scen": 1.032566,
+          "vr_mean": 0.42617,
+          "cross_corr_err_scen": 0.140713,
+          "cross_corr_err_mean": 0.204255,
+          "domain_violation_pct": 0.0
+        }
+      },
+      "custom_mode2_per_variable_vr": {
+        "Bức xạ sóng ngắn bề mặt": {
+          "vr_scen": 1.1054,
+          "vr_mean": 0.3467
+        },
+        "Bức xạ đỉnh khí quyển": {
+          "vr_scen": 1.0032,
+          "vr_mean": 0.9827
+        },
+        "Bức xạ sóng dài xuống": {
+          "vr_scen": 1.0204,
+          "vr_mean": 0.3905
+        },
+        "Bức xạ sóng ngắn trời quang": {
+          "vr_scen": 1.0281,
+          "vr_mean": 0.6173
+        },
+        "Bức xạ trực tiếp pháp tuyến": {
+          "vr_scen": 1.1133,
+          "vr_mean": 0.32
+        },
+        "Bức xạ khuếch tán": {
+          "vr_scen": 1.0103,
+          "vr_mean": 0.1512
+        },
+        "Bức xạ quang hợp tổng": {
+          "vr_scen": 1.0984,
+          "vr_mean": 0.3385
+        },
+        "Bức xạ quang hợp trời quang": {
+          "vr_scen": 1.1164,
+          "vr_mean": 0.5985
+        },
+        "Bức xạ UVA": {
+          "vr_scen": 1.063,
+          "vr_mean": 0.3274
+        },
+        "Bức xạ UVB": {
+          "vr_scen": 0.7219,
+          "vr_mean": 0.246
+        },
+        "Chỉ số UV": {
+          "vr_scen": 1.0778,
+          "vr_mean": 0.3691
+        }
+      }
+    }
+  },
+  "results_by_profile_split_model": {
+    "A-8": {
+      "val_724": {
+        "SC-35": {
+          "clean": {
+            "n_origins": 724,
+            "MAE": 3.168312,
+            "MSE": 44.136167,
+            "RMSE": 6.643506,
+            "MASE": 0.855944,
+            "delta_MAE": 0.0,
+            "abs_delta_MAE": 0.0,
+            "delta_pct": 0.0,
+            "oracle_fidelity_mae": 0.0,
+            "p90_tail_mae": 14.734207,
+            "horizon_mae_h1_to_h7": [
+              2.917306,
+              3.146308,
+              3.195504,
+              3.21811,
+              3.264147,
+              3.222722,
+              3.21409
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.278491,
+              6.631691,
+              6.683697,
+              6.720078,
+              6.773077,
+              6.675178,
+              6.729827
+            ]
+          },
+          "raw_nan": {
+            "n_origins": 724,
+            "MAE": 3.160542,
+            "MSE": 46.185699,
+            "RMSE": 6.796006,
+            "MASE": 0.853845,
+            "delta_MAE": -0.007771,
+            "abs_delta_MAE": 0.007771,
+            "delta_pct": -0.2453,
+            "oracle_fidelity_mae": 0.555562,
+            "p90_tail_mae": 15.711486,
+            "horizon_mae_h1_to_h7": [
+              2.898743,
+              3.079944,
+              3.18591,
+              3.228186,
+              3.262442,
+              3.238941,
+              3.229627
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.369244,
+              6.903021,
+              6.817174,
+              6.74571,
+              6.815515,
+              6.840264,
+              7.061303
+            ]
+          },
+          "ffill_stale_80d": {
+            "n_origins": 724,
+            "MAE": 3.220772,
+            "MSE": 45.116361,
+            "RMSE": 6.716871,
+            "MASE": 0.870116,
+            "delta_MAE": 0.052459,
+            "abs_delta_MAE": 0.052459,
+            "delta_pct": 1.6558,
+            "oracle_fidelity_mae": 0.213285,
+            "p90_tail_mae": 14.923748,
+            "horizon_mae_h1_to_h7": [
+              2.93123,
+              3.19118,
+              3.250981,
+              3.27808,
+              3.297949,
+              3.295165,
+              3.300818
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.326145,
+              6.732309,
+              6.784051,
+              6.743237,
+              6.798086,
+              6.735838,
+              6.884065
+            ]
+          },
+          "train_mean": {
+            "n_origins": 724,
+            "MAE": 3.18736,
+            "MSE": 44.206076,
+            "RMSE": 6.648765,
+            "MASE": 0.86109,
+            "delta_MAE": 0.019048,
+            "abs_delta_MAE": 0.019048,
+            "delta_pct": 0.6012,
+            "oracle_fidelity_mae": 0.131358,
+            "p90_tail_mae": 14.781551,
+            "horizon_mae_h1_to_h7": [
+              2.922103,
+              3.182334,
+              3.200045,
+              3.247236,
+              3.286039,
+              3.237792,
+              3.235972
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.284256,
+              6.634073,
+              6.683942,
+              6.722475,
+              6.758813,
+              6.669397,
+              6.775736
+            ]
+          },
+          "doy_climatology": {
+            "n_origins": 724,
+            "MAE": 3.171052,
+            "MSE": 44.072555,
+            "RMSE": 6.638716,
+            "MASE": 0.856684,
+            "delta_MAE": 0.00274,
+            "abs_delta_MAE": 0.00274,
+            "delta_pct": 0.0865,
+            "oracle_fidelity_mae": 0.096238,
+            "p90_tail_mae": 14.704046,
+            "horizon_mae_h1_to_h7": [
+              2.905271,
+              3.166765,
+              3.193653,
+              3.233633,
+              3.261784,
+              3.215494,
+              3.220766
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.279808,
+              6.636614,
+              6.670424,
+              6.7162,
+              6.756512,
+              6.673469,
+              6.726047
+            ]
+          },
+          "custom_mode1_ou": {
+            "n_origins": 724,
+            "MAE": 3.171052,
+            "MSE": 44.072555,
+            "RMSE": 6.638716,
+            "MASE": 0.856684,
+            "delta_MAE": 0.00274,
+            "abs_delta_MAE": 0.00274,
+            "delta_pct": 0.0865,
+            "oracle_fidelity_mae": 0.096238,
+            "p90_tail_mae": 14.704046,
+            "horizon_mae_h1_to_h7": [
+              2.905271,
+              3.166765,
+              3.193653,
+              3.233633,
+              3.261784,
+              3.215494,
+              3.220766
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.279808,
+              6.636614,
+              6.670424,
+              6.7162,
+              6.756512,
+              6.673469,
+              6.726047
+            ]
+          },
+          "custom_mode2_k10": {
+            "n_origins": 724,
+            "MAE": 3.167731,
+            "MSE": 44.176803,
+            "RMSE": 6.646563,
+            "MASE": 0.855787,
+            "delta_MAE": -0.000581,
+            "abs_delta_MAE": 0.000581,
+            "delta_pct": -0.0183,
+            "oracle_fidelity_mae": 0.104964,
+            "p90_tail_mae": 14.760126,
+            "horizon_mae_h1_to_h7": [
+              2.910738,
+              3.141525,
+              3.198893,
+              3.228804,
+              3.258366,
+              3.22326,
+              3.212533
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.288342,
+              6.64333,
+              6.692731,
+              6.726549,
+              6.762432,
+              6.672868,
+              6.727835
+            ]
+          },
+          "custom_mode2_k10_wmedian": {
+            "n_origins": 724,
+            "MAE": 3.168558,
+            "MSE": 44.137887,
+            "RMSE": 6.643635,
+            "MASE": 0.85601,
+            "delta_MAE": 0.000245,
+            "abs_delta_MAE": 0.000245,
+            "delta_pct": 0.0077,
+            "oracle_fidelity_mae": 0.099337,
+            "p90_tail_mae": 14.731679,
+            "horizon_mae_h1_to_h7": [
+              2.907914,
+              3.15089,
+              3.195898,
+              3.223226,
+              3.260202,
+              3.224736,
+              3.217037
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.285848,
+              6.636174,
+              6.68601,
+              6.723349,
+              6.761493,
+              6.674697,
+              6.725995
+            ]
+          },
+          "custom_hybrid_k10": {
+            "n_origins": 724,
+            "MAE": 3.167731,
+            "MSE": 44.176803,
+            "RMSE": 6.646563,
+            "MASE": 0.855787,
+            "delta_MAE": -0.000581,
+            "abs_delta_MAE": 0.000581,
+            "delta_pct": -0.0183,
+            "oracle_fidelity_mae": 0.104964,
+            "p90_tail_mae": 14.760126,
+            "horizon_mae_h1_to_h7": [
+              2.910738,
+              3.141525,
+              3.198893,
+              3.228804,
+              3.258366,
+              3.22326,
+              3.212533
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.288342,
+              6.64333,
+              6.692731,
+              6.726549,
+              6.762432,
+              6.672868,
+              6.727835
+            ]
+          },
+          "retrained_no_ceres_27vars": {
+            "n_origins": 724,
+            "MAE": 3.169104,
+            "MSE": 44.148426,
+            "RMSE": 6.644428,
+            "MASE": 0.856158,
+            "delta_MAE": 0.000791,
+            "abs_delta_MAE": 0.000791,
+            "delta_pct": 0.025,
+            "oracle_fidelity_mae": 0.211809,
+            "p90_tail_mae": 14.766324,
+            "horizon_mae_h1_to_h7": [
+              2.906677,
+              3.150666,
+              3.201388,
+              3.20955,
+              3.2522,
+              3.229168,
+              3.234079
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.29656,
+              6.634809,
+              6.701486,
+              6.696602,
+              6.756197,
+              6.672402,
+              6.741667
+            ]
+          }
+        },
+        "SC-31": {
+          "clean": {
+            "n_origins": 724,
+            "MAE": 3.193921,
+            "MSE": 45.065166,
+            "RMSE": 6.713059,
+            "MASE": 0.862862,
+            "delta_MAE": 0.0,
+            "abs_delta_MAE": 0.0,
+            "delta_pct": 0.0,
+            "oracle_fidelity_mae": 0.0,
+            "p90_tail_mae": 14.931509,
+            "horizon_mae_h1_to_h7": [
+              2.910186,
+              3.147009,
+              3.208489,
+              3.228573,
+              3.264777,
+              3.317861,
+              3.280555
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.32955,
+              6.64888,
+              6.72925,
+              6.760669,
+              6.844814,
+              6.811146,
+              6.852205
+            ]
+          },
+          "raw_nan": {
+            "n_origins": 724,
+            "MAE": 3.131219,
+            "MSE": 46.830526,
+            "RMSE": 6.843283,
+            "MASE": 0.845923,
+            "delta_MAE": -0.062703,
+            "abs_delta_MAE": 0.062703,
+            "delta_pct": -1.9632,
+            "oracle_fidelity_mae": 0.615115,
+            "p90_tail_mae": 15.958983,
+            "horizon_mae_h1_to_h7": [
+              2.87576,
+              3.097959,
+              3.195462,
+              3.216212,
+              3.163894,
+              3.201072,
+              3.168171
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.350726,
+              6.717097,
+              6.858019,
+              7.014731,
+              6.90602,
+              7.006976,
+              7.023735
+            ]
+          },
+          "ffill_stale_80d": {
+            "n_origins": 724,
+            "MAE": 3.248393,
+            "MSE": 45.734202,
+            "RMSE": 6.762707,
+            "MASE": 0.877578,
+            "delta_MAE": 0.054471,
+            "abs_delta_MAE": 0.054471,
+            "delta_pct": 1.7055,
+            "oracle_fidelity_mae": 0.248171,
+            "p90_tail_mae": 15.031154,
+            "horizon_mae_h1_to_h7": [
+              2.926449,
+              3.196075,
+              3.284942,
+              3.295311,
+              3.296095,
+              3.382983,
+              3.356893
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.342052,
+              6.775671,
+              6.808202,
+              6.765978,
+              6.875347,
+              6.833142,
+              6.922123
+            ]
+          },
+          "train_mean": {
+            "n_origins": 724,
+            "MAE": 3.209405,
+            "MSE": 45.156841,
+            "RMSE": 6.719884,
+            "MASE": 0.867045,
+            "delta_MAE": 0.015483,
+            "abs_delta_MAE": 0.015483,
+            "delta_pct": 0.4848,
+            "oracle_fidelity_mae": 0.162129,
+            "p90_tail_mae": 14.970753,
+            "horizon_mae_h1_to_h7": [
+              2.905085,
+              3.177868,
+              3.221683,
+              3.261648,
+              3.272963,
+              3.31521,
+              3.311377
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.345359,
+              6.653361,
+              6.729817,
+              6.764125,
+              6.838559,
+              6.814552,
+              6.878899
+            ]
+          },
+          "doy_climatology": {
+            "n_origins": 724,
+            "MAE": 3.192118,
+            "MSE": 45.046791,
+            "RMSE": 6.711691,
+            "MASE": 0.862375,
+            "delta_MAE": -0.001804,
+            "abs_delta_MAE": 0.001804,
+            "delta_pct": -0.0565,
+            "oracle_fidelity_mae": 0.128044,
+            "p90_tail_mae": 14.903425,
+            "horizon_mae_h1_to_h7": [
+              2.884435,
+              3.166407,
+              3.214218,
+              3.246094,
+              3.249993,
+              3.307996,
+              3.275679
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.34561,
+              6.656349,
+              6.732395,
+              6.753917,
+              6.828081,
+              6.817069,
+              6.835067
+            ]
+          },
+          "custom_mode1_ou": {
+            "n_origins": 724,
+            "MAE": 3.192118,
+            "MSE": 45.046791,
+            "RMSE": 6.711691,
+            "MASE": 0.862375,
+            "delta_MAE": -0.001804,
+            "abs_delta_MAE": 0.001804,
+            "delta_pct": -0.0565,
+            "oracle_fidelity_mae": 0.128044,
+            "p90_tail_mae": 14.903425,
+            "horizon_mae_h1_to_h7": [
+              2.884435,
+              3.166407,
+              3.214218,
+              3.246094,
+              3.249993,
+              3.307996,
+              3.275679
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.34561,
+              6.656349,
+              6.732395,
+              6.753917,
+              6.828081,
+              6.817069,
+              6.835067
+            ]
+          },
+          "custom_mode2_k10": {
+            "n_origins": 724,
+            "MAE": 3.189598,
+            "MSE": 45.084982,
+            "RMSE": 6.714535,
+            "MASE": 0.861694,
+            "delta_MAE": -0.004323,
+            "abs_delta_MAE": 0.004323,
+            "delta_pct": -0.1354,
+            "oracle_fidelity_mae": 0.135966,
+            "p90_tail_mae": 14.947671,
+            "horizon_mae_h1_to_h7": [
+              2.901754,
+              3.14145,
+              3.20907,
+              3.236439,
+              3.251285,
+              3.316225,
+              3.270963
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.351424,
+              6.664109,
+              6.744955,
+              6.750775,
+              6.835968,
+              6.805127,
+              6.836397
+            ]
+          },
+          "custom_mode2_k10_wmedian": {
+            "n_origins": 724,
+            "MAE": 3.191071,
+            "MSE": 45.107587,
+            "RMSE": 6.716218,
+            "MASE": 0.862092,
+            "delta_MAE": -0.00285,
+            "abs_delta_MAE": 0.00285,
+            "delta_pct": -0.0892,
+            "oracle_fidelity_mae": 0.129502,
+            "p90_tail_mae": 14.933936,
+            "horizon_mae_h1_to_h7": [
+              2.896723,
+              3.150383,
+              3.208001,
+              3.232326,
+              3.252228,
+              3.322636,
+              3.275198
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.353341,
+              6.656855,
+              6.743546,
+              6.747781,
+              6.831898,
+              6.822715,
+              6.844137
+            ]
+          },
+          "custom_hybrid_k10": {
+            "n_origins": 724,
+            "MAE": 3.189598,
+            "MSE": 45.084982,
+            "RMSE": 6.714535,
+            "MASE": 0.861694,
+            "delta_MAE": -0.004323,
+            "abs_delta_MAE": 0.004323,
+            "delta_pct": -0.1354,
+            "oracle_fidelity_mae": 0.135966,
+            "p90_tail_mae": 14.947671,
+            "horizon_mae_h1_to_h7": [
+              2.901754,
+              3.14145,
+              3.20907,
+              3.236439,
+              3.251285,
+              3.316225,
+              3.270963
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.351424,
+              6.664109,
+              6.744955,
+              6.750775,
+              6.835968,
+              6.805127,
+              6.836397
+            ]
+          },
+          "retrained_no_ceres_27vars": {
+            "n_origins": 724,
+            "MAE": 3.192056,
+            "MSE": 45.089923,
+            "RMSE": 6.714903,
+            "MASE": 0.862358,
+            "delta_MAE": -0.001865,
+            "abs_delta_MAE": 0.001865,
+            "delta_pct": -0.0584,
+            "oracle_fidelity_mae": 0.241884,
+            "p90_tail_mae": 14.947559,
+            "horizon_mae_h1_to_h7": [
+              2.905842,
+              3.166523,
+              3.200442,
+              3.239852,
+              3.254855,
+              3.306126,
+              3.270752
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.362719,
+              6.676242,
+              6.741857,
+              6.73657,
+              6.835642,
+              6.815118,
+              6.824018
+            ]
+          }
+        },
+        "SC-30": {
+          "clean": {
+            "n_origins": 724,
+            "MAE": 3.148493,
+            "MSE": 44.720166,
+            "RMSE": 6.687314,
+            "MASE": 0.850589,
+            "delta_MAE": 0.0,
+            "abs_delta_MAE": 0.0,
+            "delta_pct": 0.0,
+            "oracle_fidelity_mae": 0.0,
+            "p90_tail_mae": 14.91284,
+            "horizon_mae_h1_to_h7": [
+              2.909023,
+              3.123201,
+              3.166002,
+              3.146075,
+              3.222197,
+              3.237165,
+              3.235787
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.344642,
+              6.627051,
+              6.740463,
+              6.721059,
+              6.801049,
+              6.743536,
+              6.8215
+            ]
+          },
+          "raw_nan": {
+            "n_origins": 724,
+            "MAE": 3.099194,
+            "MSE": 46.769631,
+            "RMSE": 6.838833,
+            "MASE": 0.837271,
+            "delta_MAE": -0.049299,
+            "abs_delta_MAE": 0.049299,
+            "delta_pct": -1.5658,
+            "oracle_fidelity_mae": 0.615817,
+            "p90_tail_mae": 15.985274,
+            "horizon_mae_h1_to_h7": [
+              2.893374,
+              3.067653,
+              3.145908,
+              3.110942,
+              3.153185,
+              3.168235,
+              3.155062
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.361097,
+              6.766967,
+              6.926029,
+              6.977011,
+              6.982928,
+              6.901954,
+              6.93435
+            ]
+          },
+          "ffill_stale_80d": {
+            "n_origins": 724,
+            "MAE": 3.204796,
+            "MSE": 45.490186,
+            "RMSE": 6.744641,
+            "MASE": 0.8658,
+            "delta_MAE": 0.056303,
+            "abs_delta_MAE": 0.056303,
+            "delta_pct": 1.7883,
+            "oracle_fidelity_mae": 0.250716,
+            "p90_tail_mae": 15.044738,
+            "horizon_mae_h1_to_h7": [
+              2.926265,
+              3.177737,
+              3.232715,
+              3.208764,
+              3.276055,
+              3.324175,
+              3.28786
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.351809,
+              6.74919,
+              6.796635,
+              6.740539,
+              6.838092,
+              6.8006,
+              6.920801
+            ]
+          },
+          "train_mean": {
+            "n_origins": 724,
+            "MAE": 3.176326,
+            "MSE": 44.704643,
+            "RMSE": 6.686153,
+            "MASE": 0.858109,
+            "delta_MAE": 0.027833,
+            "abs_delta_MAE": 0.027833,
+            "delta_pct": 0.884,
+            "oracle_fidelity_mae": 0.158011,
+            "p90_tail_mae": 14.898459,
+            "horizon_mae_h1_to_h7": [
+              2.902552,
+              3.153229,
+              3.211859,
+              3.185158,
+              3.248866,
+              3.26554,
+              3.267077
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.346445,
+              6.6192,
+              6.741314,
+              6.721109,
+              6.80044,
+              6.748541,
+              6.814245
+            ]
+          },
+          "doy_climatology": {
+            "n_origins": 724,
+            "MAE": 3.15435,
+            "MSE": 44.715703,
+            "RMSE": 6.68698,
+            "MASE": 0.852172,
+            "delta_MAE": 0.005858,
+            "abs_delta_MAE": 0.005858,
+            "delta_pct": 0.186,
+            "oracle_fidelity_mae": 0.121238,
+            "p90_tail_mae": 14.860069,
+            "horizon_mae_h1_to_h7": [
+              2.890294,
+              3.131623,
+              3.188391,
+              3.171148,
+              3.231443,
+              3.225588,
+              3.241964
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.366926,
+              6.623266,
+              6.733899,
+              6.728766,
+              6.792036,
+              6.739354,
+              6.814117
+            ]
+          },
+          "custom_mode1_ou": {
+            "n_origins": 724,
+            "MAE": 3.15435,
+            "MSE": 44.715703,
+            "RMSE": 6.68698,
+            "MASE": 0.852172,
+            "delta_MAE": 0.005858,
+            "abs_delta_MAE": 0.005858,
+            "delta_pct": 0.186,
+            "oracle_fidelity_mae": 0.121238,
+            "p90_tail_mae": 14.860069,
+            "horizon_mae_h1_to_h7": [
+              2.890294,
+              3.131623,
+              3.188391,
+              3.171148,
+              3.231443,
+              3.225588,
+              3.241964
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.366926,
+              6.623266,
+              6.733899,
+              6.728766,
+              6.792036,
+              6.739354,
+              6.814117
+            ]
+          },
+          "custom_mode2_k10": {
+            "n_origins": 724,
+            "MAE": 3.148244,
+            "MSE": 44.776474,
+            "RMSE": 6.691523,
+            "MASE": 0.850522,
+            "delta_MAE": -0.000249,
+            "abs_delta_MAE": 0.000249,
+            "delta_pct": -0.0079,
+            "oracle_fidelity_mae": 0.129766,
+            "p90_tail_mae": 14.928542,
+            "horizon_mae_h1_to_h7": [
+              2.905934,
+              3.111265,
+              3.171802,
+              3.15886,
+              3.226323,
+              3.233371,
+              3.230153
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.364321,
+              6.636508,
+              6.750504,
+              6.733181,
+              6.800446,
+              6.733739,
+              6.811253
+            ]
+          },
+          "custom_mode2_k10_wmedian": {
+            "n_origins": 724,
+            "MAE": 3.150463,
+            "MSE": 44.777343,
+            "RMSE": 6.691587,
+            "MASE": 0.851122,
+            "delta_MAE": 0.00197,
+            "abs_delta_MAE": 0.00197,
+            "delta_pct": 0.0626,
+            "oracle_fidelity_mae": 0.119379,
+            "p90_tail_mae": 14.90656,
+            "horizon_mae_h1_to_h7": [
+              2.900865,
+              3.114789,
+              3.173063,
+              3.157967,
+              3.231843,
+              3.235971,
+              3.23874
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.371721,
+              6.629072,
+              6.74327,
+              6.730603,
+              6.797198,
+              6.742874,
+              6.81594
+            ]
+          },
+          "custom_hybrid_k10": {
+            "n_origins": 724,
+            "MAE": 3.148244,
+            "MSE": 44.776474,
+            "RMSE": 6.691523,
+            "MASE": 0.850522,
+            "delta_MAE": -0.000249,
+            "abs_delta_MAE": 0.000249,
+            "delta_pct": -0.0079,
+            "oracle_fidelity_mae": 0.129766,
+            "p90_tail_mae": 14.928542,
+            "horizon_mae_h1_to_h7": [
+              2.905934,
+              3.111265,
+              3.171802,
+              3.15886,
+              3.226323,
+              3.233371,
+              3.230153
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.364321,
+              6.636508,
+              6.750504,
+              6.733181,
+              6.800446,
+              6.733739,
+              6.811253
+            ]
+          },
+          "retrained_no_ceres_27vars": {
+            "n_origins": 724,
+            "MAE": 3.145504,
+            "MSE": 44.658834,
+            "RMSE": 6.682727,
+            "MASE": 0.849782,
+            "delta_MAE": -0.002989,
+            "abs_delta_MAE": 0.002989,
+            "delta_pct": -0.0949,
+            "oracle_fidelity_mae": 0.241092,
+            "p90_tail_mae": 14.929974,
+            "horizon_mae_h1_to_h7": [
+              2.900858,
+              3.121399,
+              3.169122,
+              3.157716,
+              3.226912,
+              3.233408,
+              3.209114
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.334256,
+              6.632865,
+              6.745479,
+              6.725358,
+              6.805033,
+              6.743498,
+              6.780782
+            ]
+          }
+        }
+      },
+      "test_2184": {
+        "SC-35": {
+          "clean": {
+            "n_origins": 2184,
+            "MAE": 3.733345,
+            "MSE": 65.580906,
+            "RMSE": 8.098204,
+            "MASE": 1.008592,
+            "delta_MAE": 0.0,
+            "abs_delta_MAE": 0.0,
+            "delta_pct": 0.0,
+            "oracle_fidelity_mae": 0.0,
+            "p90_tail_mae": 15.513931,
+            "horizon_mae_h1_to_h7": [
+              3.4965,
+              3.767633,
+              3.759876,
+              3.776017,
+              3.758977,
+              3.796773,
+              3.777643
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.673421,
+              8.11628,
+              8.184135,
+              8.178776,
+              8.160244,
+              8.178062,
+              8.183412
+            ]
+          },
+          "raw_nan": {
+            "n_origins": 2184,
+            "MAE": 3.756506,
+            "MSE": 69.014823,
+            "RMSE": 8.307516,
+            "MASE": 1.014849,
+            "delta_MAE": 0.023161,
+            "abs_delta_MAE": 0.023161,
+            "delta_pct": 0.6204,
+            "oracle_fidelity_mae": 0.616833,
+            "p90_tail_mae": 16.510534,
+            "horizon_mae_h1_to_h7": [
+              3.498538,
+              3.768265,
+              3.817633,
+              3.792492,
+              3.773522,
+              3.796472,
+              3.848623
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.828601,
+              8.467979,
+              8.372957,
+              8.220932,
+              8.251594,
+              8.343041,
+              8.644354
+            ]
+          },
+          "ffill_stale_80d": {
+            "n_origins": 2184,
+            "MAE": 3.742198,
+            "MSE": 66.015262,
+            "RMSE": 8.124978,
+            "MASE": 1.010983,
+            "delta_MAE": 0.008852,
+            "abs_delta_MAE": 0.008852,
+            "delta_pct": 0.2371,
+            "oracle_fidelity_mae": 0.212398,
+            "p90_tail_mae": 15.583915,
+            "horizon_mae_h1_to_h7": [
+              3.505215,
+              3.772572,
+              3.776652,
+              3.787183,
+              3.769957,
+              3.808026,
+              3.775778
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.684941,
+              8.165598,
+              8.224506,
+              8.180997,
+              8.175503,
+              8.181673,
+              8.247526
+            ]
+          },
+          "train_mean": {
+            "n_origins": 2184,
+            "MAE": 3.743168,
+            "MSE": 65.664033,
+            "RMSE": 8.103335,
+            "MASE": 1.011245,
+            "delta_MAE": 0.009822,
+            "abs_delta_MAE": 0.009822,
+            "delta_pct": 0.2631,
+            "oracle_fidelity_mae": 0.144332,
+            "p90_tail_mae": 15.543693,
+            "horizon_mae_h1_to_h7": [
+              3.503402,
+              3.788405,
+              3.770858,
+              3.784131,
+              3.773272,
+              3.800252,
+              3.781854
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.666202,
+              8.105633,
+              8.191645,
+              8.182905,
+              8.156824,
+              8.17457,
+              8.231399
+            ]
+          },
+          "doy_climatology": {
+            "n_origins": 2184,
+            "MAE": 3.733821,
+            "MSE": 65.517986,
+            "RMSE": 8.094318,
+            "MASE": 1.00872,
+            "delta_MAE": 0.000476,
+            "abs_delta_MAE": 0.000476,
+            "delta_pct": 0.0127,
+            "oracle_fidelity_mae": 0.107063,
+            "p90_tail_mae": 15.49703,
+            "horizon_mae_h1_to_h7": [
+              3.492188,
+              3.782105,
+              3.764564,
+              3.77055,
+              3.75855,
+              3.788836,
+              3.779953
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.673107,
+              8.113754,
+              8.17342,
+              8.170181,
+              8.155039,
+              8.176423,
+              8.185421
+            ]
+          },
+          "custom_mode1_ou": {
+            "n_origins": 2184,
+            "MAE": 3.733821,
+            "MSE": 65.517986,
+            "RMSE": 8.094318,
+            "MASE": 1.00872,
+            "delta_MAE": 0.000476,
+            "abs_delta_MAE": 0.000476,
+            "delta_pct": 0.0127,
+            "oracle_fidelity_mae": 0.107063,
+            "p90_tail_mae": 15.49703,
+            "horizon_mae_h1_to_h7": [
+              3.492188,
+              3.782105,
+              3.764564,
+              3.77055,
+              3.75855,
+              3.788836,
+              3.779953
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.673107,
+              8.113754,
+              8.17342,
+              8.170181,
+              8.155039,
+              8.176423,
+              8.185421
+            ]
+          },
+          "custom_mode2_k10": {
+            "n_origins": 2184,
+            "MAE": 3.731443,
+            "MSE": 65.612632,
+            "RMSE": 8.100162,
+            "MASE": 1.008078,
+            "delta_MAE": -0.001902,
+            "abs_delta_MAE": 0.001902,
+            "delta_pct": -0.051,
+            "oracle_fidelity_mae": 0.114421,
+            "p90_tail_mae": 15.543042,
+            "horizon_mae_h1_to_h7": [
+              3.493668,
+              3.768429,
+              3.76538,
+              3.768894,
+              3.759016,
+              3.790304,
+              3.774408
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.676028,
+              8.124259,
+              8.190019,
+              8.180203,
+              8.163782,
+              8.170142,
+              8.183688
+            ]
+          },
+          "custom_mode2_k10_wmedian": {
+            "n_origins": 2184,
+            "MAE": 3.732123,
+            "MSE": 65.557456,
+            "RMSE": 8.096756,
+            "MASE": 1.008262,
+            "delta_MAE": -0.001222,
+            "abs_delta_MAE": 0.001222,
+            "delta_pct": -0.0327,
+            "oracle_fidelity_mae": 0.108338,
+            "p90_tail_mae": 15.51676,
+            "horizon_mae_h1_to_h7": [
+              3.491874,
+              3.772757,
+              3.767539,
+              3.768123,
+              3.759437,
+              3.790738,
+              3.774395
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.671497,
+              8.114296,
+              8.18311,
+              8.177091,
+              8.160593,
+              8.175671,
+              8.181903
+            ]
+          },
+          "custom_hybrid_k10": {
+            "n_origins": 2184,
+            "MAE": 3.731443,
+            "MSE": 65.612632,
+            "RMSE": 8.100162,
+            "MASE": 1.008078,
+            "delta_MAE": -0.001902,
+            "abs_delta_MAE": 0.001902,
+            "delta_pct": -0.051,
+            "oracle_fidelity_mae": 0.114421,
+            "p90_tail_mae": 15.543042,
+            "horizon_mae_h1_to_h7": [
+              3.493668,
+              3.768429,
+              3.76538,
+              3.768894,
+              3.759016,
+              3.790304,
+              3.774408
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.676028,
+              8.124259,
+              8.190019,
+              8.180203,
+              8.163782,
+              8.170142,
+              8.183688
+            ]
+          },
+          "retrained_no_ceres_27vars": {
+            "n_origins": 2184,
+            "MAE": 3.73118,
+            "MSE": 65.467975,
+            "RMSE": 8.091228,
+            "MASE": 1.008007,
+            "delta_MAE": -0.002166,
+            "abs_delta_MAE": 0.002166,
+            "delta_pct": -0.058,
+            "oracle_fidelity_mae": 0.231083,
+            "p90_tail_mae": 15.522298,
+            "horizon_mae_h1_to_h7": [
+              3.485073,
+              3.770503,
+              3.780846,
+              3.768425,
+              3.761428,
+              3.778389,
+              3.773592
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.668951,
+              8.105349,
+              8.188712,
+              8.179588,
+              8.146827,
+              8.166784,
+              8.169365
+            ]
+          }
+        },
+        "SC-31": {
+          "clean": {
+            "n_origins": 2184,
+            "MAE": 3.724641,
+            "MSE": 65.924037,
+            "RMSE": 8.119362,
+            "MASE": 1.00624,
+            "delta_MAE": 0.0,
+            "abs_delta_MAE": 0.0,
+            "delta_pct": 0.0,
+            "oracle_fidelity_mae": 0.0,
+            "p90_tail_mae": 15.629338,
+            "horizon_mae_h1_to_h7": [
+              3.474685,
+              3.765182,
+              3.774701,
+              3.762214,
+              3.756667,
+              3.768005,
+              3.771037
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.699609,
+              8.172253,
+              8.203552,
+              8.192995,
+              8.183775,
+              8.172044,
+              8.198698
+            ]
+          },
+          "raw_nan": {
+            "n_origins": 2184,
+            "MAE": 3.737912,
+            "MSE": 69.721537,
+            "RMSE": 8.349942,
+            "MASE": 1.009826,
+            "delta_MAE": 0.013271,
+            "abs_delta_MAE": 0.013271,
+            "delta_pct": 0.3563,
+            "oracle_fidelity_mae": 0.630768,
+            "p90_tail_mae": 16.667492,
+            "horizon_mae_h1_to_h7": [
+              3.457325,
+              3.768447,
+              3.8297,
+              3.807364,
+              3.751614,
+              3.757963,
+              3.792972
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.729365,
+              8.255871,
+              8.439094,
+              8.55483,
+              8.379006,
+              8.486817,
+              8.573858
+            ]
+          },
+          "ffill_stale_80d": {
+            "n_origins": 2184,
+            "MAE": 3.741526,
+            "MSE": 66.200456,
+            "RMSE": 8.136366,
+            "MASE": 1.010802,
+            "delta_MAE": 0.016885,
+            "abs_delta_MAE": 0.016885,
+            "delta_pct": 0.4533,
+            "oracle_fidelity_mae": 0.252421,
+            "p90_tail_mae": 15.650572,
+            "horizon_mae_h1_to_h7": [
+              3.487954,
+              3.771288,
+              3.805435,
+              3.778218,
+              3.776668,
+              3.789649,
+              3.781472
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.67786,
+              8.233388,
+              8.247602,
+              8.190256,
+              8.203998,
+              8.157104,
+              8.229084
+            ]
+          },
+          "train_mean": {
+            "n_origins": 2184,
+            "MAE": 3.731631,
+            "MSE": 66.050494,
+            "RMSE": 8.127145,
+            "MASE": 1.008129,
+            "delta_MAE": 0.00699,
+            "abs_delta_MAE": 0.00699,
+            "delta_pct": 0.1877,
+            "oracle_fidelity_mae": 0.177472,
+            "p90_tail_mae": 15.677282,
+            "horizon_mae_h1_to_h7": [
+              3.469699,
+              3.780679,
+              3.793553,
+              3.768004,
+              3.768925,
+              3.763015,
+              3.777545
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.670355,
+              8.161331,
+              8.199397,
+              8.203619,
+              8.192729,
+              8.19184,
+              8.255619
+            ]
+          },
+          "doy_climatology": {
+            "n_origins": 2184,
+            "MAE": 3.72473,
+            "MSE": 65.880619,
+            "RMSE": 8.116688,
+            "MASE": 1.006264,
+            "delta_MAE": 8.8e-05,
+            "abs_delta_MAE": 8.8e-05,
+            "delta_pct": 0.0024,
+            "oracle_fidelity_mae": 0.13903,
+            "p90_tail_mae": 15.623053,
+            "horizon_mae_h1_to_h7": [
+              3.460513,
+              3.776538,
+              3.774379,
+              3.762155,
+              3.756693,
+              3.75985,
+              3.782981
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.688522,
+              8.162651,
+              8.19257,
+              8.19296,
+              8.178128,
+              8.181202,
+              8.207645
+            ]
+          },
+          "custom_mode1_ou": {
+            "n_origins": 2184,
+            "MAE": 3.72473,
+            "MSE": 65.880619,
+            "RMSE": 8.116688,
+            "MASE": 1.006264,
+            "delta_MAE": 8.8e-05,
+            "abs_delta_MAE": 8.8e-05,
+            "delta_pct": 0.0024,
+            "oracle_fidelity_mae": 0.13903,
+            "p90_tail_mae": 15.623053,
+            "horizon_mae_h1_to_h7": [
+              3.460513,
+              3.776538,
+              3.774379,
+              3.762155,
+              3.756693,
+              3.75985,
+              3.782981
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.688522,
+              8.162651,
+              8.19257,
+              8.19296,
+              8.178128,
+              8.181202,
+              8.207645
+            ]
+          },
+          "custom_mode2_k10": {
+            "n_origins": 2184,
+            "MAE": 3.722442,
+            "MSE": 65.909103,
+            "RMSE": 8.118442,
+            "MASE": 1.005646,
+            "delta_MAE": -0.002199,
+            "abs_delta_MAE": 0.002199,
+            "delta_pct": -0.059,
+            "oracle_fidelity_mae": 0.144274,
+            "p90_tail_mae": 15.649529,
+            "horizon_mae_h1_to_h7": [
+              3.464456,
+              3.766037,
+              3.778247,
+              3.75831,
+              3.751466,
+              3.762581,
+              3.775998
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.685616,
+              8.174023,
+              8.211137,
+              8.191016,
+              8.182636,
+              8.161466,
+              8.209739
+            ]
+          },
+          "custom_mode2_k10_wmedian": {
+            "n_origins": 2184,
+            "MAE": 3.723547,
+            "MSE": 65.903192,
+            "RMSE": 8.118078,
+            "MASE": 1.005945,
+            "delta_MAE": -0.001095,
+            "abs_delta_MAE": 0.001095,
+            "delta_pct": -0.0294,
+            "oracle_fidelity_mae": 0.136798,
+            "p90_tail_mae": 15.641033,
+            "horizon_mae_h1_to_h7": [
+              3.464484,
+              3.770168,
+              3.779237,
+              3.758878,
+              3.754195,
+              3.761183,
+              3.776681
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.682365,
+              8.163082,
+              8.203677,
+              8.190903,
+              8.180935,
+              8.182195,
+              8.20978
+            ]
+          },
+          "custom_hybrid_k10": {
+            "n_origins": 2184,
+            "MAE": 3.722442,
+            "MSE": 65.909103,
+            "RMSE": 8.118442,
+            "MASE": 1.005646,
+            "delta_MAE": -0.002199,
+            "abs_delta_MAE": 0.002199,
+            "delta_pct": -0.059,
+            "oracle_fidelity_mae": 0.144274,
+            "p90_tail_mae": 15.649529,
+            "horizon_mae_h1_to_h7": [
+              3.464456,
+              3.766037,
+              3.778247,
+              3.75831,
+              3.751466,
+              3.762581,
+              3.775998
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.685616,
+              8.174023,
+              8.211137,
+              8.191016,
+              8.182636,
+              8.161466,
+              8.209739
+            ]
+          },
+          "retrained_no_ceres_27vars": {
+            "n_origins": 2184,
+            "MAE": 3.727075,
+            "MSE": 65.978763,
+            "RMSE": 8.122731,
+            "MASE": 1.006898,
+            "delta_MAE": 0.002433,
+            "abs_delta_MAE": 0.002433,
+            "delta_pct": 0.0653,
+            "oracle_fidelity_mae": 0.255502,
+            "p90_tail_mae": 15.657743,
+            "horizon_mae_h1_to_h7": [
+              3.462118,
+              3.765654,
+              3.785757,
+              3.770843,
+              3.755342,
+              3.77179,
+              3.778019
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.679794,
+              8.188162,
+              8.219201,
+              8.187367,
+              8.189966,
+              8.17409,
+              8.206495
+            ]
+          }
+        },
+        "SC-30": {
+          "clean": {
+            "n_origins": 2184,
+            "MAE": 3.750072,
+            "MSE": 65.842588,
+            "RMSE": 8.114345,
+            "MASE": 1.013111,
+            "delta_MAE": 0.0,
+            "abs_delta_MAE": 0.0,
+            "delta_pct": 0.0,
+            "oracle_fidelity_mae": 0.0,
+            "p90_tail_mae": 15.61595,
+            "horizon_mae_h1_to_h7": [
+              3.477736,
+              3.809342,
+              3.778564,
+              3.797979,
+              3.775214,
+              3.801555,
+              3.810115
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.687102,
+              8.18357,
+              8.182001,
+              8.18159,
+              8.191377,
+              8.166039,
+              8.195691
+            ]
+          },
+          "raw_nan": {
+            "n_origins": 2184,
+            "MAE": 3.740463,
+            "MSE": 69.497081,
+            "RMSE": 8.336491,
+            "MASE": 1.010515,
+            "delta_MAE": -0.009609,
+            "abs_delta_MAE": 0.009609,
+            "delta_pct": -0.2562,
+            "oracle_fidelity_mae": 0.658405,
+            "p90_tail_mae": 16.672479,
+            "horizon_mae_h1_to_h7": [
+              3.460992,
+              3.784966,
+              3.821635,
+              3.817093,
+              3.784548,
+              3.750779,
+              3.76323
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.714994,
+              8.314141,
+              8.491303,
+              8.54558,
+              8.495628,
+              8.376654,
+              8.388104
+            ]
+          },
+          "ffill_stale_80d": {
+            "n_origins": 2184,
+            "MAE": 3.772238,
+            "MSE": 66.272399,
+            "RMSE": 8.140786,
+            "MASE": 1.019099,
+            "delta_MAE": 0.022166,
+            "abs_delta_MAE": 0.022166,
+            "delta_pct": 0.5911,
+            "oracle_fidelity_mae": 0.284078,
+            "p90_tail_mae": 15.667854,
+            "horizon_mae_h1_to_h7": [
+              3.496618,
+              3.817491,
+              3.806006,
+              3.82228,
+              3.799654,
+              3.846874,
+              3.816742
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.680803,
+              8.247954,
+              8.209531,
+              8.174911,
+              8.223522,
+              8.18956,
+              8.243939
+            ]
+          },
+          "train_mean": {
+            "n_origins": 2184,
+            "MAE": 3.774241,
+            "MSE": 65.741105,
+            "RMSE": 8.108089,
+            "MASE": 1.01964,
+            "delta_MAE": 0.024169,
+            "abs_delta_MAE": 0.024169,
+            "delta_pct": 0.6445,
+            "oracle_fidelity_mae": 0.190784,
+            "p90_tail_mae": 15.597413,
+            "horizon_mae_h1_to_h7": [
+              3.475262,
+              3.831331,
+              3.814071,
+              3.824298,
+              3.810184,
+              3.83077,
+              3.833772
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.653657,
+              8.156535,
+              8.177813,
+              8.170323,
+              8.205877,
+              8.184676,
+              8.192927
+            ]
+          },
+          "doy_climatology": {
+            "n_origins": 2184,
+            "MAE": 3.750893,
+            "MSE": 65.704052,
+            "RMSE": 8.105804,
+            "MASE": 1.013333,
+            "delta_MAE": 0.000821,
+            "abs_delta_MAE": 0.000821,
+            "delta_pct": 0.0219,
+            "oracle_fidelity_mae": 0.141718,
+            "p90_tail_mae": 15.579714,
+            "horizon_mae_h1_to_h7": [
+              3.468881,
+              3.817455,
+              3.782823,
+              3.801347,
+              3.781745,
+              3.792537,
+              3.811465
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.683613,
+              8.164569,
+              8.160901,
+              8.172739,
+              8.185442,
+              8.1721,
+              8.188505
+            ]
+          },
+          "custom_mode1_ou": {
+            "n_origins": 2184,
+            "MAE": 3.750893,
+            "MSE": 65.704052,
+            "RMSE": 8.105804,
+            "MASE": 1.013333,
+            "delta_MAE": 0.000821,
+            "abs_delta_MAE": 0.000821,
+            "delta_pct": 0.0219,
+            "oracle_fidelity_mae": 0.141718,
+            "p90_tail_mae": 15.579714,
+            "horizon_mae_h1_to_h7": [
+              3.468881,
+              3.817455,
+              3.782823,
+              3.801347,
+              3.781745,
+              3.792537,
+              3.811465
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.683613,
+              8.164569,
+              8.160901,
+              8.172739,
+              8.185442,
+              8.1721,
+              8.188505
+            ]
+          },
+          "custom_mode2_k10": {
+            "n_origins": 2184,
+            "MAE": 3.746869,
+            "MSE": 65.826091,
+            "RMSE": 8.113328,
+            "MASE": 1.012245,
+            "delta_MAE": -0.003203,
+            "abs_delta_MAE": 0.003203,
+            "delta_pct": -0.0854,
+            "oracle_fidelity_mae": 0.148819,
+            "p90_tail_mae": 15.638304,
+            "horizon_mae_h1_to_h7": [
+              3.470854,
+              3.80245,
+              3.786128,
+              3.791492,
+              3.773596,
+              3.798906,
+              3.804654
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.681091,
+              8.176349,
+              8.189237,
+              8.183173,
+              8.19423,
+              8.159394,
+              8.196448
+            ]
+          },
+          "custom_mode2_k10_wmedian": {
+            "n_origins": 2184,
+            "MAE": 3.747778,
+            "MSE": 65.777278,
+            "RMSE": 8.110319,
+            "MASE": 1.012491,
+            "delta_MAE": -0.002295,
+            "abs_delta_MAE": 0.002295,
+            "delta_pct": -0.0612,
+            "oracle_fidelity_mae": 0.140456,
+            "p90_tail_mae": 15.614262,
+            "horizon_mae_h1_to_h7": [
+              3.469858,
+              3.80477,
+              3.787169,
+              3.794575,
+              3.774396,
+              3.799333,
+              3.804342
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.676104,
+              8.163865,
+              8.178763,
+              8.181195,
+              8.187423,
+              8.171252,
+              8.200143
+            ]
+          },
+          "custom_hybrid_k10": {
+            "n_origins": 2184,
+            "MAE": 3.746869,
+            "MSE": 65.826091,
+            "RMSE": 8.113328,
+            "MASE": 1.012245,
+            "delta_MAE": -0.003203,
+            "abs_delta_MAE": 0.003203,
+            "delta_pct": -0.0854,
+            "oracle_fidelity_mae": 0.148819,
+            "p90_tail_mae": 15.638304,
+            "horizon_mae_h1_to_h7": [
+              3.470854,
+              3.80245,
+              3.786128,
+              3.791492,
+              3.773596,
+              3.798906,
+              3.804654
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.681091,
+              8.176349,
+              8.189237,
+              8.183173,
+              8.19423,
+              8.159394,
+              8.196448
+            ]
+          },
+          "retrained_no_ceres_27vars": {
+            "n_origins": 2184,
+            "MAE": 3.758465,
+            "MSE": 65.91881,
+            "RMSE": 8.11904,
+            "MASE": 1.015378,
+            "delta_MAE": 0.008393,
+            "abs_delta_MAE": 0.008393,
+            "delta_pct": 0.2238,
+            "oracle_fidelity_mae": 0.278277,
+            "p90_tail_mae": 15.624409,
+            "horizon_mae_h1_to_h7": [
+              3.480995,
+              3.81511,
+              3.803012,
+              3.803416,
+              3.77544,
+              3.827248,
+              3.804033
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.692166,
+              8.168879,
+              8.199162,
+              8.191722,
+              8.182766,
+              8.190603,
+              8.194966
+            ]
+          }
+        }
+      }
+    },
+    "A-11": {
+      "val_724": {
+        "SC-35": {
+          "clean": {
+            "n_origins": 724,
+            "MAE": 3.168312,
+            "MSE": 44.136167,
+            "RMSE": 6.643506,
+            "MASE": 0.855944,
+            "delta_MAE": 0.0,
+            "abs_delta_MAE": 0.0,
+            "delta_pct": 0.0,
+            "oracle_fidelity_mae": 0.0,
+            "p90_tail_mae": 14.734207,
+            "horizon_mae_h1_to_h7": [
+              2.917306,
+              3.146308,
+              3.195504,
+              3.21811,
+              3.264147,
+              3.222722,
+              3.21409
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.278491,
+              6.631691,
+              6.683697,
+              6.720078,
+              6.773077,
+              6.675178,
+              6.729827
+            ]
+          },
+          "raw_nan": {
+            "n_origins": 724,
+            "MAE": 3.211525,
+            "MSE": 46.803672,
+            "RMSE": 6.841321,
+            "MASE": 0.867618,
+            "delta_MAE": 0.043212,
+            "abs_delta_MAE": 0.043212,
+            "delta_pct": 1.3639,
+            "oracle_fidelity_mae": 0.734409,
+            "p90_tail_mae": 15.95506,
+            "horizon_mae_h1_to_h7": [
+              2.905253,
+              3.101507,
+              3.257551,
+              3.311502,
+              3.347561,
+              3.279016,
+              3.278285
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.427582,
+              6.923978,
+              6.915194,
+              6.759857,
+              6.860021,
+              6.926772,
+              7.05796
+            ]
+          },
+          "ffill_stale_80d": {
+            "n_origins": 724,
+            "MAE": 3.286834,
+            "MSE": 45.427205,
+            "RMSE": 6.739971,
+            "MASE": 0.887963,
+            "delta_MAE": 0.118521,
+            "abs_delta_MAE": 0.118521,
+            "delta_pct": 3.7408,
+            "oracle_fidelity_mae": 0.351063,
+            "p90_tail_mae": 14.930028,
+            "horizon_mae_h1_to_h7": [
+              2.947762,
+              3.227971,
+              3.327281,
+              3.366064,
+              3.411348,
+              3.363291,
+              3.364118
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.327746,
+              6.745653,
+              6.832891,
+              6.759152,
+              6.829837,
+              6.784503,
+              6.884442
+            ]
+          },
+          "train_mean": {
+            "n_origins": 724,
+            "MAE": 3.248731,
+            "MSE": 44.210126,
+            "RMSE": 6.64907,
+            "MASE": 0.87767,
+            "delta_MAE": 0.080419,
+            "abs_delta_MAE": 0.080419,
+            "delta_pct": 2.5382,
+            "oracle_fidelity_mae": 0.236736,
+            "p90_tail_mae": 14.664567,
+            "horizon_mae_h1_to_h7": [
+              2.934122,
+              3.219436,
+              3.256339,
+              3.33256,
+              3.373927,
+              3.311214,
+              3.313521
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.283817,
+              6.62392,
+              6.69534,
+              6.733226,
+              6.762798,
+              6.686898,
+              6.744944
+            ]
+          },
+          "doy_climatology": {
+            "n_origins": 724,
+            "MAE": 3.170979,
+            "MSE": 44.070835,
+            "RMSE": 6.638587,
+            "MASE": 0.856664,
+            "delta_MAE": 0.002667,
+            "abs_delta_MAE": 0.002667,
+            "delta_pct": 0.0842,
+            "oracle_fidelity_mae": 0.106875,
+            "p90_tail_mae": 14.704654,
+            "horizon_mae_h1_to_h7": [
+              2.904525,
+              3.160727,
+              3.197118,
+              3.236843,
+              3.258833,
+              3.222663,
+              3.216145
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.284567,
+              6.637049,
+              6.67305,
+              6.712451,
+              6.754271,
+              6.672147,
+              6.724979
+            ]
+          },
+          "custom_mode1_ou": {
+            "n_origins": 724,
+            "MAE": 3.170957,
+            "MSE": 44.070878,
+            "RMSE": 6.63859,
+            "MASE": 0.856658,
+            "delta_MAE": 0.002645,
+            "abs_delta_MAE": 0.002645,
+            "delta_pct": 0.0835,
+            "oracle_fidelity_mae": 0.106916,
+            "p90_tail_mae": 14.704953,
+            "horizon_mae_h1_to_h7": [
+              2.904314,
+              3.160747,
+              3.197032,
+              3.237051,
+              3.258888,
+              3.222389,
+              3.216282
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.284359,
+              6.637049,
+              6.673049,
+              6.712561,
+              6.754289,
+              6.672103,
+              6.725112
+            ]
+          },
+          "custom_mode2_k10": {
+            "n_origins": 724,
+            "MAE": 3.166128,
+            "MSE": 44.169779,
+            "RMSE": 6.646035,
+            "MASE": 0.855354,
+            "delta_MAE": -0.002184,
+            "abs_delta_MAE": 0.002184,
+            "delta_pct": -0.0689,
+            "oracle_fidelity_mae": 0.124414,
+            "p90_tail_mae": 14.761047,
+            "horizon_mae_h1_to_h7": [
+              2.912076,
+              3.137177,
+              3.199344,
+              3.221913,
+              3.252794,
+              3.222481,
+              3.217112
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.289636,
+              6.644527,
+              6.70406,
+              6.718069,
+              6.758423,
+              6.667522,
+              6.728314
+            ]
+          },
+          "custom_mode2_k10_wmedian": {
+            "n_origins": 724,
+            "MAE": 3.167738,
+            "MSE": 44.142815,
+            "RMSE": 6.644006,
+            "MASE": 0.855789,
+            "delta_MAE": -0.000574,
+            "abs_delta_MAE": 0.000574,
+            "delta_pct": -0.0181,
+            "oracle_fidelity_mae": 0.116941,
+            "p90_tail_mae": 14.738685,
+            "horizon_mae_h1_to_h7": [
+              2.913348,
+              3.142725,
+              3.197474,
+              3.220499,
+              3.257697,
+              3.225806,
+              3.216621
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.292621,
+              6.637534,
+              6.691487,
+              6.717162,
+              6.75906,
+              6.671485,
+              6.727249
+            ]
+          },
+          "custom_hybrid_k10": {
+            "n_origins": 724,
+            "MAE": 3.166128,
+            "MSE": 44.169779,
+            "RMSE": 6.646035,
+            "MASE": 0.855354,
+            "delta_MAE": -0.002184,
+            "abs_delta_MAE": 0.002184,
+            "delta_pct": -0.0689,
+            "oracle_fidelity_mae": 0.124414,
+            "p90_tail_mae": 14.761047,
+            "horizon_mae_h1_to_h7": [
+              2.912076,
+              3.137177,
+              3.199344,
+              3.221913,
+              3.252794,
+              3.222481,
+              3.217112
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.289636,
+              6.644527,
+              6.70406,
+              6.718069,
+              6.758423,
+              6.667522,
+              6.728314
+            ]
+          },
+          "retrained_no_syn1deg_24vars": {
+            "n_origins": 724,
+            "MAE": 3.1686,
+            "MSE": 44.271444,
+            "RMSE": 6.653679,
+            "MASE": 0.856022,
+            "delta_MAE": 0.000288,
+            "abs_delta_MAE": 0.000288,
+            "delta_pct": 0.0091,
+            "oracle_fidelity_mae": 0.229716,
+            "p90_tail_mae": 14.794412,
+            "horizon_mae_h1_to_h7": [
+              2.91783,
+              3.147492,
+              3.184854,
+              3.208909,
+              3.260068,
+              3.216729,
+              3.24432
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.335787,
+              6.620107,
+              6.720791,
+              6.70434,
+              6.775053,
+              6.68612,
+              6.72379
+            ]
+          }
+        },
+        "SC-31": {
+          "clean": {
+            "n_origins": 724,
+            "MAE": 3.193921,
+            "MSE": 45.065166,
+            "RMSE": 6.713059,
+            "MASE": 0.862862,
+            "delta_MAE": 0.0,
+            "abs_delta_MAE": 0.0,
+            "delta_pct": 0.0,
+            "oracle_fidelity_mae": 0.0,
+            "p90_tail_mae": 14.931509,
+            "horizon_mae_h1_to_h7": [
+              2.910186,
+              3.147009,
+              3.208489,
+              3.228573,
+              3.264777,
+              3.317861,
+              3.280555
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.32955,
+              6.64888,
+              6.72925,
+              6.760669,
+              6.844814,
+              6.811146,
+              6.852205
+            ]
+          },
+          "raw_nan": {
+            "n_origins": 724,
+            "MAE": 3.217417,
+            "MSE": 51.774215,
+            "RMSE": 7.19543,
+            "MASE": 0.86921,
+            "delta_MAE": 0.023496,
+            "abs_delta_MAE": 0.023496,
+            "delta_pct": 0.7356,
+            "oracle_fidelity_mae": 1.354197,
+            "p90_tail_mae": 17.501035,
+            "horizon_mae_h1_to_h7": [
+              2.833655,
+              3.149827,
+              3.268794,
+              3.333912,
+              3.262221,
+              3.328703,
+              3.344805
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.458749,
+              7.058431,
+              7.103489,
+              7.376768,
+              7.347833,
+              7.469363,
+              7.498287
+            ]
+          },
+          "ffill_stale_80d": {
+            "n_origins": 724,
+            "MAE": 3.311905,
+            "MSE": 45.90924,
+            "RMSE": 6.775636,
+            "MASE": 0.894736,
+            "delta_MAE": 0.117984,
+            "abs_delta_MAE": 0.117984,
+            "delta_pct": 3.694,
+            "oracle_fidelity_mae": 0.391436,
+            "p90_tail_mae": 14.983349,
+            "horizon_mae_h1_to_h7": [
+              2.930405,
+              3.230127,
+              3.32916,
+              3.392698,
+              3.394056,
+              3.45062,
+              3.456267
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.358057,
+              6.802879,
+              6.801079,
+              6.791826,
+              6.900053,
+              6.822919,
+              6.936433
+            ]
+          },
+          "train_mean": {
+            "n_origins": 724,
+            "MAE": 3.279798,
+            "MSE": 45.22727,
+            "RMSE": 6.725122,
+            "MASE": 0.886063,
+            "delta_MAE": 0.085877,
+            "abs_delta_MAE": 0.085877,
+            "delta_pct": 2.6888,
+            "oracle_fidelity_mae": 0.281511,
+            "p90_tail_mae": 14.887074,
+            "horizon_mae_h1_to_h7": [
+              2.924212,
+              3.210966,
+              3.300029,
+              3.354226,
+              3.369732,
+              3.402976,
+              3.396445
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.368752,
+              6.659815,
+              6.726001,
+              6.783901,
+              6.850834,
+              6.806793,
+              6.866586
+            ]
+          },
+          "doy_climatology": {
+            "n_origins": 724,
+            "MAE": 3.191848,
+            "MSE": 45.065024,
+            "RMSE": 6.713049,
+            "MASE": 0.862302,
+            "delta_MAE": -0.002073,
+            "abs_delta_MAE": 0.002073,
+            "delta_pct": -0.0649,
+            "oracle_fidelity_mae": 0.147617,
+            "p90_tail_mae": 14.920225,
+            "horizon_mae_h1_to_h7": [
+              2.886368,
+              3.171627,
+              3.21527,
+              3.243798,
+              3.248601,
+              3.30307,
+              3.274202
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.373762,
+              6.663101,
+              6.733825,
+              6.754707,
+              6.823024,
+              6.808765,
+              6.822756
+            ]
+          },
+          "custom_mode1_ou": {
+            "n_origins": 724,
+            "MAE": 3.191646,
+            "MSE": 45.064279,
+            "RMSE": 6.712993,
+            "MASE": 0.862247,
+            "delta_MAE": -0.002276,
+            "abs_delta_MAE": 0.002276,
+            "delta_pct": -0.0712,
+            "oracle_fidelity_mae": 0.147796,
+            "p90_tail_mae": 14.920315,
+            "horizon_mae_h1_to_h7": [
+              2.886335,
+              3.171797,
+              3.215196,
+              3.243778,
+              3.248528,
+              3.302806,
+              3.273081
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.373759,
+              6.663177,
+              6.733816,
+              6.754683,
+              6.823072,
+              6.80862,
+              6.822433
+            ]
+          },
+          "custom_mode2_k10": {
+            "n_origins": 724,
+            "MAE": 3.188686,
+            "MSE": 45.090224,
+            "RMSE": 6.714925,
+            "MASE": 0.861448,
+            "delta_MAE": -0.005235,
+            "abs_delta_MAE": 0.005235,
+            "delta_pct": -0.1639,
+            "oracle_fidelity_mae": 0.16112,
+            "p90_tail_mae": 14.956395,
+            "horizon_mae_h1_to_h7": [
+              2.90521,
+              3.146,
+              3.206933,
+              3.234089,
+              3.242016,
+              3.310462,
+              3.276091
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.370344,
+              6.675059,
+              6.751146,
+              6.742305,
+              6.827839,
+              6.79911,
+              6.827148
+            ]
+          },
+          "custom_mode2_k10_wmedian": {
+            "n_origins": 724,
+            "MAE": 3.188771,
+            "MSE": 45.069348,
+            "RMSE": 6.713371,
+            "MASE": 0.861471,
+            "delta_MAE": -0.00515,
+            "abs_delta_MAE": 0.00515,
+            "delta_pct": -0.1612,
+            "oracle_fidelity_mae": 0.154235,
+            "p90_tail_mae": 14.938379,
+            "horizon_mae_h1_to_h7": [
+              2.903364,
+              3.149013,
+              3.205445,
+              3.2301,
+              3.243716,
+              3.314494,
+              3.275268
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.374408,
+              6.662181,
+              6.742057,
+              6.736258,
+              6.824078,
+              6.815793,
+              6.827307
+            ]
+          },
+          "custom_hybrid_k10": {
+            "n_origins": 724,
+            "MAE": 3.188686,
+            "MSE": 45.090224,
+            "RMSE": 6.714925,
+            "MASE": 0.861448,
+            "delta_MAE": -0.005235,
+            "abs_delta_MAE": 0.005235,
+            "delta_pct": -0.1639,
+            "oracle_fidelity_mae": 0.16112,
+            "p90_tail_mae": 14.956395,
+            "horizon_mae_h1_to_h7": [
+              2.90521,
+              3.146,
+              3.206933,
+              3.234089,
+              3.242016,
+              3.310462,
+              3.276091
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.370344,
+              6.675059,
+              6.751146,
+              6.742305,
+              6.827839,
+              6.79911,
+              6.827148
+            ]
+          },
+          "retrained_no_syn1deg_24vars": {
+            "n_origins": 724,
+            "MAE": 3.194033,
+            "MSE": 45.081323,
+            "RMSE": 6.714263,
+            "MASE": 0.862892,
+            "delta_MAE": 0.000112,
+            "abs_delta_MAE": 0.000112,
+            "delta_pct": 0.0035,
+            "oracle_fidelity_mae": 0.253332,
+            "p90_tail_mae": 14.944355,
+            "horizon_mae_h1_to_h7": [
+              2.896584,
+              3.151717,
+              3.201173,
+              3.25254,
+              3.262225,
+              3.317665,
+              3.276325
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.352441,
+              6.653888,
+              6.734588,
+              6.75699,
+              6.813754,
+              6.836677,
+              6.838314
+            ]
+          }
+        },
+        "SC-30": {
+          "clean": {
+            "n_origins": 724,
+            "MAE": 3.148493,
+            "MSE": 44.720166,
+            "RMSE": 6.687314,
+            "MASE": 0.850589,
+            "delta_MAE": 0.0,
+            "abs_delta_MAE": 0.0,
+            "delta_pct": 0.0,
+            "oracle_fidelity_mae": 0.0,
+            "p90_tail_mae": 14.91284,
+            "horizon_mae_h1_to_h7": [
+              2.909023,
+              3.123201,
+              3.166002,
+              3.146075,
+              3.222197,
+              3.237165,
+              3.235787
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.344642,
+              6.627051,
+              6.740463,
+              6.721059,
+              6.801049,
+              6.743536,
+              6.8215
+            ]
+          },
+          "raw_nan": {
+            "n_origins": 724,
+            "MAE": 3.261783,
+            "MSE": 55.817515,
+            "RMSE": 7.471112,
+            "MASE": 0.881196,
+            "delta_MAE": 0.11329,
+            "abs_delta_MAE": 0.11329,
+            "delta_pct": 3.5982,
+            "oracle_fidelity_mae": 1.880967,
+            "p90_tail_mae": 18.452288,
+            "horizon_mae_h1_to_h7": [
+              2.80767,
+              3.199134,
+              3.362956,
+              3.391718,
+              3.413024,
+              3.361002,
+              3.296977
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.648785,
+              7.283078,
+              7.629896,
+              7.700911,
+              7.767942,
+              7.642362,
+              7.563536
+            ]
+          },
+          "ffill_stale_80d": {
+            "n_origins": 724,
+            "MAE": 3.375834,
+            "MSE": 46.284698,
+            "RMSE": 6.803286,
+            "MASE": 0.912007,
+            "delta_MAE": 0.227341,
+            "abs_delta_MAE": 0.227341,
+            "delta_pct": 7.2206,
+            "oracle_fidelity_mae": 0.630327,
+            "p90_tail_mae": 15.04885,
+            "horizon_mae_h1_to_h7": [
+              2.943937,
+              3.285034,
+              3.463454,
+              3.45049,
+              3.548019,
+              3.455772,
+              3.484134
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.33947,
+              6.793812,
+              6.886765,
+              6.821364,
+              6.953743,
+              6.852058,
+              6.955886
+            ]
+          },
+          "train_mean": {
+            "n_origins": 724,
+            "MAE": 3.391139,
+            "MSE": 44.763703,
+            "RMSE": 6.690568,
+            "MASE": 0.916142,
+            "delta_MAE": 0.242646,
+            "abs_delta_MAE": 0.242646,
+            "delta_pct": 7.7067,
+            "oracle_fidelity_mae": 0.632209,
+            "p90_tail_mae": 14.369423,
+            "horizon_mae_h1_to_h7": [
+              2.953881,
+              3.349122,
+              3.506199,
+              3.453636,
+              3.558122,
+              3.407507,
+              3.509502
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.347002,
+              6.622481,
+              6.761236,
+              6.744684,
+              6.822506,
+              6.751521,
+              6.772705
+            ]
+          },
+          "doy_climatology": {
+            "n_origins": 724,
+            "MAE": 3.153777,
+            "MSE": 44.731488,
+            "RMSE": 6.68816,
+            "MASE": 0.852017,
+            "delta_MAE": 0.005285,
+            "abs_delta_MAE": 0.005285,
+            "delta_pct": 0.1678,
+            "oracle_fidelity_mae": 0.134194,
+            "p90_tail_mae": 14.870198,
+            "horizon_mae_h1_to_h7": [
+              2.891612,
+              3.135446,
+              3.188894,
+              3.175492,
+              3.225459,
+              3.218963,
+              3.240576
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.376002,
+              6.630146,
+              6.73865,
+              6.730454,
+              6.785637,
+              6.73303,
+              6.813311
+            ]
+          },
+          "custom_mode1_ou": {
+            "n_origins": 724,
+            "MAE": 3.154395,
+            "MSE": 44.735911,
+            "RMSE": 6.688491,
+            "MASE": 0.852184,
+            "delta_MAE": 0.005902,
+            "abs_delta_MAE": 0.005902,
+            "delta_pct": 0.1874,
+            "oracle_fidelity_mae": 0.13492,
+            "p90_tail_mae": 14.870198,
+            "horizon_mae_h1_to_h7": [
+              2.89188,
+              3.135788,
+              3.188806,
+              3.175441,
+              3.226924,
+              3.220026,
+              3.241897
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.376079,
+              6.630203,
+              6.738614,
+              6.730442,
+              6.78592,
+              6.733386,
+              6.81487
+            ]
+          },
+          "custom_mode2_k10": {
+            "n_origins": 724,
+            "MAE": 3.146105,
+            "MSE": 44.765757,
+            "RMSE": 6.690722,
+            "MASE": 0.849944,
+            "delta_MAE": -0.002388,
+            "abs_delta_MAE": 0.002388,
+            "delta_pct": -0.0759,
+            "oracle_fidelity_mae": 0.161106,
+            "p90_tail_mae": 14.935461,
+            "horizon_mae_h1_to_h7": [
+              2.910062,
+              3.109899,
+              3.165044,
+              3.153049,
+              3.21693,
+              3.229474,
+              3.238275
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.369724,
+              6.642123,
+              6.756723,
+              6.726982,
+              6.788787,
+              6.731359,
+              6.809164
+            ]
+          },
+          "custom_mode2_k10_wmedian": {
+            "n_origins": 724,
+            "MAE": 3.144947,
+            "MSE": 44.781442,
+            "RMSE": 6.691894,
+            "MASE": 0.849632,
+            "delta_MAE": -0.003545,
+            "abs_delta_MAE": 0.003545,
+            "delta_pct": -0.1126,
+            "oracle_fidelity_mae": 0.152504,
+            "p90_tail_mae": 14.916956,
+            "horizon_mae_h1_to_h7": [
+              2.906264,
+              3.106964,
+              3.159154,
+              3.145029,
+              3.225428,
+              3.230529,
+              3.241264
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.373448,
+              6.628453,
+              6.755766,
+              6.722833,
+              6.786077,
+              6.748596,
+              6.817743
+            ]
+          },
+          "custom_hybrid_k10": {
+            "n_origins": 724,
+            "MAE": 3.146105,
+            "MSE": 44.765757,
+            "RMSE": 6.690722,
+            "MASE": 0.849944,
+            "delta_MAE": -0.002388,
+            "abs_delta_MAE": 0.002388,
+            "delta_pct": -0.0759,
+            "oracle_fidelity_mae": 0.161106,
+            "p90_tail_mae": 14.935461,
+            "horizon_mae_h1_to_h7": [
+              2.910062,
+              3.109899,
+              3.165044,
+              3.153049,
+              3.21693,
+              3.229474,
+              3.238275
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.369724,
+              6.642123,
+              6.756723,
+              6.726982,
+              6.788787,
+              6.731359,
+              6.809164
+            ]
+          },
+          "retrained_no_syn1deg_24vars": {
+            "n_origins": 724,
+            "MAE": 3.108459,
+            "MSE": 44.25089,
+            "RMSE": 6.652134,
+            "MASE": 0.839774,
+            "delta_MAE": -0.040033,
+            "abs_delta_MAE": 0.040033,
+            "delta_pct": -1.2715,
+            "oracle_fidelity_mae": 0.478476,
+            "p90_tail_mae": 14.943024,
+            "horizon_mae_h1_to_h7": [
+              2.880726,
+              3.086554,
+              3.14852,
+              3.171397,
+              3.199667,
+              3.143809,
+              3.128542
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.355012,
+              6.632127,
+              6.721346,
+              6.707713,
+              6.752354,
+              6.708703,
+              6.679376
+            ]
+          }
+        }
+      },
+      "test_2184": {
+        "SC-35": {
+          "clean": {
+            "n_origins": 2184,
+            "MAE": 3.733345,
+            "MSE": 65.580906,
+            "RMSE": 8.098204,
+            "MASE": 1.008592,
+            "delta_MAE": 0.0,
+            "abs_delta_MAE": 0.0,
+            "delta_pct": 0.0,
+            "oracle_fidelity_mae": 0.0,
+            "p90_tail_mae": 15.513931,
+            "horizon_mae_h1_to_h7": [
+              3.4965,
+              3.767633,
+              3.759876,
+              3.776017,
+              3.758977,
+              3.796773,
+              3.777643
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.673421,
+              8.11628,
+              8.184135,
+              8.178776,
+              8.160244,
+              8.178062,
+              8.183412
+            ]
+          },
+          "raw_nan": {
+            "n_origins": 2184,
+            "MAE": 3.795844,
+            "MSE": 69.808397,
+            "RMSE": 8.355142,
+            "MASE": 1.025476,
+            "delta_MAE": 0.062498,
+            "abs_delta_MAE": 0.062498,
+            "delta_pct": 1.6741,
+            "oracle_fidelity_mae": 0.813406,
+            "p90_tail_mae": 16.717209,
+            "horizon_mae_h1_to_h7": [
+              3.528099,
+              3.801279,
+              3.856687,
+              3.840232,
+              3.829215,
+              3.847954,
+              3.867439
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.920806,
+              8.509793,
+              8.445983,
+              8.216143,
+              8.29189,
+              8.445487,
+              8.636071
+            ]
+          },
+          "ffill_stale_80d": {
+            "n_origins": 2184,
+            "MAE": 3.767851,
+            "MSE": 66.036843,
+            "RMSE": 8.126306,
+            "MASE": 1.017914,
+            "delta_MAE": 0.034505,
+            "abs_delta_MAE": 0.034505,
+            "delta_pct": 0.9243,
+            "oracle_fidelity_mae": 0.363647,
+            "p90_tail_mae": 15.548944,
+            "horizon_mae_h1_to_h7": [
+              3.516077,
+              3.795751,
+              3.788352,
+              3.824022,
+              3.815231,
+              3.835478,
+              3.800044
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.696489,
+              8.171003,
+              8.226303,
+              8.166125,
+              8.173835,
+              8.183119,
+              8.253725
+            ]
+          },
+          "train_mean": {
+            "n_origins": 2184,
+            "MAE": 3.768079,
+            "MSE": 65.350205,
+            "RMSE": 8.083947,
+            "MASE": 1.017975,
+            "delta_MAE": 0.034733,
+            "abs_delta_MAE": 0.034733,
+            "delta_pct": 0.9304,
+            "oracle_fidelity_mae": 0.265372,
+            "p90_tail_mae": 15.409805,
+            "horizon_mae_h1_to_h7": [
+              3.516896,
+              3.807408,
+              3.787556,
+              3.819651,
+              3.809378,
+              3.820259,
+              3.815402
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.666648,
+              8.088129,
+              8.168974,
+              8.146636,
+              8.147212,
+              8.156495,
+              8.200659
+            ]
+          },
+          "doy_climatology": {
+            "n_origins": 2184,
+            "MAE": 3.731604,
+            "MSE": 65.513507,
+            "RMSE": 8.094041,
+            "MASE": 1.008121,
+            "delta_MAE": -0.001741,
+            "abs_delta_MAE": 0.001741,
+            "delta_pct": -0.0466,
+            "oracle_fidelity_mae": 0.121451,
+            "p90_tail_mae": 15.496559,
+            "horizon_mae_h1_to_h7": [
+              3.490673,
+              3.776247,
+              3.762076,
+              3.769308,
+              3.758192,
+              3.784322,
+              3.780411
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.680795,
+              8.11811,
+              8.175444,
+              8.162978,
+              8.155276,
+              8.167564,
+              8.185751
+            ]
+          },
+          "custom_mode1_ou": {
+            "n_origins": 2184,
+            "MAE": 3.731383,
+            "MSE": 65.510499,
+            "RMSE": 8.093856,
+            "MASE": 1.008062,
+            "delta_MAE": -0.001962,
+            "abs_delta_MAE": 0.001962,
+            "delta_pct": -0.0526,
+            "oracle_fidelity_mae": 0.121237,
+            "p90_tail_mae": 15.496527,
+            "horizon_mae_h1_to_h7": [
+              3.490689,
+              3.776405,
+              3.761627,
+              3.769457,
+              3.757824,
+              3.784508,
+              3.77917
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.680798,
+              8.118282,
+              8.175333,
+              8.163753,
+              8.155148,
+              8.167645,
+              8.183675
+            ]
+          },
+          "custom_mode2_k10": {
+            "n_origins": 2184,
+            "MAE": 3.728969,
+            "MSE": 65.561459,
+            "RMSE": 8.097003,
+            "MASE": 1.007409,
+            "delta_MAE": -0.004376,
+            "abs_delta_MAE": 0.004376,
+            "delta_pct": -0.1172,
+            "oracle_fidelity_mae": 0.133851,
+            "p90_tail_mae": 15.540375,
+            "horizon_mae_h1_to_h7": [
+              3.492791,
+              3.763829,
+              3.765095,
+              3.767647,
+              3.756402,
+              3.782335,
+              3.774681
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.67807,
+              8.127162,
+              8.190349,
+              8.170264,
+              8.159516,
+              8.159995,
+              8.18098
+            ]
+          },
+          "custom_mode2_k10_wmedian": {
+            "n_origins": 2184,
+            "MAE": 3.73056,
+            "MSE": 65.540945,
+            "RMSE": 8.095736,
+            "MASE": 1.007839,
+            "delta_MAE": -0.002785,
+            "abs_delta_MAE": 0.002785,
+            "delta_pct": -0.0746,
+            "oracle_fidelity_mae": 0.127943,
+            "p90_tail_mae": 15.513366,
+            "horizon_mae_h1_to_h7": [
+              3.490593,
+              3.769359,
+              3.765627,
+              3.771526,
+              3.757436,
+              3.785437,
+              3.773945
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.675248,
+              8.116923,
+              8.182649,
+              8.174203,
+              8.158755,
+              8.167149,
+              8.182408
+            ]
+          },
+          "custom_hybrid_k10": {
+            "n_origins": 2184,
+            "MAE": 3.728969,
+            "MSE": 65.561459,
+            "RMSE": 8.097003,
+            "MASE": 1.007409,
+            "delta_MAE": -0.004376,
+            "abs_delta_MAE": 0.004376,
+            "delta_pct": -0.1172,
+            "oracle_fidelity_mae": 0.133851,
+            "p90_tail_mae": 15.540375,
+            "horizon_mae_h1_to_h7": [
+              3.492791,
+              3.763829,
+              3.765095,
+              3.767647,
+              3.756402,
+              3.782335,
+              3.774681
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.67807,
+              8.127162,
+              8.190349,
+              8.170264,
+              8.159516,
+              8.159995,
+              8.18098
+            ]
+          },
+          "retrained_no_syn1deg_24vars": {
+            "n_origins": 2184,
+            "MAE": 3.728086,
+            "MSE": 65.3849,
+            "RMSE": 8.086093,
+            "MASE": 1.007171,
+            "delta_MAE": -0.005259,
+            "abs_delta_MAE": 0.005259,
+            "delta_pct": -0.1409,
+            "oracle_fidelity_mae": 0.248877,
+            "p90_tail_mae": 15.523139,
+            "horizon_mae_h1_to_h7": [
+              3.482974,
+              3.769136,
+              3.763215,
+              3.767024,
+              3.759414,
+              3.780055,
+              3.774783
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.679964,
+              8.109411,
+              8.158216,
+              8.169239,
+              8.150933,
+              8.158042,
+              8.164899
+            ]
+          }
+        },
+        "SC-31": {
+          "clean": {
+            "n_origins": 2184,
+            "MAE": 3.724641,
+            "MSE": 65.924037,
+            "RMSE": 8.119362,
+            "MASE": 1.00624,
+            "delta_MAE": 0.0,
+            "abs_delta_MAE": 0.0,
+            "delta_pct": 0.0,
+            "oracle_fidelity_mae": 0.0,
+            "p90_tail_mae": 15.629338,
+            "horizon_mae_h1_to_h7": [
+              3.474685,
+              3.765182,
+              3.774701,
+              3.762214,
+              3.756667,
+              3.768005,
+              3.771037
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.699609,
+              8.172253,
+              8.203552,
+              8.192995,
+              8.183775,
+              8.172044,
+              8.198698
+            ]
+          },
+          "raw_nan": {
+            "n_origins": 2184,
+            "MAE": 3.901483,
+            "MSE": 76.890532,
+            "RMSE": 8.768725,
+            "MASE": 1.054015,
+            "delta_MAE": 0.176842,
+            "abs_delta_MAE": 0.176842,
+            "delta_pct": 4.7479,
+            "oracle_fidelity_mae": 1.40194,
+            "p90_tail_mae": 18.123593,
+            "horizon_mae_h1_to_h7": [
+              3.44524,
+              3.865992,
+              3.93134,
+              4.02324,
+              3.9648,
+              4.030123,
+              4.049645
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.892349,
+              8.641554,
+              8.72521,
+              8.999041,
+              8.934173,
+              9.048808,
+              9.08051
+            ]
+          },
+          "ffill_stale_80d": {
+            "n_origins": 2184,
+            "MAE": 3.766573,
+            "MSE": 66.171441,
+            "RMSE": 8.134583,
+            "MASE": 1.017568,
+            "delta_MAE": 0.041931,
+            "abs_delta_MAE": 0.041931,
+            "delta_pct": 1.1258,
+            "oracle_fidelity_mae": 0.410823,
+            "p90_tail_mae": 15.596008,
+            "horizon_mae_h1_to_h7": [
+              3.51173,
+              3.786338,
+              3.813005,
+              3.809672,
+              3.807027,
+              3.83477,
+              3.803467
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.707648,
+              8.248279,
+              8.235009,
+              8.172268,
+              8.193172,
+              8.14999,
+              8.222311
+            ]
+          },
+          "train_mean": {
+            "n_origins": 2184,
+            "MAE": 3.761472,
+            "MSE": 65.782077,
+            "RMSE": 8.110615,
+            "MASE": 1.016191,
+            "delta_MAE": 0.036831,
+            "abs_delta_MAE": 0.036831,
+            "delta_pct": 0.9888,
+            "oracle_fidelity_mae": 0.319473,
+            "p90_tail_mae": 15.555083,
+            "horizon_mae_h1_to_h7": [
+              3.495063,
+              3.801015,
+              3.820041,
+              3.804827,
+              3.802755,
+              3.800789,
+              3.805815
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.697173,
+              8.146436,
+              8.175888,
+              8.189976,
+              8.171737,
+              8.159405,
+              8.22129
+            ]
+          },
+          "doy_climatology": {
+            "n_origins": 2184,
+            "MAE": 3.723019,
+            "MSE": 65.874108,
+            "RMSE": 8.116287,
+            "MASE": 1.005802,
+            "delta_MAE": -0.001622,
+            "abs_delta_MAE": 0.001622,
+            "delta_pct": -0.0436,
+            "oracle_fidelity_mae": 0.164337,
+            "p90_tail_mae": 15.622209,
+            "horizon_mae_h1_to_h7": [
+              3.470165,
+              3.776115,
+              3.772825,
+              3.759748,
+              3.75717,
+              3.750368,
+              3.774745
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.705671,
+              8.151698,
+              8.196154,
+              8.195234,
+              8.174995,
+              8.176768,
+              8.201361
+            ]
+          },
+          "custom_mode1_ou": {
+            "n_origins": 2184,
+            "MAE": 3.722975,
+            "MSE": 65.868004,
+            "RMSE": 8.115911,
+            "MASE": 1.00579,
+            "delta_MAE": -0.001667,
+            "abs_delta_MAE": 0.001667,
+            "delta_pct": -0.0448,
+            "oracle_fidelity_mae": 0.164279,
+            "p90_tail_mae": 15.621543,
+            "horizon_mae_h1_to_h7": [
+              3.470092,
+              3.776341,
+              3.772803,
+              3.759866,
+              3.756956,
+              3.749652,
+              3.775112
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.705218,
+              8.151748,
+              8.196138,
+              8.195217,
+              8.174876,
+              8.174524,
+              8.20152
+            ]
+          },
+          "custom_mode2_k10": {
+            "n_origins": 2184,
+            "MAE": 3.722053,
+            "MSE": 65.857358,
+            "RMSE": 8.115255,
+            "MASE": 1.005541,
+            "delta_MAE": -0.002588,
+            "abs_delta_MAE": 0.002588,
+            "delta_pct": -0.0695,
+            "oracle_fidelity_mae": 0.170938,
+            "p90_tail_mae": 15.650284,
+            "horizon_mae_h1_to_h7": [
+              3.474004,
+              3.766606,
+              3.782907,
+              3.757192,
+              3.749069,
+              3.757185,
+              3.767409
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.696146,
+              8.169016,
+              8.214576,
+              8.182409,
+              8.172852,
+              8.15951,
+              8.199624
+            ]
+          },
+          "custom_mode2_k10_wmedian": {
+            "n_origins": 2184,
+            "MAE": 3.722956,
+            "MSE": 65.872882,
+            "RMSE": 8.116211,
+            "MASE": 1.005785,
+            "delta_MAE": -0.001686,
+            "abs_delta_MAE": 0.001686,
+            "delta_pct": -0.0453,
+            "oracle_fidelity_mae": 0.165566,
+            "p90_tail_mae": 15.639782,
+            "horizon_mae_h1_to_h7": [
+              3.474934,
+              3.769301,
+              3.779281,
+              3.761091,
+              3.751488,
+              3.756354,
+              3.76824
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.693681,
+              8.156409,
+              8.205853,
+              8.18735,
+              8.17919,
+              8.175157,
+              8.20301
+            ]
+          },
+          "custom_hybrid_k10": {
+            "n_origins": 2184,
+            "MAE": 3.722053,
+            "MSE": 65.857358,
+            "RMSE": 8.115255,
+            "MASE": 1.005541,
+            "delta_MAE": -0.002588,
+            "abs_delta_MAE": 0.002588,
+            "delta_pct": -0.0695,
+            "oracle_fidelity_mae": 0.170938,
+            "p90_tail_mae": 15.650284,
+            "horizon_mae_h1_to_h7": [
+              3.474004,
+              3.766606,
+              3.782907,
+              3.757192,
+              3.749069,
+              3.757185,
+              3.767409
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.696146,
+              8.169016,
+              8.214576,
+              8.182409,
+              8.172852,
+              8.15951,
+              8.199624
+            ]
+          },
+          "retrained_no_syn1deg_24vars": {
+            "n_origins": 2184,
+            "MAE": 3.729129,
+            "MSE": 65.91419,
+            "RMSE": 8.118755,
+            "MASE": 1.007453,
+            "delta_MAE": 0.004488,
+            "abs_delta_MAE": 0.004488,
+            "delta_pct": 0.1205,
+            "oracle_fidelity_mae": 0.273061,
+            "p90_tail_mae": 15.637739,
+            "horizon_mae_h1_to_h7": [
+              3.488344,
+              3.772756,
+              3.776367,
+              3.778474,
+              3.755213,
+              3.764501,
+              3.768249
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.70152,
+              8.183091,
+              8.208606,
+              8.192744,
+              8.178939,
+              8.16844,
+              8.185489
+            ]
+          }
+        },
+        "SC-30": {
+          "clean": {
+            "n_origins": 2184,
+            "MAE": 3.750072,
+            "MSE": 65.842588,
+            "RMSE": 8.114345,
+            "MASE": 1.013111,
+            "delta_MAE": 0.0,
+            "abs_delta_MAE": 0.0,
+            "delta_pct": 0.0,
+            "oracle_fidelity_mae": 0.0,
+            "p90_tail_mae": 15.61595,
+            "horizon_mae_h1_to_h7": [
+              3.477736,
+              3.809342,
+              3.778564,
+              3.797979,
+              3.775214,
+              3.801555,
+              3.810115
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.687102,
+              8.18357,
+              8.182001,
+              8.18159,
+              8.191377,
+              8.166039,
+              8.195691
+            ]
+          },
+          "raw_nan": {
+            "n_origins": 2184,
+            "MAE": 4.098615,
+            "MSE": 83.094565,
+            "RMSE": 9.115622,
+            "MASE": 1.107272,
+            "delta_MAE": 0.348543,
+            "abs_delta_MAE": 0.348543,
+            "delta_pct": 9.2943,
+            "oracle_fidelity_mae": 2.038092,
+            "p90_tail_mae": 19.143614,
+            "horizon_mae_h1_to_h7": [
+              3.486465,
+              4.002565,
+              4.272009,
+              4.264061,
+              4.303718,
+              4.213398,
+              4.148088
+            ],
+            "horizon_rmse_h1_to_h7": [
+              8.157357,
+              8.868713,
+              9.348804,
+              9.357896,
+              9.432423,
+              9.332914,
+              9.242357
+            ]
+          },
+          "ffill_stale_80d": {
+            "n_origins": 2184,
+            "MAE": 3.97742,
+            "MSE": 67.787493,
+            "RMSE": 8.233316,
+            "MASE": 1.07453,
+            "delta_MAE": 0.227348,
+            "abs_delta_MAE": 0.227348,
+            "delta_pct": 6.0625,
+            "oracle_fidelity_mae": 0.847802,
+            "p90_tail_mae": 15.62549,
+            "horizon_mae_h1_to_h7": [
+              3.551365,
+              3.97089,
+              4.037675,
+              4.053979,
+              4.083214,
+              4.078783,
+              4.066032
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.707464,
+              8.311035,
+              8.308553,
+              8.282516,
+              8.3337,
+              8.315985,
+              8.354392
+            ]
+          },
+          "train_mean": {
+            "n_origins": 2184,
+            "MAE": 4.022252,
+            "MSE": 65.796461,
+            "RMSE": 8.111502,
+            "MASE": 1.086642,
+            "delta_MAE": 0.27218,
+            "abs_delta_MAE": 0.27218,
+            "delta_pct": 7.258,
+            "oracle_fidelity_mae": 0.809282,
+            "p90_tail_mae": 15.00648,
+            "horizon_mae_h1_to_h7": [
+              3.547142,
+              4.057453,
+              4.121277,
+              4.088964,
+              4.145845,
+              4.043583,
+              4.151503
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.651081,
+              8.144071,
+              8.175203,
+              8.180687,
+              8.205459,
+              8.220206,
+              8.188491
+            ]
+          },
+          "doy_climatology": {
+            "n_origins": 2184,
+            "MAE": 3.75066,
+            "MSE": 65.701748,
+            "RMSE": 8.105661,
+            "MASE": 1.01327,
+            "delta_MAE": 0.000588,
+            "abs_delta_MAE": 0.000588,
+            "delta_pct": 0.0157,
+            "oracle_fidelity_mae": 0.164783,
+            "p90_tail_mae": 15.576116,
+            "horizon_mae_h1_to_h7": [
+              3.475061,
+              3.811978,
+              3.78459,
+              3.801717,
+              3.784731,
+              3.788518,
+              3.808028
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.686567,
+              8.161816,
+              8.163176,
+              8.171491,
+              8.185034,
+              8.172863,
+              8.186117
+            ]
+          },
+          "custom_mode1_ou": {
+            "n_origins": 2184,
+            "MAE": 3.75039,
+            "MSE": 65.697374,
+            "RMSE": 8.105392,
+            "MASE": 1.013196,
+            "delta_MAE": 0.000317,
+            "abs_delta_MAE": 0.000317,
+            "delta_pct": 0.0085,
+            "oracle_fidelity_mae": 0.164376,
+            "p90_tail_mae": 15.575957,
+            "horizon_mae_h1_to_h7": [
+              3.474923,
+              3.811653,
+              3.784375,
+              3.801499,
+              3.784373,
+              3.788186,
+              3.807718
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.686522,
+              8.161574,
+              8.163063,
+              8.171516,
+              8.184898,
+              8.171577,
+              8.186038
+            ]
+          },
+          "custom_mode2_k10": {
+            "n_origins": 2184,
+            "MAE": 3.744999,
+            "MSE": 65.685256,
+            "RMSE": 8.104644,
+            "MASE": 1.01174,
+            "delta_MAE": -0.005073,
+            "abs_delta_MAE": 0.005073,
+            "delta_pct": -0.1353,
+            "oracle_fidelity_mae": 0.188479,
+            "p90_tail_mae": 15.624669,
+            "horizon_mae_h1_to_h7": [
+              3.478308,
+              3.798501,
+              3.792949,
+              3.788815,
+              3.769737,
+              3.791613,
+              3.795069
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.675481,
+              8.174089,
+              8.192811,
+              8.175196,
+              8.172385,
+              8.15205,
+              8.177302
+            ]
+          },
+          "custom_mode2_k10_wmedian": {
+            "n_origins": 2184,
+            "MAE": 3.747518,
+            "MSE": 65.690891,
+            "RMSE": 8.104992,
+            "MASE": 1.012421,
+            "delta_MAE": -0.002554,
+            "abs_delta_MAE": 0.002554,
+            "delta_pct": -0.0681,
+            "oracle_fidelity_mae": 0.180566,
+            "p90_tail_mae": 15.59949,
+            "horizon_mae_h1_to_h7": [
+              3.473886,
+              3.803988,
+              3.794068,
+              3.794738,
+              3.776179,
+              3.790727,
+              3.799043
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.672017,
+              8.164576,
+              8.185961,
+              8.179039,
+              8.173474,
+              8.161185,
+              8.185282
+            ]
+          },
+          "custom_hybrid_k10": {
+            "n_origins": 2184,
+            "MAE": 3.744999,
+            "MSE": 65.685256,
+            "RMSE": 8.104644,
+            "MASE": 1.01174,
+            "delta_MAE": -0.005073,
+            "abs_delta_MAE": 0.005073,
+            "delta_pct": -0.1353,
+            "oracle_fidelity_mae": 0.188479,
+            "p90_tail_mae": 15.624669,
+            "horizon_mae_h1_to_h7": [
+              3.478308,
+              3.798501,
+              3.792949,
+              3.788815,
+              3.769737,
+              3.791613,
+              3.795069
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.675481,
+              8.174089,
+              8.192811,
+              8.175196,
+              8.172385,
+              8.15205,
+              8.177302
+            ]
+          },
+          "retrained_no_syn1deg_24vars": {
+            "n_origins": 2184,
+            "MAE": 3.822852,
+            "MSE": 65.876718,
+            "RMSE": 8.116447,
+            "MASE": 1.032773,
+            "delta_MAE": 0.07278,
+            "abs_delta_MAE": 0.07278,
+            "delta_pct": 1.9408,
+            "oracle_fidelity_mae": 0.529162,
+            "p90_tail_mae": 15.541851,
+            "horizon_mae_h1_to_h7": [
+              3.514211,
+              3.847955,
+              3.873812,
+              3.861523,
+              3.872265,
+              3.898184,
+              3.892014
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.667591,
+              8.153681,
+              8.219053,
+              8.17678,
+              8.178729,
+              8.212219,
+              8.192549
+            ]
+          }
+        }
+      }
+    }
+  },
+  "short_gap_l7_check": {
+    "A-8": {
+      "val_724": {
+        "SC-35": {
+          "custom_mode1_ou_L7": {
+            "n_origins": 724,
+            "MAE": 3.1708,
+            "MSE": 44.064071,
+            "RMSE": 6.638077,
+            "MASE": 0.856616,
+            "delta_MAE": 0.002488,
+            "abs_delta_MAE": 0.002488,
+            "delta_pct": 0.0785,
+            "oracle_fidelity_mae": 0.096513,
+            "p90_tail_mae": 14.702054,
+            "horizon_mae_h1_to_h7": [
+              2.905827,
+              3.1669,
+              3.193289,
+              3.234471,
+              3.26128,
+              3.214344,
+              3.219492
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.279699,
+              6.636776,
+              6.670498,
+              6.716544,
+              6.755175,
+              6.671624,
+              6.724331
+            ]
+          },
+          "doy_climatology_L7": {
+            "n_origins": 724,
+            "MAE": 3.171052,
+            "MSE": 44.072555,
+            "RMSE": 6.638716,
+            "MASE": 0.856684,
+            "delta_MAE": 0.00274,
+            "abs_delta_MAE": 0.00274,
+            "delta_pct": 0.0865,
+            "oracle_fidelity_mae": 0.096238,
+            "p90_tail_mae": 14.704046,
+            "horizon_mae_h1_to_h7": [
+              2.905271,
+              3.166765,
+              3.193653,
+              3.233633,
+              3.261784,
+              3.215494,
+              3.220766
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.279808,
+              6.636614,
+              6.670424,
+              6.7162,
+              6.756512,
+              6.673469,
+              6.726047
+            ]
+          }
+        },
+        "SC-31": {
+          "custom_mode1_ou_L7": {
+            "n_origins": 724,
+            "MAE": 3.191252,
+            "MSE": 45.034657,
+            "RMSE": 6.710787,
+            "MASE": 0.862141,
+            "delta_MAE": -0.002669,
+            "abs_delta_MAE": 0.002669,
+            "delta_pct": -0.0836,
+            "oracle_fidelity_mae": 0.128416,
+            "p90_tail_mae": 14.901569,
+            "horizon_mae_h1_to_h7": [
+              2.884673,
+              3.166246,
+              3.21389,
+              3.24506,
+              3.248391,
+              3.305318,
+              3.275186
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.346079,
+              6.656293,
+              6.732135,
+              6.75301,
+              6.827425,
+              6.814822,
+              6.832519
+            ]
+          },
+          "doy_climatology_L7": {
+            "n_origins": 724,
+            "MAE": 3.192118,
+            "MSE": 45.046791,
+            "RMSE": 6.711691,
+            "MASE": 0.862375,
+            "delta_MAE": -0.001804,
+            "abs_delta_MAE": 0.001804,
+            "delta_pct": -0.0565,
+            "oracle_fidelity_mae": 0.128044,
+            "p90_tail_mae": 14.903425,
+            "horizon_mae_h1_to_h7": [
+              2.884435,
+              3.166407,
+              3.214218,
+              3.246094,
+              3.249993,
+              3.307996,
+              3.275679
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.34561,
+              6.656349,
+              6.732395,
+              6.753917,
+              6.828081,
+              6.817069,
+              6.835067
+            ]
+          }
+        },
+        "SC-30": {
+          "custom_mode1_ou_L7": {
+            "n_origins": 724,
+            "MAE": 3.153996,
+            "MSE": 44.71431,
+            "RMSE": 6.686876,
+            "MASE": 0.852076,
+            "delta_MAE": 0.005503,
+            "abs_delta_MAE": 0.005503,
+            "delta_pct": 0.1748,
+            "oracle_fidelity_mae": 0.12138,
+            "p90_tail_mae": 14.860773,
+            "horizon_mae_h1_to_h7": [
+              2.890176,
+              3.131637,
+              3.188797,
+              3.170372,
+              3.230256,
+              3.225546,
+              3.241185
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.36631,
+              6.623061,
+              6.734393,
+              6.728296,
+              6.792535,
+              6.739566,
+              6.813446
+            ]
+          },
+          "doy_climatology_L7": {
+            "n_origins": 724,
+            "MAE": 3.15435,
+            "MSE": 44.715703,
+            "RMSE": 6.68698,
+            "MASE": 0.852172,
+            "delta_MAE": 0.005858,
+            "abs_delta_MAE": 0.005858,
+            "delta_pct": 0.186,
+            "oracle_fidelity_mae": 0.121238,
+            "p90_tail_mae": 14.860069,
+            "horizon_mae_h1_to_h7": [
+              2.890294,
+              3.131623,
+              3.188391,
+              3.171148,
+              3.231443,
+              3.225588,
+              3.241964
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.366926,
+              6.623266,
+              6.733899,
+              6.728766,
+              6.792036,
+              6.739354,
+              6.814117
+            ]
+          }
+        }
+      },
+      "test_2184": {
+        "SC-35": {
+          "custom_mode1_ou_L7": {
+            "n_origins": 2184,
+            "MAE": 3.733759,
+            "MSE": 65.515469,
+            "RMSE": 8.094163,
+            "MASE": 1.008704,
+            "delta_MAE": 0.000414,
+            "abs_delta_MAE": 0.000414,
+            "delta_pct": 0.0111,
+            "oracle_fidelity_mae": 0.106487,
+            "p90_tail_mae": 15.496841,
+            "horizon_mae_h1_to_h7": [
+              3.492437,
+              3.782437,
+              3.764601,
+              3.771193,
+              3.758178,
+              3.788181,
+              3.779289
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.673142,
+              8.113871,
+              8.173461,
+              8.169799,
+              8.154726,
+              8.176244,
+              8.185028
+            ]
+          },
+          "doy_climatology_L7": {
+            "n_origins": 2184,
+            "MAE": 3.733821,
+            "MSE": 65.517986,
+            "RMSE": 8.094318,
+            "MASE": 1.00872,
+            "delta_MAE": 0.000476,
+            "abs_delta_MAE": 0.000476,
+            "delta_pct": 0.0127,
+            "oracle_fidelity_mae": 0.107063,
+            "p90_tail_mae": 15.49703,
+            "horizon_mae_h1_to_h7": [
+              3.492188,
+              3.782105,
+              3.764564,
+              3.77055,
+              3.75855,
+              3.788836,
+              3.779953
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.673107,
+              8.113754,
+              8.17342,
+              8.170181,
+              8.155039,
+              8.176423,
+              8.185421
+            ]
+          }
+        },
+        "SC-31": {
+          "custom_mode1_ou_L7": {
+            "n_origins": 2184,
+            "MAE": 3.724804,
+            "MSE": 65.881017,
+            "RMSE": 8.116712,
+            "MASE": 1.006284,
+            "delta_MAE": 0.000162,
+            "abs_delta_MAE": 0.000162,
+            "delta_pct": 0.0044,
+            "oracle_fidelity_mae": 0.138496,
+            "p90_tail_mae": 15.621712,
+            "horizon_mae_h1_to_h7": [
+              3.460826,
+              3.776627,
+              3.774482,
+              3.764526,
+              3.756386,
+              3.759633,
+              3.781146
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.689447,
+              8.162646,
+              8.192201,
+              8.193911,
+              8.178083,
+              8.180957,
+              8.206662
+            ]
+          },
+          "doy_climatology_L7": {
+            "n_origins": 2184,
+            "MAE": 3.72473,
+            "MSE": 65.880619,
+            "RMSE": 8.116688,
+            "MASE": 1.006264,
+            "delta_MAE": 8.8e-05,
+            "abs_delta_MAE": 8.8e-05,
+            "delta_pct": 0.0024,
+            "oracle_fidelity_mae": 0.13903,
+            "p90_tail_mae": 15.623053,
+            "horizon_mae_h1_to_h7": [
+              3.460513,
+              3.776538,
+              3.774379,
+              3.762155,
+              3.756693,
+              3.75985,
+              3.782981
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.688522,
+              8.162651,
+              8.19257,
+              8.19296,
+              8.178128,
+              8.181202,
+              8.207645
+            ]
+          }
+        },
+        "SC-30": {
+          "custom_mode1_ou_L7": {
+            "n_origins": 2184,
+            "MAE": 3.750919,
+            "MSE": 65.698073,
+            "RMSE": 8.105435,
+            "MASE": 1.01334,
+            "delta_MAE": 0.000847,
+            "abs_delta_MAE": 0.000847,
+            "delta_pct": 0.0226,
+            "oracle_fidelity_mae": 0.141516,
+            "p90_tail_mae": 15.578414,
+            "horizon_mae_h1_to_h7": [
+              3.469209,
+              3.818144,
+              3.782946,
+              3.802022,
+              3.781166,
+              3.791967,
+              3.810982
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.683437,
+              8.164148,
+              8.160655,
+              8.172624,
+              8.184863,
+              8.171451,
+              8.188122
+            ]
+          },
+          "doy_climatology_L7": {
+            "n_origins": 2184,
+            "MAE": 3.750893,
+            "MSE": 65.704052,
+            "RMSE": 8.105804,
+            "MASE": 1.013333,
+            "delta_MAE": 0.000821,
+            "abs_delta_MAE": 0.000821,
+            "delta_pct": 0.0219,
+            "oracle_fidelity_mae": 0.141718,
+            "p90_tail_mae": 15.579714,
+            "horizon_mae_h1_to_h7": [
+              3.468881,
+              3.817455,
+              3.782823,
+              3.801347,
+              3.781745,
+              3.792537,
+              3.811465
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.683613,
+              8.164569,
+              8.160901,
+              8.172739,
+              8.185442,
+              8.1721,
+              8.188505
+            ]
+          }
+        }
+      }
+    },
+    "A-11": {
+      "val_724": {
+        "SC-35": {
+          "custom_mode1_ou_L7": {
+            "n_origins": 724,
+            "MAE": 3.17163,
+            "MSE": 44.069419,
+            "RMSE": 6.63848,
+            "MASE": 0.85684,
+            "delta_MAE": 0.003317,
+            "abs_delta_MAE": 0.003317,
+            "delta_pct": 0.1047,
+            "oracle_fidelity_mae": 0.106356,
+            "p90_tail_mae": 14.702758,
+            "horizon_mae_h1_to_h7": [
+              2.905918,
+              3.161855,
+              3.197076,
+              3.23825,
+              3.260285,
+              3.220891,
+              3.217133
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.284648,
+              6.637228,
+              6.673069,
+              6.713399,
+              6.753624,
+              6.670935,
+              6.724876
+            ]
+          },
+          "doy_climatology_L7": {
+            "n_origins": 724,
+            "MAE": 3.170979,
+            "MSE": 44.070835,
+            "RMSE": 6.638587,
+            "MASE": 0.856664,
+            "delta_MAE": 0.002667,
+            "abs_delta_MAE": 0.002667,
+            "delta_pct": 0.0842,
+            "oracle_fidelity_mae": 0.106875,
+            "p90_tail_mae": 14.704654,
+            "horizon_mae_h1_to_h7": [
+              2.904525,
+              3.160727,
+              3.197118,
+              3.236843,
+              3.258833,
+              3.222663,
+              3.216145
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.284567,
+              6.637049,
+              6.67305,
+              6.712451,
+              6.754271,
+              6.672147,
+              6.724979
+            ]
+          }
+        },
+        "SC-31": {
+          "custom_mode1_ou_L7": {
+            "n_origins": 724,
+            "MAE": 3.191941,
+            "MSE": 45.06516,
+            "RMSE": 6.713059,
+            "MASE": 0.862327,
+            "delta_MAE": -0.001981,
+            "abs_delta_MAE": 0.001981,
+            "delta_pct": -0.062,
+            "oracle_fidelity_mae": 0.14732,
+            "p90_tail_mae": 14.919923,
+            "horizon_mae_h1_to_h7": [
+              2.88573,
+              3.17341,
+              3.213736,
+              3.243918,
+              3.248724,
+              3.303739,
+              3.274327
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.373805,
+              6.663907,
+              6.732604,
+              6.754042,
+              6.822804,
+              6.808716,
+              6.82413
+            ]
+          },
+          "doy_climatology_L7": {
+            "n_origins": 724,
+            "MAE": 3.191848,
+            "MSE": 45.065024,
+            "RMSE": 6.713049,
+            "MASE": 0.862302,
+            "delta_MAE": -0.002073,
+            "abs_delta_MAE": 0.002073,
+            "delta_pct": -0.0649,
+            "oracle_fidelity_mae": 0.147617,
+            "p90_tail_mae": 14.920225,
+            "horizon_mae_h1_to_h7": [
+              2.886368,
+              3.171627,
+              3.21527,
+              3.243798,
+              3.248601,
+              3.30307,
+              3.274202
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.373762,
+              6.663101,
+              6.733825,
+              6.754707,
+              6.823024,
+              6.808765,
+              6.822756
+            ]
+          }
+        },
+        "SC-30": {
+          "custom_mode1_ou_L7": {
+            "n_origins": 724,
+            "MAE": 3.153651,
+            "MSE": 44.727276,
+            "RMSE": 6.687845,
+            "MASE": 0.851983,
+            "delta_MAE": 0.005158,
+            "abs_delta_MAE": 0.005158,
+            "delta_pct": 0.1638,
+            "oracle_fidelity_mae": 0.133059,
+            "p90_tail_mae": 14.869496,
+            "horizon_mae_h1_to_h7": [
+              2.892301,
+              3.137189,
+              3.189633,
+              3.173972,
+              3.224148,
+              3.218941,
+              3.239373
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.37573,
+              6.631019,
+              6.736401,
+              6.730023,
+              6.785864,
+              6.733709,
+              6.812305
+            ]
+          },
+          "doy_climatology_L7": {
+            "n_origins": 724,
+            "MAE": 3.153777,
+            "MSE": 44.731488,
+            "RMSE": 6.68816,
+            "MASE": 0.852017,
+            "delta_MAE": 0.005285,
+            "abs_delta_MAE": 0.005285,
+            "delta_pct": 0.1678,
+            "oracle_fidelity_mae": 0.134194,
+            "p90_tail_mae": 14.870198,
+            "horizon_mae_h1_to_h7": [
+              2.891612,
+              3.135446,
+              3.188894,
+              3.175492,
+              3.225459,
+              3.218963,
+              3.240576
+            ],
+            "horizon_rmse_h1_to_h7": [
+              6.376002,
+              6.630146,
+              6.73865,
+              6.730454,
+              6.785637,
+              6.73303,
+              6.813311
+            ]
+          }
+        }
+      },
+      "test_2184": {
+        "SC-35": {
+          "custom_mode1_ou_L7": {
+            "n_origins": 2184,
+            "MAE": 3.731722,
+            "MSE": 65.507767,
+            "RMSE": 8.093687,
+            "MASE": 1.008153,
+            "delta_MAE": -0.001624,
+            "abs_delta_MAE": 0.001624,
+            "delta_pct": -0.0435,
+            "oracle_fidelity_mae": 0.119783,
+            "p90_tail_mae": 15.496491,
+            "horizon_mae_h1_to_h7": [
+              3.492001,
+              3.776614,
+              3.761065,
+              3.77115,
+              3.758772,
+              3.784305,
+              3.778144
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.681013,
+              8.116645,
+              8.174418,
+              8.16382,
+              8.154441,
+              8.168604,
+              8.184522
+            ]
+          },
+          "doy_climatology_L7": {
+            "n_origins": 2184,
+            "MAE": 3.731604,
+            "MSE": 65.513507,
+            "RMSE": 8.094041,
+            "MASE": 1.008121,
+            "delta_MAE": -0.001741,
+            "abs_delta_MAE": 0.001741,
+            "delta_pct": -0.0466,
+            "oracle_fidelity_mae": 0.121451,
+            "p90_tail_mae": 15.496559,
+            "horizon_mae_h1_to_h7": [
+              3.490673,
+              3.776247,
+              3.762076,
+              3.769308,
+              3.758192,
+              3.784322,
+              3.780411
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.680795,
+              8.11811,
+              8.175444,
+              8.162978,
+              8.155276,
+              8.167564,
+              8.185751
+            ]
+          }
+        },
+        "SC-31": {
+          "custom_mode1_ou_L7": {
+            "n_origins": 2184,
+            "MAE": 3.723617,
+            "MSE": 65.873561,
+            "RMSE": 8.116253,
+            "MASE": 1.005964,
+            "delta_MAE": -0.001024,
+            "abs_delta_MAE": 0.001024,
+            "delta_pct": -0.0275,
+            "oracle_fidelity_mae": 0.162312,
+            "p90_tail_mae": 15.621119,
+            "horizon_mae_h1_to_h7": [
+              3.470053,
+              3.777082,
+              3.773414,
+              3.763463,
+              3.757015,
+              3.749911,
+              3.774385
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.706672,
+              8.151308,
+              8.196814,
+              8.19523,
+              8.174909,
+              8.176988,
+              8.199786
+            ]
+          },
+          "doy_climatology_L7": {
+            "n_origins": 2184,
+            "MAE": 3.723019,
+            "MSE": 65.874108,
+            "RMSE": 8.116287,
+            "MASE": 1.005802,
+            "delta_MAE": -0.001622,
+            "abs_delta_MAE": 0.001622,
+            "delta_pct": -0.0436,
+            "oracle_fidelity_mae": 0.164337,
+            "p90_tail_mae": 15.622209,
+            "horizon_mae_h1_to_h7": [
+              3.470165,
+              3.776115,
+              3.772825,
+              3.759748,
+              3.75717,
+              3.750368,
+              3.774745
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.705671,
+              8.151698,
+              8.196154,
+              8.195234,
+              8.174995,
+              8.176768,
+              8.201361
+            ]
+          }
+        },
+        "SC-30": {
+          "custom_mode1_ou_L7": {
+            "n_origins": 2184,
+            "MAE": 3.750533,
+            "MSE": 65.690851,
+            "RMSE": 8.104989,
+            "MASE": 1.013235,
+            "delta_MAE": 0.000461,
+            "abs_delta_MAE": 0.000461,
+            "delta_pct": 0.0123,
+            "oracle_fidelity_mae": 0.160786,
+            "p90_tail_mae": 15.575869,
+            "horizon_mae_h1_to_h7": [
+              3.476123,
+              3.814802,
+              3.784008,
+              3.801013,
+              3.782492,
+              3.787295,
+              3.807996
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.687133,
+              8.162058,
+              8.163104,
+              8.170999,
+              8.184739,
+              8.170438,
+              8.183965
+            ]
+          },
+          "doy_climatology_L7": {
+            "n_origins": 2184,
+            "MAE": 3.75066,
+            "MSE": 65.701748,
+            "RMSE": 8.105661,
+            "MASE": 1.01327,
+            "delta_MAE": 0.000588,
+            "abs_delta_MAE": 0.000588,
+            "delta_pct": 0.0157,
+            "oracle_fidelity_mae": 0.164783,
+            "p90_tail_mae": 15.576116,
+            "horizon_mae_h1_to_h7": [
+              3.475061,
+              3.811978,
+              3.78459,
+              3.801717,
+              3.784731,
+              3.788518,
+              3.808028
+            ],
+            "horizon_rmse_h1_to_h7": [
+              7.686567,
+              8.161816,
+              8.163176,
+              8.171491,
+              8.185034,
+              8.172863,
+              8.186117
+            ]
+          }
+        }
+      }
+    }
+  },
+  "block_bootstrap_95ci": {
+    "A-8": {
+      "val_724": {
+        "SC-35": {
+          "raw_nan_vs_clean": {
+            "point_diff_mae": -0.007771,
+            "ci_95_lower": -0.074018,
+            "ci_95_upper": 0.054476,
+            "p_value_two_sided": 0.753,
+            "significant_95": false
+          },
+          "ffill_stale_80d_vs_clean": {
+            "point_diff_mae": 0.052459,
+            "ci_95_lower": 0.028634,
+            "ci_95_upper": 0.077695,
+            "p_value_two_sided": 0.0,
+            "significant_95": true
+          },
+          "doy_climatology_vs_clean": {
+            "point_diff_mae": 0.00274,
+            "ci_95_lower": -0.006282,
+            "ci_95_upper": 0.01502,
+            "p_value_two_sided": 0.638,
+            "significant_95": false
+          },
+          "custom_mode1_ou_vs_clean": {
+            "point_diff_mae": 0.00274,
+            "ci_95_lower": -0.006282,
+            "ci_95_upper": 0.01502,
+            "p_value_two_sided": 0.638,
+            "significant_95": false
+          },
+          "custom_mode2_k10_vs_clean": {
+            "point_diff_mae": -0.000581,
+            "ci_95_lower": -0.010911,
+            "ci_95_upper": 0.011499,
+            "p_value_two_sided": 0.867,
+            "significant_95": false
+          },
+          "custom_hybrid_k10_vs_clean": {
+            "point_diff_mae": -0.000581,
+            "ci_95_lower": -0.010911,
+            "ci_95_upper": 0.011499,
+            "p_value_two_sided": 0.867,
+            "significant_95": false
+          },
+          "retrained_subset_vs_clean": {
+            "point_diff_mae": 0.000791,
+            "ci_95_lower": -0.01052,
+            "ci_95_upper": 0.013398,
+            "p_value_two_sided": 0.921,
+            "significant_95": false
+          },
+          "doy_climatology_vs_raw_nan": {
+            "point_diff_mae": 0.01051,
+            "ci_95_lower": -0.052846,
+            "ci_95_upper": 0.077216,
+            "p_value_two_sided": 0.705,
+            "significant_95": false
+          },
+          "custom_mode2_k10_vs_doy_climatology": {
+            "point_diff_mae": -0.003321,
+            "ci_95_lower": -0.009478,
+            "ci_95_upper": 0.00291,
+            "p_value_two_sided": 0.261,
+            "significant_95": false
+          },
+          "retrained_subset_vs_doy_climatology": {
+            "point_diff_mae": -0.001948,
+            "ci_95_lower": -0.01218,
+            "ci_95_upper": 0.008022,
+            "p_value_two_sided": 0.707,
+            "significant_95": false
+          },
+          "retrained_subset_vs_custom_hybrid_k10": {
+            "point_diff_mae": 0.001372,
+            "ci_95_lower": -0.008018,
+            "ci_95_upper": 0.010556,
+            "p_value_two_sided": 0.765,
+            "significant_95": false
+          }
+        },
+        "SC-31": {
+          "raw_nan_vs_clean": {
+            "point_diff_mae": -0.062703,
+            "ci_95_lower": -0.15866,
+            "ci_95_upper": 0.02532,
+            "p_value_two_sided": 0.155,
+            "significant_95": false
+          },
+          "ffill_stale_80d_vs_clean": {
+            "point_diff_mae": 0.054471,
+            "ci_95_lower": 0.028706,
+            "ci_95_upper": 0.081858,
+            "p_value_two_sided": 0.0,
+            "significant_95": true
+          },
+          "doy_climatology_vs_clean": {
+            "point_diff_mae": -0.001804,
+            "ci_95_lower": -0.014717,
+            "ci_95_upper": 0.017284,
+            "p_value_two_sided": 0.732,
+            "significant_95": false
+          },
+          "custom_mode1_ou_vs_clean": {
+            "point_diff_mae": -0.001804,
+            "ci_95_lower": -0.014717,
+            "ci_95_upper": 0.017284,
+            "p_value_two_sided": 0.732,
+            "significant_95": false
+          },
+          "custom_mode2_k10_vs_clean": {
+            "point_diff_mae": -0.004323,
+            "ci_95_lower": -0.017571,
+            "ci_95_upper": 0.013221,
+            "p_value_two_sided": 0.512,
+            "significant_95": false
+          },
+          "custom_hybrid_k10_vs_clean": {
+            "point_diff_mae": -0.004323,
+            "ci_95_lower": -0.017571,
+            "ci_95_upper": 0.013221,
+            "p_value_two_sided": 0.512,
+            "significant_95": false
+          },
+          "retrained_subset_vs_clean": {
+            "point_diff_mae": -0.001865,
+            "ci_95_lower": -0.015935,
+            "ci_95_upper": 0.013815,
+            "p_value_two_sided": 0.804,
+            "significant_95": false
+          },
+          "doy_climatology_vs_raw_nan": {
+            "point_diff_mae": 0.060899,
+            "ci_95_lower": -0.027415,
+            "ci_95_upper": 0.156702,
+            "p_value_two_sided": 0.165,
+            "significant_95": false
+          },
+          "custom_mode2_k10_vs_doy_climatology": {
+            "point_diff_mae": -0.002519,
+            "ci_95_lower": -0.009955,
+            "ci_95_upper": 0.004304,
+            "p_value_two_sided": 0.498,
+            "significant_95": false
+          },
+          "retrained_subset_vs_doy_climatology": {
+            "point_diff_mae": -6.2e-05,
+            "ci_95_lower": -0.013879,
+            "ci_95_upper": 0.013212,
+            "p_value_two_sided": 0.997,
+            "significant_95": false
+          },
+          "retrained_subset_vs_custom_hybrid_k10": {
+            "point_diff_mae": 0.002458,
+            "ci_95_lower": -0.010503,
+            "ci_95_upper": 0.016163,
+            "p_value_two_sided": 0.715,
+            "significant_95": false
+          }
+        },
+        "SC-30": {
+          "raw_nan_vs_clean": {
+            "point_diff_mae": -0.049299,
+            "ci_95_lower": -0.141099,
+            "ci_95_upper": 0.034747,
+            "p_value_two_sided": 0.23,
+            "significant_95": false
+          },
+          "ffill_stale_80d_vs_clean": {
+            "point_diff_mae": 0.056303,
+            "ci_95_lower": 0.031956,
+            "ci_95_upper": 0.083047,
+            "p_value_two_sided": 0.0,
+            "significant_95": true
+          },
+          "doy_climatology_vs_clean": {
+            "point_diff_mae": 0.005858,
+            "ci_95_lower": -0.007474,
+            "ci_95_upper": 0.023551,
+            "p_value_two_sided": 0.466,
+            "significant_95": false
+          },
+          "custom_mode1_ou_vs_clean": {
+            "point_diff_mae": 0.005858,
+            "ci_95_lower": -0.007474,
+            "ci_95_upper": 0.023551,
+            "p_value_two_sided": 0.466,
+            "significant_95": false
+          },
+          "custom_mode2_k10_vs_clean": {
+            "point_diff_mae": -0.000249,
+            "ci_95_lower": -0.012665,
+            "ci_95_upper": 0.016361,
+            "p_value_two_sided": 0.875,
+            "significant_95": false
+          },
+          "custom_hybrid_k10_vs_clean": {
+            "point_diff_mae": -0.000249,
+            "ci_95_lower": -0.012665,
+            "ci_95_upper": 0.016361,
+            "p_value_two_sided": 0.875,
+            "significant_95": false
+          },
+          "retrained_subset_vs_clean": {
+            "point_diff_mae": -0.002989,
+            "ci_95_lower": -0.018173,
+            "ci_95_upper": 0.014211,
+            "p_value_two_sided": 0.656,
+            "significant_95": false
+          },
+          "doy_climatology_vs_raw_nan": {
+            "point_diff_mae": 0.055156,
+            "ci_95_lower": -0.033375,
+            "ci_95_upper": 0.150528,
+            "p_value_two_sided": 0.2,
+            "significant_95": false
+          },
+          "custom_mode2_k10_vs_doy_climatology": {
+            "point_diff_mae": -0.006106,
+            "ci_95_lower": -0.013201,
+            "ci_95_upper": 0.000461,
+            "p_value_two_sided": 0.075,
+            "significant_95": false
+          },
+          "retrained_subset_vs_doy_climatology": {
+            "point_diff_mae": -0.008846,
+            "ci_95_lower": -0.022193,
+            "ci_95_upper": 0.004297,
+            "p_value_two_sided": 0.206,
+            "significant_95": false
+          },
+          "retrained_subset_vs_custom_hybrid_k10": {
+            "point_diff_mae": -0.00274,
+            "ci_95_lower": -0.01497,
+            "ci_95_upper": 0.009338,
+            "p_value_two_sided": 0.657,
+            "significant_95": false
+          }
+        }
+      },
+      "test_2184": {
+        "SC-35": {
+          "raw_nan_vs_clean": {
+            "point_diff_mae": 0.023161,
+            "ci_95_lower": -0.012562,
+            "ci_95_upper": 0.058267,
+            "p_value_two_sided": 0.191,
+            "significant_95": false
+          },
+          "ffill_stale_80d_vs_clean": {
+            "point_diff_mae": 0.008852,
+            "ci_95_lower": -0.001705,
+            "ci_95_upper": 0.019812,
+            "p_value_two_sided": 0.095,
+            "significant_95": false
+          },
+          "doy_climatology_vs_clean": {
+            "point_diff_mae": 0.000476,
+            "ci_95_lower": -0.003948,
+            "ci_95_upper": 0.004887,
+            "p_value_two_sided": 0.849,
+            "significant_95": false
+          },
+          "custom_mode1_ou_vs_clean": {
+            "point_diff_mae": 0.000476,
+            "ci_95_lower": -0.003948,
+            "ci_95_upper": 0.004887,
+            "p_value_two_sided": 0.849,
+            "significant_95": false
+          },
+          "custom_mode2_k10_vs_clean": {
+            "point_diff_mae": -0.001902,
+            "ci_95_lower": -0.006587,
+            "ci_95_upper": 0.002713,
+            "p_value_two_sided": 0.41,
+            "significant_95": false
+          },
+          "custom_hybrid_k10_vs_clean": {
+            "point_diff_mae": -0.001902,
+            "ci_95_lower": -0.006587,
+            "ci_95_upper": 0.002713,
+            "p_value_two_sided": 0.41,
+            "significant_95": false
+          },
+          "retrained_subset_vs_clean": {
+            "point_diff_mae": -0.002166,
+            "ci_95_lower": -0.008549,
+            "ci_95_upper": 0.003982,
+            "p_value_two_sided": 0.461,
+            "significant_95": false
+          },
+          "doy_climatology_vs_raw_nan": {
+            "point_diff_mae": -0.022685,
+            "ci_95_lower": -0.059056,
+            "ci_95_upper": 0.013299,
+            "p_value_two_sided": 0.202,
+            "significant_95": false
+          },
+          "custom_mode2_k10_vs_doy_climatology": {
+            "point_diff_mae": -0.002378,
+            "ci_95_lower": -0.005493,
+            "ci_95_upper": 0.00068,
+            "p_value_two_sided": 0.133,
+            "significant_95": false
+          },
+          "retrained_subset_vs_doy_climatology": {
+            "point_diff_mae": -0.002641,
+            "ci_95_lower": -0.008429,
+            "ci_95_upper": 0.003088,
+            "p_value_two_sided": 0.355,
+            "significant_95": false
+          },
+          "retrained_subset_vs_custom_hybrid_k10": {
+            "point_diff_mae": -0.000263,
+            "ci_95_lower": -0.005585,
+            "ci_95_upper": 0.005183,
+            "p_value_two_sided": 0.904,
+            "significant_95": false
+          }
+        },
+        "SC-31": {
+          "raw_nan_vs_clean": {
+            "point_diff_mae": 0.013271,
+            "ci_95_lower": -0.02684,
+            "ci_95_upper": 0.051353,
+            "p_value_two_sided": 0.492,
+            "significant_95": false
+          },
+          "ffill_stale_80d_vs_clean": {
+            "point_diff_mae": 0.016885,
+            "ci_95_lower": 0.00638,
+            "ci_95_upper": 0.0275,
+            "p_value_two_sided": 0.002,
+            "significant_95": true
+          },
+          "doy_climatology_vs_clean": {
+            "point_diff_mae": 8.8e-05,
+            "ci_95_lower": -0.005064,
+            "ci_95_upper": 0.005121,
+            "p_value_two_sided": 0.959,
+            "significant_95": false
+          },
+          "custom_mode1_ou_vs_clean": {
+            "point_diff_mae": 8.8e-05,
+            "ci_95_lower": -0.005064,
+            "ci_95_upper": 0.005121,
+            "p_value_two_sided": 0.959,
+            "significant_95": false
+          },
+          "custom_mode2_k10_vs_clean": {
+            "point_diff_mae": -0.002199,
+            "ci_95_lower": -0.00761,
+            "ci_95_upper": 0.002754,
+            "p_value_two_sided": 0.403,
+            "significant_95": false
+          },
+          "custom_hybrid_k10_vs_clean": {
+            "point_diff_mae": -0.002199,
+            "ci_95_lower": -0.00761,
+            "ci_95_upper": 0.002754,
+            "p_value_two_sided": 0.403,
+            "significant_95": false
+          },
+          "retrained_subset_vs_clean": {
+            "point_diff_mae": 0.002433,
+            "ci_95_lower": -0.004445,
+            "ci_95_upper": 0.00913,
+            "p_value_two_sided": 0.529,
+            "significant_95": false
+          },
+          "doy_climatology_vs_raw_nan": {
+            "point_diff_mae": -0.013182,
+            "ci_95_lower": -0.052081,
+            "ci_95_upper": 0.027815,
+            "p_value_two_sided": 0.492,
+            "significant_95": false
+          },
+          "custom_mode2_k10_vs_doy_climatology": {
+            "point_diff_mae": -0.002288,
+            "ci_95_lower": -0.005598,
+            "ci_95_upper": 0.000838,
+            "p_value_two_sided": 0.155,
+            "significant_95": false
+          },
+          "retrained_subset_vs_doy_climatology": {
+            "point_diff_mae": 0.002345,
+            "ci_95_lower": -0.004098,
+            "ci_95_upper": 0.008851,
+            "p_value_two_sided": 0.499,
+            "significant_95": false
+          },
+          "retrained_subset_vs_custom_hybrid_k10": {
+            "point_diff_mae": 0.004633,
+            "ci_95_lower": -0.001388,
+            "ci_95_upper": 0.010579,
+            "p_value_two_sided": 0.137,
+            "significant_95": false
+          }
+        },
+        "SC-30": {
+          "raw_nan_vs_clean": {
+            "point_diff_mae": -0.009609,
+            "ci_95_lower": -0.051438,
+            "ci_95_upper": 0.031709,
+            "p_value_two_sided": 0.663,
+            "significant_95": false
+          },
+          "ffill_stale_80d_vs_clean": {
+            "point_diff_mae": 0.022166,
+            "ci_95_lower": 0.007222,
+            "ci_95_upper": 0.037507,
+            "p_value_two_sided": 0.002,
+            "significant_95": true
+          },
+          "doy_climatology_vs_clean": {
+            "point_diff_mae": 0.000821,
+            "ci_95_lower": -0.004601,
+            "ci_95_upper": 0.00609,
+            "p_value_two_sided": 0.806,
+            "significant_95": false
+          },
+          "custom_mode1_ou_vs_clean": {
+            "point_diff_mae": 0.000821,
+            "ci_95_lower": -0.004601,
+            "ci_95_upper": 0.00609,
+            "p_value_two_sided": 0.806,
+            "significant_95": false
+          },
+          "custom_mode2_k10_vs_clean": {
+            "point_diff_mae": -0.003203,
+            "ci_95_lower": -0.008633,
+            "ci_95_upper": 0.00195,
+            "p_value_two_sided": 0.223,
+            "significant_95": false
+          },
+          "custom_hybrid_k10_vs_clean": {
+            "point_diff_mae": -0.003203,
+            "ci_95_lower": -0.008633,
+            "ci_95_upper": 0.00195,
+            "p_value_two_sided": 0.223,
+            "significant_95": false
+          },
+          "retrained_subset_vs_clean": {
+            "point_diff_mae": 0.008393,
+            "ci_95_lower": 0.00049,
+            "ci_95_upper": 0.016206,
+            "p_value_two_sided": 0.037,
+            "significant_95": true
+          },
+          "doy_climatology_vs_raw_nan": {
+            "point_diff_mae": 0.01043,
+            "ci_95_lower": -0.033178,
+            "ci_95_upper": 0.053895,
+            "p_value_two_sided": 0.659,
+            "significant_95": false
+          },
+          "custom_mode2_k10_vs_doy_climatology": {
+            "point_diff_mae": -0.004025,
+            "ci_95_lower": -0.007932,
+            "ci_95_upper": -0.000309,
+            "p_value_two_sided": 0.033,
+            "significant_95": true
+          },
+          "retrained_subset_vs_doy_climatology": {
+            "point_diff_mae": 0.007572,
+            "ci_95_lower": 7.9e-05,
+            "ci_95_upper": 0.015103,
+            "p_value_two_sided": 0.049,
+            "significant_95": true
+          },
+          "retrained_subset_vs_custom_hybrid_k10": {
+            "point_diff_mae": 0.011596,
+            "ci_95_lower": 0.004202,
+            "ci_95_upper": 0.018678,
+            "p_value_two_sided": 0.002,
+            "significant_95": true
+          }
+        }
+      }
+    },
+    "A-11": {
+      "val_724": {
+        "SC-35": {
+          "raw_nan_vs_clean": {
+            "point_diff_mae": 0.043212,
+            "ci_95_lower": -0.042953,
+            "ci_95_upper": 0.128657,
+            "p_value_two_sided": 0.342,
+            "significant_95": false
+          },
+          "ffill_stale_80d_vs_clean": {
+            "point_diff_mae": 0.118521,
+            "ci_95_lower": 0.066536,
+            "ci_95_upper": 0.176353,
+            "p_value_two_sided": 0.0,
+            "significant_95": true
+          },
+          "doy_climatology_vs_clean": {
+            "point_diff_mae": 0.002667,
+            "ci_95_lower": -0.006669,
+            "ci_95_upper": 0.015673,
+            "p_value_two_sided": 0.674,
+            "significant_95": false
+          },
+          "custom_mode1_ou_vs_clean": {
+            "point_diff_mae": 0.002645,
+            "ci_95_lower": -0.006676,
+            "ci_95_upper": 0.015685,
+            "p_value_two_sided": 0.674,
+            "significant_95": false
+          },
+          "custom_mode2_k10_vs_clean": {
+            "point_diff_mae": -0.002184,
+            "ci_95_lower": -0.014759,
+            "ci_95_upper": 0.011545,
+            "p_value_two_sided": 0.72,
+            "significant_95": false
+          },
+          "custom_hybrid_k10_vs_clean": {
+            "point_diff_mae": -0.002184,
+            "ci_95_lower": -0.014759,
+            "ci_95_upper": 0.011545,
+            "p_value_two_sided": 0.72,
+            "significant_95": false
+          },
+          "retrained_subset_vs_clean": {
+            "point_diff_mae": 0.000288,
+            "ci_95_lower": -0.014773,
+            "ci_95_upper": 0.015423,
+            "p_value_two_sided": 0.989,
+            "significant_95": false
+          },
+          "doy_climatology_vs_raw_nan": {
+            "point_diff_mae": -0.040546,
+            "ci_95_lower": -0.125553,
+            "ci_95_upper": 0.049425,
+            "p_value_two_sided": 0.381,
+            "significant_95": false
+          },
+          "custom_mode2_k10_vs_doy_climatology": {
+            "point_diff_mae": -0.004851,
+            "ci_95_lower": -0.013418,
+            "ci_95_upper": 0.002971,
+            "p_value_two_sided": 0.229,
+            "significant_95": false
+          },
+          "retrained_subset_vs_doy_climatology": {
+            "point_diff_mae": -0.002379,
+            "ci_95_lower": -0.015904,
+            "ci_95_upper": 0.009977,
+            "p_value_two_sided": 0.702,
+            "significant_95": false
+          },
+          "retrained_subset_vs_custom_hybrid_k10": {
+            "point_diff_mae": 0.002472,
+            "ci_95_lower": -0.011594,
+            "ci_95_upper": 0.015925,
+            "p_value_two_sided": 0.711,
+            "significant_95": false
+          }
+        },
+        "SC-31": {
+          "raw_nan_vs_clean": {
+            "point_diff_mae": 0.023496,
+            "ci_95_lower": -0.182891,
+            "ci_95_upper": 0.213619,
+            "p_value_two_sided": 0.836,
+            "significant_95": false
+          },
+          "ffill_stale_80d_vs_clean": {
+            "point_diff_mae": 0.117984,
+            "ci_95_lower": 0.064247,
+            "ci_95_upper": 0.177793,
+            "p_value_two_sided": 0.0,
+            "significant_95": true
+          },
+          "doy_climatology_vs_clean": {
+            "point_diff_mae": -0.002073,
+            "ci_95_lower": -0.015301,
+            "ci_95_upper": 0.017755,
+            "p_value_two_sided": 0.727,
+            "significant_95": false
+          },
+          "custom_mode1_ou_vs_clean": {
+            "point_diff_mae": -0.002276,
+            "ci_95_lower": -0.015554,
+            "ci_95_upper": 0.017392,
+            "p_value_two_sided": 0.712,
+            "significant_95": false
+          },
+          "custom_mode2_k10_vs_clean": {
+            "point_diff_mae": -0.005235,
+            "ci_95_lower": -0.020683,
+            "ci_95_upper": 0.012774,
+            "p_value_two_sided": 0.499,
+            "significant_95": false
+          },
+          "custom_hybrid_k10_vs_clean": {
+            "point_diff_mae": -0.005235,
+            "ci_95_lower": -0.020683,
+            "ci_95_upper": 0.012774,
+            "p_value_two_sided": 0.499,
+            "significant_95": false
+          },
+          "retrained_subset_vs_clean": {
+            "point_diff_mae": 0.000112,
+            "ci_95_lower": -0.014968,
+            "ci_95_upper": 0.017218,
+            "p_value_two_sided": 0.98,
+            "significant_95": false
+          },
+          "doy_climatology_vs_raw_nan": {
+            "point_diff_mae": -0.025569,
+            "ci_95_lower": -0.218747,
+            "ci_95_upper": 0.180613,
+            "p_value_two_sided": 0.821,
+            "significant_95": false
+          },
+          "custom_mode2_k10_vs_doy_climatology": {
+            "point_diff_mae": -0.003162,
+            "ci_95_lower": -0.013267,
+            "ci_95_upper": 0.005333,
+            "p_value_two_sided": 0.505,
+            "significant_95": false
+          },
+          "retrained_subset_vs_doy_climatology": {
+            "point_diff_mae": 0.002185,
+            "ci_95_lower": -0.012242,
+            "ci_95_upper": 0.015491,
+            "p_value_two_sided": 0.768,
+            "significant_95": false
+          },
+          "retrained_subset_vs_custom_hybrid_k10": {
+            "point_diff_mae": 0.005347,
+            "ci_95_lower": -0.0091,
+            "ci_95_upper": 0.020441,
+            "p_value_two_sided": 0.466,
+            "significant_95": false
+          }
+        },
+        "SC-30": {
+          "raw_nan_vs_clean": {
+            "point_diff_mae": 0.11329,
+            "ci_95_lower": -0.154324,
+            "ci_95_upper": 0.35458,
+            "p_value_two_sided": 0.416,
+            "significant_95": false
+          },
+          "ffill_stale_80d_vs_clean": {
+            "point_diff_mae": 0.227341,
+            "ci_95_lower": 0.124472,
+            "ci_95_upper": 0.33844,
+            "p_value_two_sided": 0.0,
+            "significant_95": true
+          },
+          "doy_climatology_vs_clean": {
+            "point_diff_mae": 0.005285,
+            "ci_95_lower": -0.008545,
+            "ci_95_upper": 0.024774,
+            "p_value_two_sided": 0.555,
+            "significant_95": false
+          },
+          "custom_mode1_ou_vs_clean": {
+            "point_diff_mae": 0.005902,
+            "ci_95_lower": -0.008009,
+            "ci_95_upper": 0.02555,
+            "p_value_two_sided": 0.501,
+            "significant_95": false
+          },
+          "custom_mode2_k10_vs_clean": {
+            "point_diff_mae": -0.002388,
+            "ci_95_lower": -0.018062,
+            "ci_95_upper": 0.016338,
+            "p_value_two_sided": 0.727,
+            "significant_95": false
+          },
+          "custom_hybrid_k10_vs_clean": {
+            "point_diff_mae": -0.002388,
+            "ci_95_lower": -0.018062,
+            "ci_95_upper": 0.016338,
+            "p_value_two_sided": 0.727,
+            "significant_95": false
+          },
+          "retrained_subset_vs_clean": {
+            "point_diff_mae": -0.040033,
+            "ci_95_lower": -0.132536,
+            "ci_95_upper": 0.036332,
+            "p_value_two_sided": 0.367,
+            "significant_95": false
+          },
+          "doy_climatology_vs_raw_nan": {
+            "point_diff_mae": -0.108006,
+            "ci_95_lower": -0.352618,
+            "ci_95_upper": 0.165427,
+            "p_value_two_sided": 0.456,
+            "significant_95": false
+          },
+          "custom_mode2_k10_vs_doy_climatology": {
+            "point_diff_mae": -0.007673,
+            "ci_95_lower": -0.019651,
+            "ci_95_upper": 0.002806,
+            "p_value_two_sided": 0.158,
+            "significant_95": false
+          },
+          "retrained_subset_vs_doy_climatology": {
+            "point_diff_mae": -0.045318,
+            "ci_95_lower": -0.141175,
+            "ci_95_upper": 0.033241,
+            "p_value_two_sided": 0.318,
+            "significant_95": false
+          },
+          "retrained_subset_vs_custom_hybrid_k10": {
+            "point_diff_mae": -0.037645,
+            "ci_95_lower": -0.127415,
+            "ci_95_upper": 0.035525,
+            "p_value_two_sided": 0.382,
+            "significant_95": false
+          }
+        }
+      },
+      "test_2184": {
+        "SC-35": {
+          "raw_nan_vs_clean": {
+            "point_diff_mae": 0.062498,
+            "ci_95_lower": 0.016756,
+            "ci_95_upper": 0.10749,
+            "p_value_two_sided": 0.008,
+            "significant_95": true
+          },
+          "ffill_stale_80d_vs_clean": {
+            "point_diff_mae": 0.034505,
+            "ci_95_lower": 0.006841,
+            "ci_95_upper": 0.064531,
+            "p_value_two_sided": 0.014,
+            "significant_95": true
+          },
+          "doy_climatology_vs_clean": {
+            "point_diff_mae": -0.001741,
+            "ci_95_lower": -0.006454,
+            "ci_95_upper": 0.00313,
+            "p_value_two_sided": 0.445,
+            "significant_95": false
+          },
+          "custom_mode1_ou_vs_clean": {
+            "point_diff_mae": -0.001962,
+            "ci_95_lower": -0.006611,
+            "ci_95_upper": 0.00289,
+            "p_value_two_sided": 0.402,
+            "significant_95": false
+          },
+          "custom_mode2_k10_vs_clean": {
+            "point_diff_mae": -0.004376,
+            "ci_95_lower": -0.009162,
+            "ci_95_upper": 0.000398,
+            "p_value_two_sided": 0.075,
+            "significant_95": false
+          },
+          "custom_hybrid_k10_vs_clean": {
+            "point_diff_mae": -0.004376,
+            "ci_95_lower": -0.009162,
+            "ci_95_upper": 0.000398,
+            "p_value_two_sided": 0.075,
+            "significant_95": false
+          },
+          "retrained_subset_vs_clean": {
+            "point_diff_mae": -0.005259,
+            "ci_95_lower": -0.012532,
+            "ci_95_upper": 0.001634,
+            "p_value_two_sided": 0.124,
+            "significant_95": false
+          },
+          "doy_climatology_vs_raw_nan": {
+            "point_diff_mae": -0.064239,
+            "ci_95_lower": -0.110691,
+            "ci_95_upper": -0.017078,
+            "p_value_two_sided": 0.013,
+            "significant_95": true
+          },
+          "custom_mode2_k10_vs_doy_climatology": {
+            "point_diff_mae": -0.002635,
+            "ci_95_lower": -0.006582,
+            "ci_95_upper": 0.001133,
+            "p_value_two_sided": 0.176,
+            "significant_95": false
+          },
+          "retrained_subset_vs_doy_climatology": {
+            "point_diff_mae": -0.003518,
+            "ci_95_lower": -0.010715,
+            "ci_95_upper": 0.003144,
+            "p_value_two_sided": 0.298,
+            "significant_95": false
+          },
+          "retrained_subset_vs_custom_hybrid_k10": {
+            "point_diff_mae": -0.000883,
+            "ci_95_lower": -0.007585,
+            "ci_95_upper": 0.005103,
+            "p_value_two_sided": 0.756,
+            "significant_95": false
+          }
+        },
+        "SC-31": {
+          "raw_nan_vs_clean": {
+            "point_diff_mae": 0.176842,
+            "ci_95_lower": 0.087281,
+            "ci_95_upper": 0.268439,
+            "p_value_two_sided": 0.0,
+            "significant_95": true
+          },
+          "ffill_stale_80d_vs_clean": {
+            "point_diff_mae": 0.041931,
+            "ci_95_lower": 0.015152,
+            "ci_95_upper": 0.071226,
+            "p_value_two_sided": 0.001,
+            "significant_95": true
+          },
+          "doy_climatology_vs_clean": {
+            "point_diff_mae": -0.001622,
+            "ci_95_lower": -0.007461,
+            "ci_95_upper": 0.004215,
+            "p_value_two_sided": 0.576,
+            "significant_95": false
+          },
+          "custom_mode1_ou_vs_clean": {
+            "point_diff_mae": -0.001667,
+            "ci_95_lower": -0.007527,
+            "ci_95_upper": 0.004053,
+            "p_value_two_sided": 0.569,
+            "significant_95": false
+          },
+          "custom_mode2_k10_vs_clean": {
+            "point_diff_mae": -0.002588,
+            "ci_95_lower": -0.008482,
+            "ci_95_upper": 0.003235,
+            "p_value_two_sided": 0.385,
+            "significant_95": false
+          },
+          "custom_hybrid_k10_vs_clean": {
+            "point_diff_mae": -0.002588,
+            "ci_95_lower": -0.008482,
+            "ci_95_upper": 0.003235,
+            "p_value_two_sided": 0.385,
+            "significant_95": false
+          },
+          "retrained_subset_vs_clean": {
+            "point_diff_mae": 0.004488,
+            "ci_95_lower": -0.003947,
+            "ci_95_upper": 0.012373,
+            "p_value_two_sided": 0.297,
+            "significant_95": false
+          },
+          "doy_climatology_vs_raw_nan": {
+            "point_diff_mae": -0.178464,
+            "ci_95_lower": -0.269579,
+            "ci_95_upper": -0.090226,
+            "p_value_two_sided": 0.0,
+            "significant_95": true
+          },
+          "custom_mode2_k10_vs_doy_climatology": {
+            "point_diff_mae": -0.000966,
+            "ci_95_lower": -0.005381,
+            "ci_95_upper": 0.003131,
+            "p_value_two_sided": 0.637,
+            "significant_95": false
+          },
+          "retrained_subset_vs_doy_climatology": {
+            "point_diff_mae": 0.00611,
+            "ci_95_lower": -0.001018,
+            "ci_95_upper": 0.013008,
+            "p_value_two_sided": 0.099,
+            "significant_95": false
+          },
+          "retrained_subset_vs_custom_hybrid_k10": {
+            "point_diff_mae": 0.007076,
+            "ci_95_lower": 0.000213,
+            "ci_95_upper": 0.013477,
+            "p_value_two_sided": 0.04,
+            "significant_95": true
+          }
+        },
+        "SC-30": {
+          "raw_nan_vs_clean": {
+            "point_diff_mae": 0.348543,
+            "ci_95_lower": 0.223456,
+            "ci_95_upper": 0.474329,
+            "p_value_two_sided": 0.0,
+            "significant_95": true
+          },
+          "ffill_stale_80d_vs_clean": {
+            "point_diff_mae": 0.227348,
+            "ci_95_lower": 0.153241,
+            "ci_95_upper": 0.312466,
+            "p_value_two_sided": 0.0,
+            "significant_95": true
+          },
+          "doy_climatology_vs_clean": {
+            "point_diff_mae": 0.000588,
+            "ci_95_lower": -0.005446,
+            "ci_95_upper": 0.006922,
+            "p_value_two_sided": 0.866,
+            "significant_95": false
+          },
+          "custom_mode1_ou_vs_clean": {
+            "point_diff_mae": 0.000317,
+            "ci_95_lower": -0.005794,
+            "ci_95_upper": 0.006621,
+            "p_value_two_sided": 0.929,
+            "significant_95": false
+          },
+          "custom_mode2_k10_vs_clean": {
+            "point_diff_mae": -0.005073,
+            "ci_95_lower": -0.011841,
+            "ci_95_upper": 0.001758,
+            "p_value_two_sided": 0.157,
+            "significant_95": false
+          },
+          "custom_hybrid_k10_vs_clean": {
+            "point_diff_mae": -0.005073,
+            "ci_95_lower": -0.011841,
+            "ci_95_upper": 0.001758,
+            "p_value_two_sided": 0.157,
+            "significant_95": false
+          },
+          "retrained_subset_vs_clean": {
+            "point_diff_mae": 0.07278,
+            "ci_95_lower": 0.044466,
+            "ci_95_upper": 0.103476,
+            "p_value_two_sided": 0.0,
+            "significant_95": true
+          },
+          "doy_climatology_vs_raw_nan": {
+            "point_diff_mae": -0.347955,
+            "ci_95_lower": -0.476325,
+            "ci_95_upper": -0.222111,
+            "p_value_two_sided": 0.0,
+            "significant_95": true
+          },
+          "custom_mode2_k10_vs_doy_climatology": {
+            "point_diff_mae": -0.005662,
+            "ci_95_lower": -0.012271,
+            "ci_95_upper": 0.000561,
+            "p_value_two_sided": 0.075,
+            "significant_95": false
+          },
+          "retrained_subset_vs_doy_climatology": {
+            "point_diff_mae": 0.072192,
+            "ci_95_lower": 0.042849,
+            "ci_95_upper": 0.103784,
+            "p_value_two_sided": 0.0,
+            "significant_95": true
+          },
+          "retrained_subset_vs_custom_hybrid_k10": {
+            "point_diff_mae": 0.077853,
+            "ci_95_lower": 0.049822,
+            "ci_95_upper": 0.108764,
+            "p_value_two_sided": 0.0,
+            "significant_95": true
+          }
+        }
+      }
+    }
+  },
+  "validation_selection_and_transfer": {
+    "SC-35": {
+      "pre_declared_rule_1_frozen_fidelity": {
+        "criterion": "Minimize Val abs(delta_MAE) on 724 Val origins (frozen model, causality preserved)",
+        "selected_on_val": "custom_mode2_k10",
+        "val_MAE": 3.167731,
+        "val_delta_MAE": -0.000581,
+        "test_MAE": 3.731443,
+        "test_delta_MAE": -0.001902,
+        "test_rank_by_mae": 1
+      },
+      "pre_declared_rule_2_best_val_mae_all_candidates": {
+        "criterion": "Minimize Val MAE across all Dev_Train-only candidates (including retrained_no_ceres_27vars)",
+        "selected_on_val": "doy_climatology",
+        "val_MAE": 3.171052,
+        "val_delta_MAE": 0.00274,
+        "test_MAE": 3.733821,
+        "test_delta_MAE": 0.000476,
+        "test_rank_by_mae": 4
+      }
+    },
+    "SC-31": {
+      "pre_declared_rule_1_frozen_fidelity": {
+        "criterion": "Minimize Val abs(delta_MAE) on 724 Val origins (frozen model, causality preserved)",
+        "selected_on_val": "doy_climatology",
+        "val_MAE": 3.192118,
+        "val_delta_MAE": -0.001804,
+        "test_MAE": 3.72473,
+        "test_delta_MAE": 8.8e-05,
+        "test_rank_by_mae": 3
+      },
+      "pre_declared_rule_2_best_val_mae_all_candidates": {
+        "criterion": "Minimize Val MAE across all Dev_Train-only candidates (including retrained_no_ceres_27vars)",
+        "selected_on_val": "raw_nan",
+        "val_MAE": 3.131219,
+        "val_delta_MAE": -0.062703,
+        "test_MAE": 3.737912,
+        "test_delta_MAE": 0.013271,
+        "test_rank_by_mae": 7
+      }
+    },
+    "SC-30": {
+      "pre_declared_rule_1_frozen_fidelity": {
+        "criterion": "Minimize Val abs(delta_MAE) on 724 Val origins (frozen model, causality preserved)",
+        "selected_on_val": "custom_mode2_k10",
+        "val_MAE": 3.148244,
+        "val_delta_MAE": -0.000249,
+        "test_MAE": 3.746869,
+        "test_delta_MAE": -0.003203,
+        "test_rank_by_mae": 2
+      },
+      "pre_declared_rule_2_best_val_mae_all_candidates": {
+        "criterion": "Minimize Val MAE across all Dev_Train-only candidates (including retrained_no_ceres_27vars)",
+        "selected_on_val": "raw_nan",
+        "val_MAE": 3.099194,
+        "val_delta_MAE": -0.049299,
+        "test_MAE": 3.740463,
+        "test_delta_MAE": -0.009609,
+        "test_rank_by_mae": 1
+      }
+    }
+  },
+  "next_phase_integration_plan": {
+    "round12_operational_serving_unchanged": true,
+    "summary": "Keep operational SC-35/SC-31/SC-30 serving unaffected in Round 12. In the next promotion round, (1) add DOY climatology / Mode-1-OU lightweight fallback ONLY inside an explicit experimental or fallback flag rather than mutating raw 36-col inputs silently, OR (2) formally train & register a canonical 27-var (no-CERES-8) or FlashFlux-only contender under Dual-Resolution MLflow governance (@shadow_val_champ -> @shadow_test_contender -> @serving) so recent NRT inference (where CERES SYN1deg lags ~76-80 days behind MERRA-2 & FlashFlux) does not depend on missing CERES columns."
+  },
+  "elapsed_seconds": 64.63
+}
