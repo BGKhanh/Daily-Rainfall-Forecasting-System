@@ -174,9 +174,16 @@ class RuntimeSettings(BaseModel):
     frozen_eda_modeling: FrozenEdaModelingConfig
     variable_catalog: VariableCatalog
     config_sha256: str = ""
+    result_config_sha256: str = ""
+    operational_config_sha256: str = ""
 
     def secrets(self) -> SecretsEnvView:
         return SecretsEnvView.from_environ()
+
+
+def _canonical_json_sha256(payload: Dict[str, Any]) -> str:
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
 
 
 def _canonical_sha256_payload(
@@ -186,15 +193,43 @@ def _canonical_sha256_payload(
     frozen_eda_modeling: FrozenEdaModelingConfig,
     variable_catalog: VariableCatalog,
 ) -> str:
-    payload = {
-        "operational": operational.model_dump(mode="json"),
-        "application": application.model_dump(mode="json"),
-        "model_contract": model_contract.model_dump(mode="json"),
-        "frozen_eda_modeling": frozen_eda_modeling.model_dump(mode="json"),
-        "variable_catalog": variable_catalog.model_dump(mode="json"),
-    }
-    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    return hashlib.sha256(raw).hexdigest()
+    return _canonical_json_sha256(
+        {
+            "operational": operational.model_dump(mode="json"),
+            "application": application.model_dump(mode="json"),
+            "model_contract": model_contract.model_dump(mode="json"),
+            "frozen_eda_modeling": frozen_eda_modeling.model_dump(mode="json"),
+            "variable_catalog": variable_catalog.model_dump(mode="json"),
+        }
+    )
+
+
+def _canonical_result_sha256_payload(
+    model_contract: ModelContractConfig,
+    frozen_eda_modeling: FrozenEdaModelingConfig,
+    variable_catalog: VariableCatalog,
+) -> str:
+    """Hash Layer 4 (model_contract + variable_catalog) + Layer 5 (frozen_eda_modeling)."""
+    return _canonical_json_sha256(
+        {
+            "model_contract": model_contract.model_dump(mode="json"),
+            "frozen_eda_modeling": frozen_eda_modeling.model_dump(mode="json"),
+            "variable_catalog": variable_catalog.model_dump(mode="json"),
+        }
+    )
+
+
+def _canonical_operational_sha256_payload(
+    operational: OperationalConfig,
+    application: ApplicationConfig,
+) -> str:
+    """Hash Layer 2 (operational) + Layer 3 (application)."""
+    return _canonical_json_sha256(
+        {
+            "operational": operational.model_dump(mode="json"),
+            "application": application.model_dump(mode="json"),
+        }
+    )
 
 
 def load_settings(
@@ -242,6 +277,8 @@ def load_settings(
     cfg_sha = _canonical_sha256_payload(
         operational, application, model_contract, frozen_eda_modeling, variable_catalog
     )
+    res_sha = _canonical_result_sha256_payload(model_contract, frozen_eda_modeling, variable_catalog)
+    op_sha = _canonical_operational_sha256_payload(operational, application)
     return RuntimeSettings(
         operational=operational,
         application=application,
@@ -249,6 +286,8 @@ def load_settings(
         frozen_eda_modeling=frozen_eda_modeling,
         variable_catalog=variable_catalog,
         config_sha256=cfg_sha,
+        result_config_sha256=res_sha,
+        operational_config_sha256=op_sha,
     )
 
 
@@ -267,6 +306,40 @@ def compute_config_sha256(
         metadata_json=metadata_json,
         env_path=None,
     ).config_sha256
+
+
+def compute_result_config_sha256(
+    *,
+    runtime_toml: Path = DEFAULT_RUNTIME_TOML,
+    freeze_toml: Path = DEFAULT_FREEZE_TOML,
+    catalog_json: Path = DEFAULT_VARIABLE_CATALOG_JSON,
+    metadata_json: Path = DEFAULT_METADATA_JSON,
+) -> str:
+    """Compute deterministic SHA-256 strictly across Layer 4 (model_contract + catalog) + Layer 5 (freeze)."""
+    return load_settings(
+        runtime_toml=runtime_toml,
+        freeze_toml=freeze_toml,
+        catalog_json=catalog_json,
+        metadata_json=metadata_json,
+        env_path=None,
+    ).result_config_sha256
+
+
+def compute_operational_config_sha256(
+    *,
+    runtime_toml: Path = DEFAULT_RUNTIME_TOML,
+    freeze_toml: Path = DEFAULT_FREEZE_TOML,
+    catalog_json: Path = DEFAULT_VARIABLE_CATALOG_JSON,
+    metadata_json: Path = DEFAULT_METADATA_JSON,
+) -> str:
+    """Compute deterministic SHA-256 strictly across Layer 2 (operational) + Layer 3 (application)."""
+    return load_settings(
+        runtime_toml=runtime_toml,
+        freeze_toml=freeze_toml,
+        catalog_json=catalog_json,
+        metadata_json=metadata_json,
+        env_path=None,
+    ).operational_config_sha256
 
 
 def _extract_builder_input_vars_en(feature_builder: Any) -> Optional[set[str]]:

@@ -184,6 +184,7 @@ DDL_V3_STATEMENTS: Tuple[str, ...] = (
         revision_stats_json        TEXT,
         git_sha                    TEXT NOT NULL,
         config_sha256              TEXT,
+        operational_config_sha256  TEXT,
         error_message              TEXT,
         CHECK (status = 'SUCCESS' OR (rows_inserted_v0 = 0 AND rows_new_vintage = 0 AND rows_unpublished_skipped = 0))
     );
@@ -328,6 +329,8 @@ DDL_V3_STATEMENTS: Tuple[str, ...] = (
         degraded_reason             TEXT,
         git_sha                     TEXT NOT NULL,
         config_sha256               TEXT,
+        issued_by                   TEXT NOT NULL DEFAULT 'automated_pipeline' CHECK (issued_by IN ('automated_pipeline', 'manual_retrospective_backfill')),
+        result_config_sha256        TEXT,
         UNIQUE (location_id, model_id, data_as_of, horizon_day),
         CHECK (
             is_degraded_input = CASE
@@ -622,11 +625,32 @@ def finalize_db_for_read_only(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA journal_mode = DELETE;")
 
 
+VALID_ISSUED_BY: Tuple[str, ...] = ("automated_pipeline", "manual_retrospective_backfill")
+
+
 def _safe_compute_config_sha256() -> str:
     try:
         from src.config.settings import compute_config_sha256
 
         return compute_config_sha256()
+    except Exception:
+        return "unknown"
+
+
+def _safe_compute_result_config_sha256() -> str:
+    try:
+        from src.config.settings import compute_result_config_sha256
+
+        return compute_result_config_sha256()
+    except Exception:
+        return "unknown"
+
+
+def _safe_compute_operational_config_sha256() -> str:
+    try:
+        from src.config.settings import compute_operational_config_sha256
+
+        return compute_operational_config_sha256()
     except Exception:
         return "unknown"
 
@@ -714,8 +738,114 @@ def apply_migrations_v3_3(conn: sqlite3.Connection, *, config_sha256: Optional[s
     )
 
 
+def apply_migrations_v3_4(
+    conn: sqlite3.Connection,
+    *,
+    default_issued_by: str = "automated_pipeline",
+    operational_config_sha256: Optional[str] = None,
+    result_config_sha256: Optional[str] = None,
+    force_backfill_issued_by: bool = False,
+) -> None:
+    """
+    Idempotently migrate DDL V3.3 stores to V3.4:
+    - `forecasts_ledger.issued_by` ('automated_pipeline' vs 'manual_retrospective_backfill')
+    - `forecasts_ledger.result_config_sha256` (Layer 4 + 5 hash)
+    - `ingestion_runs.operational_config_sha256` (Layer 2 + 3 hash)
+    """
+    if default_issued_by not in VALID_ISSUED_BY:
+        raise ValueError(f"Invalid issued_by={default_issued_by!r}; expected one of {VALID_ISSUED_BY}.")
+
+    ir_cols = {str(r[1]) for r in conn.execute("PRAGMA table_info(ingestion_runs)").fetchall()}
+    fl_cols = {str(r[1]) for r in conn.execute("PRAGMA table_info(forecasts_ledger)").fetchall()}
+    if "operational_config_sha256" not in ir_cols:
+        conn.execute("ALTER TABLE ingestion_runs ADD COLUMN operational_config_sha256 TEXT;")
+    if "issued_by" not in fl_cols:
+        conn.execute(
+            f"ALTER TABLE forecasts_ledger ADD COLUMN issued_by TEXT NOT NULL DEFAULT '{default_issued_by}';"
+        )
+    if "result_config_sha256" not in fl_cols:
+        conn.execute("ALTER TABLE forecasts_ledger ADD COLUMN result_config_sha256 TEXT;")
+
+    op_sha = operational_config_sha256 or _safe_compute_operational_config_sha256()
+    res_sha = result_config_sha256 or _safe_compute_result_config_sha256()
+
+    need_ir = int(
+        conn.execute(
+            "SELECT COUNT(*) FROM ingestion_runs WHERE operational_config_sha256 IS NULL OR operational_config_sha256 = ''"
+        ).fetchone()[0]
+    )
+    need_fl_sha = int(
+        conn.execute(
+            "SELECT COUNT(*) FROM forecasts_ledger WHERE result_config_sha256 IS NULL OR result_config_sha256 = ''"
+        ).fetchone()[0]
+    )
+    need_fl_issuer = int(
+        conn.execute(
+            "SELECT COUNT(*) FROM forecasts_ledger WHERE issued_by IS NULL OR issued_by = '' OR (? = 1 AND issued_by != ?)",
+            (1 if force_backfill_issued_by else 0, default_issued_by),
+        ).fetchone()[0]
+    )
+
+    if need_ir > 0 or need_fl_sha > 0 or need_fl_issuer > 0:
+        conn.execute("BEGIN IMMEDIATE;")
+        try:
+            conn.execute("DROP TRIGGER IF EXISTS trg_ingestion_runs_no_update;")
+            conn.execute("DROP TRIGGER IF EXISTS trg_forecasts_ledger_no_update;")
+            if need_ir > 0:
+                conn.execute(
+                    "UPDATE ingestion_runs SET operational_config_sha256 = ? WHERE operational_config_sha256 IS NULL OR operational_config_sha256 = ''",
+                    (op_sha,),
+                )
+            if need_fl_sha > 0:
+                conn.execute(
+                    "UPDATE forecasts_ledger SET result_config_sha256 = ? WHERE result_config_sha256 IS NULL OR result_config_sha256 = ''",
+                    (res_sha,),
+                )
+            if need_fl_issuer > 0:
+                if force_backfill_issued_by:
+                    conn.execute("UPDATE forecasts_ledger SET issued_by = ?", (default_issued_by,))
+                else:
+                    conn.execute(
+                        "UPDATE forecasts_ledger SET issued_by = ? WHERE issued_by IS NULL OR issued_by = ''",
+                        (default_issued_by,),
+                    )
+            conn.execute(
+                """
+                CREATE TRIGGER IF NOT EXISTS trg_forecasts_ledger_no_update
+                BEFORE UPDATE ON forecasts_ledger
+                BEGIN
+                    SELECT RAISE(ABORT, 'IMMUTABLE_VIOLATION: forecasts_ledger is immutable; UPDATE is prohibited.');
+                END;
+                """
+            )
+            conn.execute(
+                """
+                CREATE TRIGGER IF NOT EXISTS trg_ingestion_runs_no_update
+                BEFORE UPDATE ON ingestion_runs
+                BEGIN
+                    SELECT RAISE(ABORT, 'IMMUTABLE_VIOLATION: ingestion_runs is append-only; UPDATE is prohibited.');
+                END;
+                """
+            )
+            conn.execute("COMMIT;")
+        except Exception:
+            try:
+                conn.execute("ROLLBACK;")
+            except sqlite3.Error:
+                pass
+            raise
+
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO schema_migrations (version, description, applied_at_utc)
+        VALUES ('V3.4', 'Add issued_by & result_config_sha256 on forecasts_ledger and operational_config_sha256 on ingestion_runs', ?)
+        """,
+        (utc_now_iso(),),
+    )
+
+
 def init_schema(conn: sqlite3.Connection, *, seed_hcmc_location: bool = True) -> None:
-    """Apply DDL V3.3 tables, indexes, 9 triggers, views, and idempotent migrations cleanly, then finalize WAL."""
+    """Apply DDL V3.4 tables, indexes, 9 triggers, views, and idempotent migrations cleanly, then finalize WAL."""
     for stmt in DDL_V3_STATEMENTS:
         conn.execute(stmt)
     if seed_hcmc_location:
@@ -737,6 +867,7 @@ def init_schema(conn: sqlite3.Connection, *, seed_hcmc_location: bool = True) ->
             ),
         )
     apply_migrations_v3_3(conn)
+    apply_migrations_v3_4(conn)
     finalize_db_for_read_only(conn)
 
 
@@ -917,6 +1048,7 @@ def seed_historical_csv_vintage_v0(
 
     finished_at = utc_now_iso()
     cfg_sha = _safe_compute_config_sha256()
+    op_cfg_sha = _safe_compute_operational_config_sha256()
     try:
         conn.execute("BEGIN IMMEDIATE;")
         conn.execute(
@@ -925,10 +1057,10 @@ def seed_historical_csv_vintage_v0(
                 run_id, run_type, started_at_utc, finished_at_utc, status,
                 location_id, scan_window_start, scan_window_end,
                 rows_scanned, rows_inserted_v0, rows_new_vintage,
-                rows_late_fill_only, rows_value_change, rows_unchanged, git_sha, config_sha256
-            ) VALUES (?, 'historical_seed', ?, ?, 'SUCCESS', ?, ?, ?, ?, ?, 0, 0, 0, 0, ?, ?)
+                rows_late_fill_only, rows_value_change, rows_unchanged, git_sha, config_sha256, operational_config_sha256
+            ) VALUES (?, 'historical_seed', ?, ?, 'SUCCESS', ?, ?, ?, ?, ?, 0, 0, 0, 0, ?, ?, ?)
             """,
-            (run_id, started_at, finished_at, location_id, win_start, win_end, total_rows, total_rows, sha, cfg_sha),
+            (run_id, started_at, finished_at, location_id, win_start, win_end, total_rows, total_rows, sha, cfg_sha, op_cfg_sha),
         )
         if fail_after_rows is not None and 0 <= fail_after_rows <= len(records):
             if fail_after_rows > 0:
@@ -952,10 +1084,10 @@ def seed_historical_csv_vintage_v0(
                 location_id, scan_window_start, scan_window_end,
                 rows_scanned, rows_inserted_v0, rows_new_vintage,
                 rows_late_fill_only, rows_value_change, rows_unchanged,
-                rows_unpublished_skipped, git_sha, config_sha256, error_message
-            ) VALUES (?, 'historical_seed', ?, ?, 'FAILED', ?, ?, ?, ?, 0, 0, 0, 0, 0, 0, ?, ?, ?)
+                rows_unpublished_skipped, git_sha, config_sha256, operational_config_sha256, error_message
+            ) VALUES (?, 'historical_seed', ?, ?, 'FAILED', ?, ?, ?, ?, 0, 0, 0, 0, 0, 0, ?, ?, ?, ?)
             """,
-            (run_id, started_at, utc_now_iso(), location_id, win_start, win_end, total_rows, sha, cfg_sha, str(exc)),
+            (run_id, started_at, utc_now_iso(), location_id, win_start, win_end, total_rows, sha, cfg_sha, op_cfg_sha, str(exc)),
         )
         conn.execute("COMMIT;")
         finalize_db_for_read_only(conn)
@@ -1047,18 +1179,80 @@ def clear_db_query_cache() -> None:
         store.clear()
 
 
+def _normalize_required_obs_vars(required_vars: Optional[Sequence[str]]) -> Optional[List[str]]:
+    """Validate optional model-contract subset variables against canonical ALL_35_VARS whitelist."""
+    if required_vars is None:
+        return None
+    req = [str(v).strip() for v in required_vars if str(v).strip()]
+    if not req:
+        raise ValueError("required_vars must contain at least one canonical observation variable.")
+    unknown = [v for v in req if v not in ALL_35_VARS]
+    if unknown:
+        raise ValueError(f"Unknown required_vars not in canonical 35 NASA POWER columns: {unknown}")
+    if set(req) == set(ALL_35_VARS):
+        return None
+    return [v for v in ALL_35_VARS if v in set(req)]
+
+
 def get_default_complete_anchor_date(
     conn: sqlite3.Connection,
     location_id: str = HCMC_LOCATION_ID,
     max_date: Optional[str] = None,
+    required_vars: Optional[Sequence[str]] = None,
 ) -> Optional[str]:
     """
-    Return the latest `obs_date` with `completeness_regime = 'COMPLETE_ALL_35'`
-    (optionally `<= max_date`) whose trailing 30-day window `[anchor - 29d .. anchor]` is continuous and
-    contains no missing meteorological/precipitation observations. Uses index-first base table pushdown.
+    Return the latest `obs_date` whose trailing 30-day window `[anchor - 29d .. anchor]` is continuous and
+    contains no missing values across `required_vars` (defaults to all 35 vars / `COMPLETE_ALL_35`).
     """
+    subset_cols = _normalize_required_obs_vars(required_vars)
+    if subset_cols is not None:
+        non_null_expr = " AND ".join(f"o.{col} IS NOT NULL" for col in subset_cols)
+        where_clauses = ["o.location_id = ?", non_null_expr]
+        params: List[Any] = [location_id]
+        if max_date is not None:
+            where_clauses.append("o.obs_date <= ?")
+            params.append(pd.to_datetime(max_date).strftime("%Y-%m-%d"))
+        candidates = conn.execute(
+            f"""
+            SELECT o.obs_date
+            FROM observations_vintage o
+            WHERE {' AND '.join(where_clauses)}
+              AND o.version_num = (
+                  SELECT MAX(v.version_num)
+                  FROM observations_vintage v
+                  WHERE v.location_id = o.location_id AND v.obs_date = o.obs_date
+              )
+            ORDER BY o.obs_date DESC
+            LIMIT 250
+            """,
+            tuple(params),
+        ).fetchall()
+        for cand in candidates:
+            anchor_str = str(cand["obs_date"])
+            anchor_dt = pd.to_datetime(anchor_str)
+            win_start = (anchor_dt - timedelta(days=29)).strftime("%Y-%m-%d")
+            stats = conn.execute(
+                f"""
+                SELECT
+                    COUNT(*) AS cnt,
+                    SUM(CASE WHEN {non_null_expr} THEN 1 ELSE 0 END) AS complete_cnt
+                FROM observations_vintage o
+                INNER JOIN (
+                    SELECT obs_date, MAX(version_num) AS max_ver
+                    FROM observations_vintage
+                    WHERE location_id = ?
+                      AND obs_date BETWEEN ? AND ?
+                    GROUP BY obs_date
+                ) m ON o.location_id = ? AND o.obs_date = m.obs_date AND o.version_num = m.max_ver
+                """,
+                (location_id, win_start, anchor_str, location_id),
+            ).fetchone()
+            if stats is not None and int(stats["cnt"] or 0) == 30 and int(stats["complete_cnt"] or 0) == 30:
+                return anchor_str
+        return None
+
     where_clauses = ["location_id = ?", "completeness_regime = 'COMPLETE_ALL_35'"]
-    params: List[Any] = [location_id]
+    params = [location_id]
     if max_date is not None:
         max_date_str = pd.to_datetime(max_date).strftime("%Y-%m-%d")
         where_clauses.append("obs_date <= ?")
@@ -1127,25 +1321,44 @@ def get_complete_anchor_range(
     *,
     location_id: str = HCMC_LOCATION_ID,
     window_days: int = 35,
+    required_vars: Optional[Sequence[str]] = None,
 ) -> Optional[Dict[str, str]]:
     """
     Return `{"min": earliest_anchor, "max": latest_anchor}` where each anchor satisfies
-    `COMPLETE_ALL_35` and has `window_days` continuous preceding days with `missing_count = 0`.
+    completeness across `required_vars` (defaults to `COMPLETE_ALL_35`) for `window_days` continuous days.
     """
-    rows = conn.execute(
-        """
-        SELECT o.obs_date, o.missing_count, o.completeness_regime
-        FROM observations_vintage o
-        INNER JOIN (
-            SELECT obs_date, MAX(version_num) AS max_ver
-            FROM observations_vintage
-            WHERE location_id = ?
-            GROUP BY obs_date
-        ) m ON o.location_id = ? AND o.obs_date = m.obs_date AND o.version_num = m.max_ver
-        ORDER BY o.obs_date ASC
-        """,
-        (location_id, location_id),
-    ).fetchall()
+    subset_cols = _normalize_required_obs_vars(required_vars)
+    if subset_cols is not None:
+        non_null_expr = " AND ".join(f"o.{col} IS NOT NULL" for col in subset_cols)
+        rows = conn.execute(
+            f"""
+            SELECT o.obs_date, CASE WHEN {non_null_expr} THEN 1 ELSE 0 END AS is_req_complete
+            FROM observations_vintage o
+            INNER JOIN (
+                SELECT obs_date, MAX(version_num) AS max_ver
+                FROM observations_vintage
+                WHERE location_id = ?
+                GROUP BY obs_date
+            ) m ON o.location_id = ? AND o.obs_date = m.obs_date AND o.version_num = m.max_ver
+            ORDER BY o.obs_date ASC
+            """,
+            (location_id, location_id),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT o.obs_date, o.missing_count, o.completeness_regime
+            FROM observations_vintage o
+            INNER JOIN (
+                SELECT obs_date, MAX(version_num) AS max_ver
+                FROM observations_vintage
+                WHERE location_id = ?
+                GROUP BY obs_date
+            ) m ON o.location_id = ? AND o.obs_date = m.obs_date AND o.version_num = m.max_ver
+            ORDER BY o.obs_date ASC
+            """,
+            (location_id, location_id),
+        ).fetchall()
     if not rows:
         return None
 
@@ -1157,9 +1370,12 @@ def get_complete_anchor_range(
     for row in rows:
         date_str = str(row["obs_date"])
         curr_dt = datetime.strptime(date_str, "%Y-%m-%d")
-        is_complete = (
-            str(row["completeness_regime"]) == "COMPLETE_ALL_35" and int(row["missing_count"] or 0) == 0
-        )
+        if subset_cols is not None:
+            is_complete = int(row["is_req_complete"] or 0) == 1
+        else:
+            is_complete = (
+                str(row["completeness_regime"]) == "COMPLETE_ALL_35" and int(row["missing_count"] or 0) == 0
+            )
         if not is_complete:
             streak = 0
             prev_dt = curr_dt
@@ -1503,6 +1719,9 @@ def insert_forecasts_idempotent(
         else:
             temp_status = str(temp_status)
 
+        issued_by_val = str(row.get("issued_by") or "automated_pipeline")
+        if issued_by_val not in VALID_ISSUED_BY:
+            raise ValueError(f"Invalid issued_by={issued_by_val!r}; expected one of {VALID_ISSUED_BY}.")
         to_insert.append(
             (
                 forecast_id,
@@ -1535,6 +1754,8 @@ def insert_forecasts_idempotent(
                 row.get("degraded_reason"),
                 str(row["git_sha"]),
                 str(row.get("config_sha256") or _safe_compute_config_sha256()),
+                issued_by_val,
+                str(row.get("result_config_sha256") or _safe_compute_result_config_sha256()),
             )
         )
 
@@ -1551,7 +1772,8 @@ def insert_forecasts_idempotent(
                     input_window_start, input_window_end, input_window_hash,
                     input_vintage_manifest_json, input_provisional_days,
                     meteo_missing_count, flashflux_max_ffill_days, ceres_policy_applied,
-                    ceres_max_staleness_days, is_degraded_input, degraded_reason, git_sha, config_sha256
+                    ceres_max_staleness_days, is_degraded_input, degraded_reason, git_sha, config_sha256,
+                    issued_by, result_config_sha256
                 ) VALUES (
                     ?, ?, ?, ?, ?,
                     ?, ?, ?, ?,
@@ -1560,7 +1782,8 @@ def insert_forecasts_idempotent(
                     ?, ?, ?,
                     ?, ?,
                     ?, ?, ?,
-                    ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?,
+                    ?, ?
                 )
                 """,
                 to_insert,
@@ -1923,6 +2146,7 @@ def ingest_nasa_power_window(
         insert_obs_sql = f"INSERT INTO observations_vintage ({', '.join(obs_col_list)}) VALUES ({', '.join(['?'] * len(obs_col_list))})"
 
         cfg_sha = _safe_compute_config_sha256()
+        op_cfg_sha = _safe_compute_operational_config_sha256()
         conn.execute("BEGIN IMMEDIATE;")
         conn.execute(
             """
@@ -1932,15 +2156,15 @@ def ingest_nasa_power_window(
                 nasa_api_version, nasa_sources_header_json,
                 rows_scanned, rows_inserted_v0, rows_new_vintage,
                 rows_late_fill_only, rows_value_change, rows_unchanged,
-                rows_unpublished_skipped, latest_valid_by_group_json, revision_stats_json, git_sha, config_sha256
-            ) VALUES (?, ?, ?, ?, 'SUCCESS', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                rows_unpublished_skipped, latest_valid_by_group_json, revision_stats_json, git_sha, config_sha256, operational_config_sha256
+            ) VALUES (?, ?, ?, ?, 'SUCCESS', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 run_id, run_type, started_at, finished_at, location_id, win_start, win_end,
                 api_version, sources_json,
                 rows_scanned, rows_inserted_v0, rows_new_vintage,
                 rows_late_fill_only, rows_value_change, rows_unchanged,
-                rows_unpublished_skipped, latest_group_json, revision_stats_json, sha, cfg_sha,
+                rows_unpublished_skipped, latest_group_json, revision_stats_json, sha, cfg_sha, op_cfg_sha,
             ),
         )
         if obs_inserts:
@@ -1980,10 +2204,10 @@ def ingest_nasa_power_window(
                 location_id, scan_window_start, scan_window_end,
                 rows_scanned, rows_inserted_v0, rows_new_vintage,
                 rows_late_fill_only, rows_value_change, rows_unchanged,
-                rows_unpublished_skipped, git_sha, config_sha256, error_message
-            ) VALUES (?, ?, ?, ?, 'FAILED', ?, ?, ?, 0, 0, 0, 0, 0, 0, 0, ?, ?, ?)
+                rows_unpublished_skipped, git_sha, config_sha256, operational_config_sha256, error_message
+            ) VALUES (?, ?, ?, ?, 'FAILED', ?, ?, ?, 0, 0, 0, 0, 0, 0, 0, ?, ?, ?, ?)
             """,
-            (run_id, run_type, started_at, utc_now_iso(), location_id, win_start, win_end, sha, _safe_compute_config_sha256(), str(exc)),
+            (run_id, run_type, started_at, utc_now_iso(), location_id, win_start, win_end, sha, _safe_compute_config_sha256(), _safe_compute_operational_config_sha256(), str(exc)),
         )
         conn.execute("COMMIT;")
         finalize_db_for_read_only(conn)
@@ -2184,8 +2408,19 @@ def get_observations_bounds(
     return str(row["min_d"]), str(row["max_d"]), int(row["cnt"])
 
 
-def _aggregate_daily_bucket(bucket_rows: List[Dict[str, Any]], p_start: str, p_end: str) -> Dict[str, Any]:
-    cal_days = len(bucket_rows)
+def _days_in_month(year: int, month: int) -> int:
+    next_year = year + (month // 12)
+    next_month = (month % 12) + 1
+    return (date(next_year, next_month, 1) - date(year, month, 1)).days
+
+
+def _aggregate_daily_bucket(
+    bucket_rows: List[Dict[str, Any]],
+    p_start: str,
+    p_end: str,
+    calendar_days_override: Optional[int] = None,
+) -> Dict[str, Any]:
+    cal_days = int(calendar_days_override) if calendar_days_override is not None else len(bucket_rows)
     pub_vals = [float(r["precip_mm"]) for r in bucket_rows if r["precip_mm"] is not None]
     pub_cnt = len(pub_vals)
     if pub_cnt == 0:
@@ -2201,7 +2436,7 @@ def _aggregate_daily_bucket(bucket_rows: List[Dict[str, Any]], p_start: str, p_e
         }
     total_mm = round(sum(pub_vals), 4)
     mean_mm = round(total_mm / pub_cnt, 4)
-    all_finalized = (pub_cnt == cal_days) and all(r["status"] == "FINALIZED" for r in bucket_rows)
+    all_finalized = (pub_cnt == len(bucket_rows)) and all(r["status"] == "FINALIZED" for r in bucket_rows)
     status = "FINALIZED" if all_finalized else "PROVISIONAL"
     return {
         "date": p_start,
@@ -2357,7 +2592,19 @@ def get_observations_series(
                 b_key = f"{d_obj.year:04d}-{d_obj.month:02d}"
             buckets.setdefault(b_key, []).append(pt)
         series = [
-            _aggregate_daily_bucket(b_rows, b_rows[0]["date"], b_rows[-1]["date"])
+            _aggregate_daily_bucket(
+                b_rows,
+                b_rows[0]["date"],
+                b_rows[-1]["date"],
+                calendar_days_override=(
+                    7
+                    if granularity == "weekly"
+                    else _days_in_month(
+                        date.fromisoformat(b_rows[0]["date"]).year,
+                        date.fromisoformat(b_rows[0]["date"]).month,
+                    )
+                ),
+            )
             for b_rows in buckets.values()
         ]
 

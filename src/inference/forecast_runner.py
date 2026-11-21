@@ -189,19 +189,38 @@ def list_complete_anchor_dates(
     start_date: str,
     end_date: str,
     location_id: str = HCMC_LOCATION_ID,
+    required_vars: Optional[Sequence[str]] = None,
 ) -> List[str]:
-    """Return all dates in [start_date, end_date] with COMPLETE_ALL_35 and a complete 30-day lookback."""
-    rows = conn.execute(
-        """
-        SELECT obs_date, completeness_regime
-        FROM v_observations_latest
-        WHERE location_id = ?
-          AND obs_date BETWEEN ? AND ?
-        ORDER BY obs_date ASC
-        """,
-        (location_id, (pd.to_datetime(start_date) - timedelta(days=29)).strftime("%Y-%m-%d"), end_date),
-    ).fetchall()
-    complete_set = {str(r["obs_date"]) for r in rows if r["completeness_regime"] == "COMPLETE_ALL_35"}
+    """Return all dates in [start_date, end_date] satisfying completeness across `required_vars` over a 30-day lookback."""
+    from src.data.vintage_store import _normalize_required_obs_vars
+
+    subset_cols = _normalize_required_obs_vars(required_vars)
+    q_start = (pd.to_datetime(start_date) - timedelta(days=29)).strftime("%Y-%m-%d")
+    if subset_cols is not None:
+        non_null_expr = " AND ".join(f"{col} IS NOT NULL" for col in subset_cols)
+        rows = conn.execute(
+            f"""
+            SELECT obs_date, CASE WHEN {non_null_expr} THEN 1 ELSE 0 END AS is_ok
+            FROM v_observations_latest
+            WHERE location_id = ?
+              AND obs_date BETWEEN ? AND ?
+            ORDER BY obs_date ASC
+            """,
+            (location_id, q_start, end_date),
+        ).fetchall()
+        complete_set = {str(r["obs_date"]) for r in rows if int(r["is_ok"] or 0) == 1}
+    else:
+        rows = conn.execute(
+            """
+            SELECT obs_date, completeness_regime
+            FROM v_observations_latest
+            WHERE location_id = ?
+              AND obs_date BETWEEN ? AND ?
+            ORDER BY obs_date ASC
+            """,
+            (location_id, q_start, end_date),
+        ).fetchall()
+        complete_set = {str(r["obs_date"]) for r in rows if r["completeness_regime"] == "COMPLETE_ALL_35"}
 
     anchors: List[str] = []
     for dt in pd.date_range(start_date, end_date, freq="D"):
@@ -222,6 +241,7 @@ def issue_forecasts_for_anchors(
     issued_run_date: Optional[str] = None,
     model_ids: Sequence[str] = ALL_RUNNER_MODEL_IDS,
     git_sha: Optional[str] = None,
+    issued_by: str = "automated_pipeline",
 ) -> Dict[str, Any]:
     """
     Generate and idempotently insert 7-horizon forecasts into `forecasts_ledger`
@@ -386,6 +406,7 @@ def issue_forecasts_for_anchors(
                         "is_degraded_input": 0,
                         "degraded_reason": None,
                         "git_sha": sha,
+                        "issued_by": issued_by,
                     }
                 )
 
