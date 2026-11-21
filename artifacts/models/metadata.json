@@ -235,7 +235,7 @@
     "sc35_xgb_h7.json": "8b2fc2763546103a48a9c695e90afe1a85b7220c4272afe806c54a10f32d6d65",
     "sc35_xgboost_tweedie_f3.joblib": "eee30d04c666dd099608cfba6c26ea3eec690bc7bfd9a6c6715983b74515653f",
     "standalone_inference.py": "0848ba6ec2302fde58b9ba8e479b404af17be927208af5ce0a3133c4132c86ec",
-    "demo_rainfall_vintage.db": "d2366555912facd5820b02f4c4aab97f2f49c3267ad06d92cc833ad6e1af3e20"
+    "demo_rainfall_vintage.db": "adb85f50290ebe8d39a6e9dcea09da4ed3d390271b5781a7f2296d33bc92aac1"
   },
   "timezone": "Asia/Ho_Chi_Minh (UTC+7)"
 }
