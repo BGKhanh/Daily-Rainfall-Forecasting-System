@@ -1,0 +1,316 @@
+{
+  "generated_at_utc": "2026-11-21T09:05:16.185592Z",
+  "turso_org_plan": "starter",
+  "isolated_temp_db_verification": {
+    "temp_db_name": "ds108-r11-probe-b7849b62",
+    "deleted_cleanly": true,
+    "trigger_parity": {
+      "update_blocked": true,
+      "delete_blocked": true,
+      "delete_run_blocked": true
+    },
+    "atomic_rollback_ok": true,
+    "fk_enforced": true,
+    "before_vs_after_rows_read": {
+      "sample_rows_in_test_db": 1000,
+      "bounds_lookup": {
+        "before_view": 4000,
+        "after_indexed": 1000
+      },
+      "obs_90d_query": {
+        "before_view": 1270,
+        "after_indexed": 183
+      },
+      "predict_35d_fetch": {
+        "before_view": 5107,
+        "after_indexed": 107
+      }
+    },
+    "index_and_trigger_isolation": {
+      "rows_inserted": 50,
+      "unindexed_triggerless": {
+        "rows_read": 0,
+        "rows_written": 100
+      },
+      "three_indexes_plus_before_insert_trigger": {
+        "rows_read": 0,
+        "rows_written": 250
+      },
+      "trigger_probe_rows_read_delta": 0,
+      "index_rows_written_delta": 150
+    }
+  },
+  "production_migration_observations_only": {
+    "source_db": "D:\\DS108_project\\data\\vintage\\rainfall_vintage.db",
+    "include_forecasts": false,
+    "tables": {
+      "locations": {
+        "source_count": 1,
+        "target_count": 1,
+        "source_sha256": "427e78eba7cbea796b6d2586ec0737ae68d46be7325d702fe5875dfc24eb5fc4",
+        "target_sha256": "427e78eba7cbea796b6d2586ec0737ae68d46be7325d702fe5875dfc24eb5fc4",
+        "parity_ok": true
+      },
+      "ingestion_runs": {
+        "source_count": 4,
+        "target_count": 4,
+        "source_sha256": "df65ea651dbda4789875e4d1b6745acdb20c5a3116c90046e248b585707f2081",
+        "target_sha256": "df65ea651dbda4789875e4d1b6745acdb20c5a3116c90046e248b585707f2081",
+        "parity_ok": true
+      },
+      "observations_vintage": {
+        "source_count": 9454,
+        "target_count": 9454,
+        "source_sha256": "c9e874b971c38fca99df07f5d241da9dfe748a2e1c056873e3931287468a17d4",
+        "target_sha256": "c9e874b971c38fca99df07f5d241da9dfe748a2e1c056873e3931287468a17d4",
+        "parity_ok": true
+      },
+      "forecasts_ledger": {
+        "source_count": 0,
+        "target_count": 0,
+        "observations_only_enforced": true
+      }
+    },
+    "no_manual_retrospective_backfill_in_prod": true,
+    "prod_forecasts_by_issued_by": {
+      "local_automated_pipeline": 0,
+      "local_manual_retrospective_backfill": 0,
+      "turso_automated_pipeline": 0,
+      "turso_manual_retrospective_backfill": 0
+    }
+  },
+  "production_benchmark_and_parity": {
+    "prod_obs_count": 9454,
+    "after_bounds_rows_read": 9518,
+    "obs_min_date": "2001-01-01",
+    "obs_max_date": "2026-11-17",
+    "obs_90d_before_view_rows_read": 9724,
+    "obs_90d_after_indexed_rows_read": 192,
+    "predict_before_view_rows_read": 47377,
+    "predict_after_indexed_rows_read": 107,
+    "replica_initial_sync": {
+      "sync_count": 1,
+      "last_sync_at_utc": "2026-11-21T09:05:13.103482Z",
+      "duration_ms": 5325.46,
+      "rows_read": 18994,
+      "replica_path": "C:\\Users\\ADMIN\\AppData\\Local\\Temp\\tmp0alzx5s0\\test_prod_replica.db",
+      "table_counts": {
+        "locations": 1,
+        "ingestion_runs": 4,
+        "observations_vintage": 9454,
+        "forecasts_ledger": 0
+      },
+      "table_sha256": {
+        "locations": "427e78eba7cbea796b6d2586ec0737ae68d46be7325d702fe5875dfc24eb5fc4",
+        "ingestion_runs": "df65ea651dbda4789875e4d1b6745acdb20c5a3116c90046e248b585707f2081",
+        "observations_vintage": "c9e874b971c38fca99df07f5d241da9dfe748a2e1c056873e3931287468a17d4",
+        "forecasts_ledger": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    "api_parity_modes": {
+      "local": {
+        "db_role": "local_or_production_db",
+        "default_anchor": "2026-08-30",
+        "obs_total_mm": 42.45,
+        "sc35_day1": 5.69
+      },
+      "turso_remote": {
+        "db_role": "turso_remote",
+        "default_anchor": "2026-08-30",
+        "obs_total_mm": 42.45,
+        "sc35_day1": 5.69
+      },
+      "turso_replica": {
+        "db_role": "turso_replica",
+        "default_anchor": "2026-08-30",
+        "obs_total_mm": 42.45,
+        "sc35_day1": 5.69
+      }
+    },
+    "all_modes_match_predictions_and_obs": true
+  },
+  "cost_model": {
+    "safety_factor": 2.0,
+    "plans_accessed_date": "2026-11-20",
+    "starter_limits": {
+      "plan": "Turso Starter (Free, $0/mo)",
+      "rows_read_monthly": 500000000,
+      "rows_written_monthly": 10000000,
+      "storage_bytes": 5368709120,
+      "sync_bytes_monthly": 3221225472,
+      "syncs_bandwidth_gb_monthly": 3.0,
+      "quota_warning_pct": 70.0
+    },
+    "developer_limits": {
+      "plan": "Turso Developer ($4.99/mo billed yearly)",
+      "rows_read_monthly": 2500000000,
+      "rows_written_monthly": 25000000,
+      "storage_bytes": 9663676416,
+      "sync_bytes_monthly": 10737418240,
+      "syncs_bandwidth_gb_monthly": 10.0
+    },
+    "remote_reads_per_weighted_req": 152,
+    "scenarios": [
+      {
+        "scenario": "S1: Idle Dev / Demo (5 req/day)",
+        "requests_per_day": 5,
+        "requests_per_month": 150,
+        "multiplier": 2.0,
+        "turso_remote_2x": {
+          "multiplier": 2.0,
+          "rows_read_per_month": 60600,
+          "rows_written_per_month": 2180,
+          "storage_mb": 8.39,
+          "sync_mb_per_month": 0.0,
+          "starter_rows_read_pct": 0.0121,
+          "fits_starter": true,
+          "triggers_70pct_warning": false
+        },
+        "turso_replica_2x": {
+          "multiplier": 2.0,
+          "rows_read_per_month": 84120,
+          "rows_written_per_month": 2180,
+          "storage_mb": 8.39,
+          "sync_mb_per_month": 6.152,
+          "starter_rows_read_pct": 0.016824,
+          "starter_sync_bandwidth_pct": 0.2003,
+          "fits_starter": true,
+          "triggers_70pct_warning": false
+        }
+      },
+      {
+        "scenario": "S2: Low Team / Class (100 req/day)",
+        "requests_per_day": 100,
+        "requests_per_month": 3000,
+        "multiplier": 2.0,
+        "turso_remote_2x": {
+          "multiplier": 2.0,
+          "rows_read_per_month": 927000,
+          "rows_written_per_month": 2180,
+          "storage_mb": 8.39,
+          "sync_mb_per_month": 0.0,
+          "starter_rows_read_pct": 0.1854,
+          "fits_starter": true,
+          "triggers_70pct_warning": false
+        },
+        "turso_replica_2x": {
+          "multiplier": 2.0,
+          "rows_read_per_month": 84120,
+          "rows_written_per_month": 2180,
+          "storage_mb": 8.39,
+          "sync_mb_per_month": 6.152,
+          "starter_rows_read_pct": 0.016824,
+          "starter_sync_bandwidth_pct": 0.2003,
+          "fits_starter": true,
+          "triggers_70pct_warning": false
+        }
+      },
+      {
+        "scenario": "S3: Medium Public Console (2,000 req/day)",
+        "requests_per_day": 2000,
+        "requests_per_month": 60000,
+        "multiplier": 2.0,
+        "turso_remote_2x": {
+          "multiplier": 2.0,
+          "rows_read_per_month": 18255000,
+          "rows_written_per_month": 2180,
+          "storage_mb": 8.39,
+          "sync_mb_per_month": 0.0,
+          "starter_rows_read_pct": 3.651,
+          "fits_starter": true,
+          "triggers_70pct_warning": false
+        },
+        "turso_replica_2x": {
+          "multiplier": 2.0,
+          "rows_read_per_month": 84120,
+          "rows_written_per_month": 2180,
+          "storage_mb": 8.39,
+          "sync_mb_per_month": 6.152,
+          "starter_rows_read_pct": 0.016824,
+          "starter_sync_bandwidth_pct": 0.2003,
+          "fits_starter": true,
+          "triggers_70pct_warning": false
+        }
+      },
+      {
+        "scenario": "S4: High Burst / Evaluation (20,000 req/day)",
+        "requests_per_day": 20000,
+        "requests_per_month": 600000,
+        "multiplier": 2.0,
+        "turso_remote_2x": {
+          "multiplier": 2.0,
+          "rows_read_per_month": 182415000,
+          "rows_written_per_month": 2180,
+          "storage_mb": 8.39,
+          "sync_mb_per_month": 0.0,
+          "starter_rows_read_pct": 36.483,
+          "fits_starter": true,
+          "triggers_70pct_warning": false
+        },
+        "turso_replica_2x": {
+          "multiplier": 2.0,
+          "rows_read_per_month": 84120,
+          "rows_written_per_month": 2180,
+          "storage_mb": 8.39,
+          "sync_mb_per_month": 6.152,
+          "starter_rows_read_pct": 0.016824,
+          "starter_sync_bandwidth_pct": 0.2003,
+          "fits_starter": true,
+          "triggers_70pct_warning": false
+        }
+      },
+      {
+        "scenario": "S5: Peak NRT-to-Final Revision Wave (2,000 req/day, 5x)",
+        "requests_per_day": 2000,
+        "requests_per_month": 60000,
+        "multiplier": 5.0,
+        "turso_remote_2x": {
+          "multiplier": 5.0,
+          "rows_read_per_month": 45825000,
+          "rows_written_per_month": 30200,
+          "storage_mb": 15.54,
+          "sync_mb_per_month": 0.0,
+          "starter_rows_read_pct": 9.165,
+          "fits_starter": true,
+          "triggers_70pct_warning": false
+        },
+        "turso_replica_2x": {
+          "multiplier": 5.0,
+          "rows_read_per_month": 210300,
+          "rows_written_per_month": 30200,
+          "storage_mb": 15.54,
+          "sync_mb_per_month": 92.285,
+          "starter_rows_read_pct": 0.04206,
+          "starter_sync_bandwidth_pct": 3.0041,
+          "fits_starter": true,
+          "triggers_70pct_warning": false
+        }
+      }
+    ],
+    "quota_billing_note": "Turso counts `rows_read` (B-tree row reads from remote Hrana queries/polls) separately from `Syncs` bandwidth (3 GB/mo free Starter cap on embedded replica frame/WAL transfers; 10 GB/mo Developer)."
+  },
+  "org_usage_delta": {
+    "before": {
+      "rows_read": 698937,
+      "rows_written": 62806,
+      "storage_bytes": 7299072,
+      "bytes_synced": 0,
+      "input_bytes_count": 18173327,
+      "output_bytes_count": 24968566,
+      "databases": 1,
+      "locations": 2,
+      "groups": 0
+    },
+    "after": {
+      "rows_read": 698937,
+      "rows_written": 62806,
+      "storage_bytes": 7299072,
+      "bytes_synced": 0,
+      "input_bytes_count": 18173327,
+      "output_bytes_count": 24968566,
+      "databases": 1,
+      "locations": 2,
+      "groups": 0
+    }
+  }
+}

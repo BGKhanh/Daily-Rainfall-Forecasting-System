@@ -199,10 +199,19 @@ cython_debug/
 # EXCLUSIONS FOR RAW CODE ONLY REPO
 # =============================================================================
 
-# Reports directory (all generated JSON, CSV reports except test_benchmark needed by serving API & Docker)
+# Reports directory (all generated JSON, CSV reports except test_benchmark, storage_audit, and Round 12 screenshots)
 reports/*
 !reports/test_benchmark/
 !reports/test_benchmark/**
+!reports/storage_audit/
+reports/storage_audit/*
+!reports/storage_audit/province_area_official_comparison_65.json
+!reports/storage_audit/turso_parity_and_cost_report.json
+!reports/storage_audit/turso_python_client_wheel_logs.json
+!reports/storage_audit/SUMMARY_ROUND12.md
+!reports/ui_screenshots/
+reports/ui_screenshots/*
+!reports/ui_screenshots/r12_*.png
 
 # Office documents & texts
 *.docx
@@ -233,6 +242,7 @@ scripts/data/*
 !scripts/data/ingest_nasa_vintage.py
 !scripts/data/probe_variable_grids.py
 !scripts/data/compute_province_grid_overlap.py
+!scripts/data/audit_province_areas_65.py
 !scripts/mlops/
 !scripts/mlops/**
 **/__pycache__/

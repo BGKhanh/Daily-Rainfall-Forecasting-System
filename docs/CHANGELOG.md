@@ -2,6 +2,19 @@
 
 All notable canonical reconciliation, MLOps tracking, runtime optimization, and operational limitation updates are recorded in this file.
 
+## [1.6.0-serving / Round 12: CERES-8 Imputer Audit, Turso Resilience, DDL V3.4 & UI Polish] - 2026-11-21
+
+### Added & Changed
+- **Exogenous Imputer Research & CERES-8 vs. SYN1deg-11 Audit (`research/imputer_benchmark/`)**:
+  - Audited `custom_mode2_k10` and `doy_climatology` across `8` CERES-only radiation variables (`A-8`, `27` remaining variables intact) vs `11`-variable SYN1deg outage (`A-11`) across 724 Validation & 2,184 Test purged origins (`research/imputer_benchmark/ceres8_scientific_audit_2184.json`, `README.md`), verifying 0 lag/rolling radiation features (`F0`) and comparing against a retrained 27-variable no-CERES LightGBM baseline.
+- **Turso Resilience, Atomic Replica Staging, Secret Redaction & Wheel Probes (`src/data/turso_backend.py`, `src/api/main.py`)**:
+  - Added HTTP `402`/`403`/`429` `BLOCKED` / quota fallback (`TursoQuotaBlockedError` + `/health` `degraded_reason` + `>= 70%` 500M quota warning), atomic replica sync via `.staging.{pid}.db` + `PRAGMA integrity_check` + `os.replace`, URL/token secret redaction, Windows/Linux wheel resolution logs (`reports/storage_audit/turso_python_client_wheel_logs.json`), and Cost Scenario S5 (`5x` NRT-to-Final wave) in `docs/TURSO_COST_AND_OPERATIONS.md`.
+- **DDL V3.4 Dual Config Hashes, Option A Ledger & Subset Completeness (`src/config/settings.py`, `src/data/vintage_store.py`)**:
+  - Split config hashing into `result_config_sha256` (Layer 4+5, stamped on `forecasts_ledger` with `issued_by`) and `operational_config_sha256` (Layer 2+3, stamped on `ingestion_runs`). Enforced `no_manual_retrospective_backfill_in_prod = True` while permitting `automated_pipeline` forecasts in Prod/Turso, and updated anchor completeness helpers to accept `< 35` model-contract variable subsets.
+- **65-Unit Area Audit & Priority 1–4 / Usability 5–11 UI Polish (`scripts/data/audit_province_areas_65.py`, `frontend/`)**:
+  - Audited spherical polygon areas vs official GSO pre-merger areas (`reports/storage_audit/province_area_official_comparison_65.json`), explaining Can Tho's `+26.83%` (`1,826.91` vs `1,440.4 km2`) simplified boundary shift into neighboring Hau Giang.
+  - Added hollow-circle + dotted-connector partial period distinction on both ends of weekly/monthly `/observations` charts (`calendar_days_count` = 7 or days in month), multi-province forecast tabs defaulting to `Ho Chi Minh City`, deduplicated unsupported headings, full-width directional cell overlap table, SVG `km` scale bar & `N ↑` North arrow, representative CERES + MERRA-2 `"input feed"` highlights, `"1×"` / `"Fit to selection"` map buttons, scroll-more indicator, ISO date hints, mobile chart horizontal scroll (`min-width: 540px`), exact quantitative spatial figures, and dynamic `/health` snapshot card.
+
 ## [1.5.0-serving / Round 11: 5-Layer Config, Grid-Scale Map UI, Turso Storage & Automated Pipeline] - 2026-11-20
 
 ### Added & Changed

@@ -89,12 +89,12 @@ jobs:
 
       - name: Build serving Docker image
         run: |
-          docker build -t kgb0630/ds_108:1.5.0-serving .
+          docker build -t kgb0630/ds_108:1.6.0-serving .
 
       - name: Run container & verify /, /locations, /observations, /health, /models, /predict, /scores, and RSS <= 350 MB
         run: |
           set -e
-          docker run -d --name ds108-smoke -p 8000:8000 kgb0630/ds_108:1.5.0-serving
+          docker run -d --name ds108-smoke -p 8000:8000 kgb0630/ds_108:1.6.0-serving
           trap "docker rm -f ds108-smoke || true" EXIT
 
           for i in $(seq 1 30); do
