@@ -460,6 +460,18 @@ export const GridScalePanel: React.FC<GridScalePanelProps> = ({
                   <div className="metric-sub">
                     {`cos(φ) = ${Math.cos((unitOverlap.representative_point.lat * Math.PI) / 180).toFixed(4)}`}
                   </div>
+                  {unitOverlap.exceeds_5pct_area_threshold &&
+                    unitOverlap.official_area_km2 !== undefined &&
+                    unitOverlap.area_rel_diff_pct !== undefined && (
+                      <div className="area-warning-row">
+                        <span className="area-warning-badge" data-testid="official-area-warning-badge">
+                          {EN.gridScale.officialAreaWarningBadge(
+                            unitOverlap.area_rel_diff_pct,
+                            unitOverlap.official_area_km2
+                          )}
+                        </span>
+                      </div>
+                    )}
                 </div>
 
                 <div className="metric-card">
@@ -467,8 +479,11 @@ export const GridScalePanel: React.FC<GridScalePanelProps> = ({
                   <div className="metric-value">
                     {`${unitOverlap.merra2_grid.cell_dimensions_km_at_phi.height_km} × ${unitOverlap.merra2_grid.cell_dimensions_km_at_phi.width_km} km`}
                   </div>
-                  <div className="metric-sub">
-                    {`${unitOverlap.merra2_grid.cell_dimensions_km_at_phi.area_km2.toFixed(0)} ${EN.gridScale.metricAreaUnit} · ${unitOverlap.merra2_grid.intersecting_cell_count} cells`}
+                  <div className="metric-sub" data-testid="merra-per-cell-sub">
+                    {EN.gridScale.perCellAreaLabel(
+                      unitOverlap.merra2_grid.cell_dimensions_km_at_phi.area_km2,
+                      unitOverlap.merra2_grid.intersecting_cell_count
+                    )}
                   </div>
                 </div>
 
@@ -477,8 +492,11 @@ export const GridScalePanel: React.FC<GridScalePanelProps> = ({
                   <div className="metric-value">
                     {`${unitOverlap.ceres_grid.cell_dimensions_km_at_phi.height_km} × ${unitOverlap.ceres_grid.cell_dimensions_km_at_phi.width_km} km`}
                   </div>
-                  <div className="metric-sub">
-                    {`${unitOverlap.ceres_grid.cell_dimensions_km_at_phi.area_km2.toFixed(0)} ${EN.gridScale.metricAreaUnit} · ${unitOverlap.ceres_grid.intersecting_cell_count} cells`}
+                  <div className="metric-sub" data-testid="ceres-per-cell-sub">
+                    {EN.gridScale.perCellAreaLabel(
+                      unitOverlap.ceres_grid.cell_dimensions_km_at_phi.area_km2,
+                      unitOverlap.ceres_grid.intersecting_cell_count
+                    )}
                   </div>
                 </div>
               </div>
@@ -489,6 +507,7 @@ export const GridScalePanel: React.FC<GridScalePanelProps> = ({
                   <li>{EN.gridScale.timelineCeres}</li>
                   <li>{EN.gridScale.timelineMerra}</li>
                   <li>{EN.gridScale.timelineFaqNote}</li>
+                  <li>{EN.gridScale.boundaryCoverageCaveat}</li>
                 </ul>
               </div>
             </div>

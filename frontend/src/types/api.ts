@@ -1,6 +1,7 @@
 export type ErrorCode =
   | "UNSUPPORTED_LOCATION"
   | "INCOMPLETE_RADIATION_AT_ANCHOR"
+  | "INCOMPLETE_METEOROLOGY_AT_ANCHOR"
   | "ANCHOR_DATE_NOT_FOUND"
   | "INVALID_CLIENT_HISTORY"
   | "SERVER_DB_DATA_ERROR"
@@ -81,6 +82,7 @@ export interface HealthResponse {
   journal_mode: string | null;
   degraded_reason?: string | null;
   turso_quota_warning?: boolean;
+  turso_usage_source?: string | null;
   replica_sync_count?: number | null;
   replica_last_sync_at_utc?: string | null;
   replica_last_sync_duration_ms?: number | null;
@@ -114,6 +116,11 @@ export interface PredictResponse {
   lag_days: number;
   forecast_horizon_mode: "operational_forecast" | "retrospective_hindcast_only";
   anchor_completeness_regime: string | null;
+  is_degraded_input?: boolean;
+  ceres_policy_applied?: string;
+  imputed_values?: Record<string, number>;
+  imputed_variables?: string[];
+  doy_table_sha256?: string | null;
 }
 
 export interface BootstrapSummary {
@@ -322,6 +329,9 @@ export interface ProvinceOverlapUnit {
     lon: number;
   };
   polygon_area_km2: number;
+  official_area_km2?: number;
+  area_rel_diff_pct?: number;
+  exceeds_5pct_area_threshold?: boolean;
   merra2_grid: OverlapGridSection;
   ceres_grid: OverlapGridSection;
 }

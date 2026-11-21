@@ -86,6 +86,8 @@ export const EN = {
         "This location is outside the 65 configured administrative units or not yet enabled for forecasting.",
       INCOMPLETE_RADIATION_AT_ANCHOR:
         "Complete satellite radiation variables are required at the anchor date and are not yet available.",
+      INCOMPLETE_METEOROLOGY_AT_ANCHOR:
+        "All 24 GEOS-IT meteorology variables are required across the 30-day window ending on the anchor date.",
       ANCHOR_DATE_NOT_FOUND:
         "The requested anchor date was not found in the observation archive.",
       INVALID_CLIENT_HISTORY:
@@ -171,6 +173,12 @@ export const EN = {
     metricCeresLabel: "CERES / FLASHFlux cell (1.0° × 1.0°)",
     metricRatioLabel: "Intersecting cells (MERRA-2 / CERES)",
     metricAreaUnit: "km²",
+    perCellAreaLabel: (areaKm2: number, count: number) =>
+      `${areaKm2.toLocaleString("en-US", { maximumFractionDigits: 0 })} km² per cell · ${count} ${count === 1 ? "cell intersects" : "cells intersect"}`,
+    officialAreaWarningBadge: (relPct: number, officialKm2: number) =>
+      `Simplified polygon differs from official GSO area by ${relPct >= 0 ? "+" : ""}${relPct.toFixed(1)}% (official: ${officialKm2.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} km²) — overlap percentages are approximate`,
+    boundaryCoverageCaveat:
+      "Polygon areas come from simplified boundaries (24/63 mainland provinces + 2 islands differ > 5% vs GSO official areas; Can Tho +26.8% / Hau Giang −21.4% reflect a geometric boundary shift hypothesis).",
     overlapTableHeading: "Cell-to-province overlap breakdown",
     overlapColDir: "Dir.",
     overlapColGrid: "Grid",
@@ -209,6 +217,9 @@ export const EN = {
       `Retrospective replay: latest complete archive input lags today by ${lagDays} days, so observed rainfall is shown beside the model line.`,
     technicalBannerTooltip:
       "Technical note: Satellite CERES radiation (SYN1deg) lags real time by ~80 days. When all 7 forecasted days precede today, zero future days remain unobserved.",
+    estimatedRadiationTitle: "Estimated radiation inputs:",
+    estimatedRadiationBody: (count: number) =>
+      `${count} pending NASA POWER solar variable(s) at the anchor date were filled in-memory using Dev Train (2001–2018) DOY medians while keeping all 24 meteorology variables strictly observed.`,
     unavailableHeading: (locationName: string) => `${locationName} — Forecast not available yet`,
     unavailableDetail:
       "The serving point-regression model has only been trained and validated for Ho Chi Minh City.",
@@ -350,7 +361,7 @@ export const EN = {
       },
       {
         title: "Archive snapshot & map orientation scope",
-        body: "When running the bundled container without an external database, the SQLite archive reflects a static snapshot with real NASA POWER source-transition boundaries. The 65-unit pre-merger map and MERRA-2 grid overlay orient users spatially and indicate configured backend readiness.",
+        body: "Active archive data follows the connected runtime database: bundled container runs serve a static SQLite snapshot with real NASA POWER source-transition boundaries, whereas connected Turso or local production stores receive daily scans. The 65-unit pre-merger map and MERRA-2 grid overlay orient users spatially.",
       },
     ],
     snapshotDynamicLine: (modeLabel: string, dbRole: string, scanWindowEnd?: string | null) =>

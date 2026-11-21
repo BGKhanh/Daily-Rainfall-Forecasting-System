@@ -171,7 +171,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 3536.83,
+      "area_rel_diff_pct": -0.9,
+      "exceeds_5pct_area_threshold": false
     },
     "BARIA_VUNGTAU": {
       "location_id": "BARIA_VUNGTAU",
@@ -344,7 +347,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 1982.6,
+      "area_rel_diff_pct": -10.25,
+      "exceeds_5pct_area_threshold": true
     },
     "BAC_GIANG": {
       "location_id": "BAC_GIANG",
@@ -503,7 +509,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 3851.4,
+      "area_rel_diff_pct": -8.25,
+      "exceeds_5pct_area_threshold": true
     },
     "BAC_KAN": {
       "location_id": "BAC_KAN",
@@ -676,7 +685,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 4859.96,
+      "area_rel_diff_pct": 0.19,
+      "exceeds_5pct_area_threshold": false
     },
     "BAC_LIEU": {
       "location_id": "BAC_LIEU",
@@ -807,7 +819,10 @@
             "contains_representative_point": true
           }
         ]
-      }
+      },
+      "official_area_km2": 2667.88,
+      "area_rel_diff_pct": -6.12,
+      "exceeds_5pct_area_threshold": true
     },
     "BAC_NINH": {
       "location_id": "BAC_NINH",
@@ -938,7 +953,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 822.7,
+      "area_rel_diff_pct": 23.29,
+      "exceeds_5pct_area_threshold": true
     },
     "BEN_TRE": {
       "location_id": "BEN_TRE",
@@ -1083,7 +1101,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 2379.7,
+      "area_rel_diff_pct": -1.63,
+      "exceeds_5pct_area_threshold": false
     },
     "BINH_DINH": {
       "location_id": "BINH_DINH",
@@ -1284,7 +1305,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 6066.4,
+      "area_rel_diff_pct": -6.65,
+      "exceeds_5pct_area_threshold": true
     },
     "BINH_DUONG": {
       "location_id": "BINH_DUONG",
@@ -1429,7 +1453,10 @@
             "contains_representative_point": true
           }
         ]
-      }
+      },
+      "official_area_km2": 2694.64,
+      "area_rel_diff_pct": -10.37,
+      "exceeds_5pct_area_threshold": true
     },
     "BINH_PHUOC": {
       "location_id": "BINH_PHUOC",
@@ -1658,7 +1685,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 6873.56,
+      "area_rel_diff_pct": 4.13,
+      "exceeds_5pct_area_threshold": false
     },
     "BINH_THUAN": {
       "location_id": "BINH_THUAN",
@@ -1929,7 +1959,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 7942.6,
+      "area_rel_diff_pct": 4.45,
+      "exceeds_5pct_area_threshold": false
     },
     "CA_MAU": {
       "location_id": "CA_MAU",
@@ -2102,7 +2135,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 5274.51,
+      "area_rel_diff_pct": 2.86,
+      "exceeds_5pct_area_threshold": false
     },
     "CANTHO": {
       "location_id": "CANTHO",
@@ -2247,7 +2283,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 1440.4,
+      "area_rel_diff_pct": 26.83,
+      "exceeds_5pct_area_threshold": true
     },
     "CAO_BANG": {
       "location_id": "CAO_BANG",
@@ -2448,7 +2487,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 6700.3,
+      "area_rel_diff_pct": 5.26,
+      "exceeds_5pct_area_threshold": true
     },
     "DANANG": {
       "location_id": "DANANG",
@@ -2579,7 +2621,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 1284.9,
+      "area_rel_diff_pct": -26.47,
+      "exceeds_5pct_area_threshold": true
     },
     "DAK_LAK": {
       "location_id": "DAK_LAK",
@@ -2822,7 +2867,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 13125.37,
+      "area_rel_diff_pct": -0.47,
+      "exceeds_5pct_area_threshold": false
     },
     "DAK_NONG": {
       "location_id": "DAK_NONG",
@@ -3023,7 +3071,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 6514.33,
+      "area_rel_diff_pct": 5.25,
+      "exceeds_5pct_area_threshold": true
     },
     "DIEN_BIEN": {
       "location_id": "DIEN_BIEN",
@@ -3294,7 +3345,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 9539.93,
+      "area_rel_diff_pct": -0.73,
+      "exceeds_5pct_area_threshold": false
     },
     "DONG_NAI": {
       "location_id": "DONG_NAI",
@@ -3495,7 +3549,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 5863.62,
+      "area_rel_diff_pct": 3.23,
+      "exceeds_5pct_area_threshold": false
     },
     "DONG_THAP": {
       "location_id": "DONG_THAP",
@@ -3626,7 +3683,10 @@
             "contains_representative_point": true
           }
         ]
-      }
+      },
+      "official_area_km2": 3382.28,
+      "area_rel_diff_pct": -5.39,
+      "exceeds_5pct_area_threshold": true
     },
     "GIA_LAI": {
       "location_id": "GIA_LAI",
@@ -3897,7 +3957,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 15510.99,
+      "area_rel_diff_pct": 3.84,
+      "exceeds_5pct_area_threshold": false
     },
     "HA_GIANG": {
       "location_id": "HA_GIANG",
@@ -4154,7 +4217,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 7929.5,
+      "area_rel_diff_pct": 0.01,
+      "exceeds_5pct_area_threshold": false
     },
     "HA_NAM": {
       "location_id": "HA_NAM",
@@ -4271,7 +4337,10 @@
             "contains_representative_point": true
           }
         ]
-      }
+      },
+      "official_area_km2": 860.9,
+      "area_rel_diff_pct": 2.41,
+      "exceeds_5pct_area_threshold": false
     },
     "HANOI": {
       "location_id": "HANOI",
@@ -4472,7 +4541,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 3358.9,
+      "area_rel_diff_pct": -3.96,
+      "exceeds_5pct_area_threshold": false
     },
     "HA_TINH": {
       "location_id": "HA_TINH",
@@ -4687,7 +4759,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 5994.5,
+      "area_rel_diff_pct": -0.82,
+      "exceeds_5pct_area_threshold": false
     },
     "HAI_DUONG": {
       "location_id": "HAI_DUONG",
@@ -4846,7 +4921,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 1668.2,
+      "area_rel_diff_pct": 21.07,
+      "exceeds_5pct_area_threshold": true
     },
     "HAIPHONG": {
       "location_id": "HAIPHONG",
@@ -5047,7 +5125,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 1522.5,
+      "area_rel_diff_pct": 0.84,
+      "exceeds_5pct_area_threshold": false
     },
     "HAU_GIANG": {
       "location_id": "HAU_GIANG",
@@ -5150,7 +5231,10 @@
             "contains_representative_point": true
           }
         ]
-      }
+      },
+      "official_area_km2": 1622.2,
+      "area_rel_diff_pct": -21.43,
+      "exceeds_5pct_area_threshold": true
     },
     "HCMC": {
       "location_id": "HCMC",
@@ -5309,7 +5393,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 2095.0,
+      "area_rel_diff_pct": 0.28,
+      "exceeds_5pct_area_threshold": false
     },
     "HOA_BINH": {
       "location_id": "HOA_BINH",
@@ -5482,7 +5569,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 4591.0,
+      "area_rel_diff_pct": 7.79,
+      "exceeds_5pct_area_threshold": true
     },
     "HOANG_SA": {
       "location_id": "HOANG_SA",
@@ -5725,7 +5815,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 10.0,
+      "area_rel_diff_pct": 7685.8,
+      "exceeds_5pct_area_threshold": true
     },
     "HUNG_YEN": {
       "location_id": "HUNG_YEN",
@@ -5856,7 +5949,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 930.2,
+      "area_rel_diff_pct": 1.31,
+      "exceeds_5pct_area_threshold": false
     },
     "KHANH_HOA": {
       "location_id": "KHANH_HOA",
@@ -6043,7 +6139,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 5199.6,
+      "area_rel_diff_pct": -3.91,
+      "exceeds_5pct_area_threshold": false
     },
     "KIEN_GIANG": {
       "location_id": "KIEN_GIANG",
@@ -6314,7 +6413,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 6352.0,
+      "area_rel_diff_pct": -3.18,
+      "exceeds_5pct_area_threshold": false
     },
     "KON_TUM": {
       "location_id": "KON_TUM",
@@ -6571,7 +6673,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 9674.2,
+      "area_rel_diff_pct": 7.02,
+      "exceeds_5pct_area_threshold": true
     },
     "LAI_CHAU": {
       "location_id": "LAI_CHAU",
@@ -6814,7 +6919,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 9068.73,
+      "area_rel_diff_pct": 1.67,
+      "exceeds_5pct_area_threshold": false
     },
     "LAM_DONG": {
       "location_id": "LAM_DONG",
@@ -7057,7 +7165,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 9781.2,
+      "area_rel_diff_pct": -0.36,
+      "exceeds_5pct_area_threshold": false
     },
     "LANG_SON": {
       "location_id": "LANG_SON",
@@ -7272,7 +7383,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 8310.2,
+      "area_rel_diff_pct": -4.95,
+      "exceeds_5pct_area_threshold": false
     },
     "LAO_CAI": {
       "location_id": "LAO_CAI",
@@ -7473,7 +7587,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 6364.0,
+      "area_rel_diff_pct": 2.61,
+      "exceeds_5pct_area_threshold": false
     },
     "LONG_AN": {
       "location_id": "LONG_AN",
@@ -7646,7 +7763,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 4494.8,
+      "area_rel_diff_pct": -0.29,
+      "exceeds_5pct_area_threshold": false
     },
     "NAM_DINH": {
       "location_id": "NAM_DINH",
@@ -7819,7 +7939,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 1668.8,
+      "area_rel_diff_pct": 5.36,
+      "exceeds_5pct_area_threshold": true
     },
     "NGHE_AN": {
       "location_id": "NGHE_AN",
@@ -8118,7 +8241,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 16493.7,
+      "area_rel_diff_pct": 0.63,
+      "exceeds_5pct_area_threshold": false
     },
     "NINH_BINH": {
       "location_id": "NINH_BINH",
@@ -8277,7 +8403,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 1411.8,
+      "area_rel_diff_pct": 3.15,
+      "exceeds_5pct_area_threshold": false
     },
     "NINH_THUAN": {
       "location_id": "NINH_THUAN",
@@ -8436,7 +8565,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 3355.3,
+      "area_rel_diff_pct": 0.47,
+      "exceeds_5pct_area_threshold": false
     },
     "PHU_THO": {
       "location_id": "PHU_THO",
@@ -8595,7 +8727,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 3534.6,
+      "area_rel_diff_pct": 4.59,
+      "exceeds_5pct_area_threshold": false
     },
     "PHU_YEN": {
       "location_id": "PHU_YEN",
@@ -8796,7 +8931,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 5026.0,
+      "area_rel_diff_pct": 2.71,
+      "exceeds_5pct_area_threshold": false
     },
     "QUANG_BINH": {
       "location_id": "QUANG_BINH",
@@ -9039,7 +9177,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 8065.3,
+      "area_rel_diff_pct": -1.22,
+      "exceeds_5pct_area_threshold": false
     },
     "QUANG_NAM": {
       "location_id": "QUANG_NAM",
@@ -9282,7 +9423,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 10574.9,
+      "area_rel_diff_pct": -0.13,
+      "exceeds_5pct_area_threshold": false
     },
     "QUANG_NGAI": {
       "location_id": "QUANG_NGAI",
@@ -9497,7 +9641,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 5155.3,
+      "area_rel_diff_pct": -14.72,
+      "exceeds_5pct_area_threshold": true
     },
     "QUANG_NINH": {
       "location_id": "QUANG_NINH",
@@ -9712,7 +9859,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 6177.7,
+      "area_rel_diff_pct": -10.6,
+      "exceeds_5pct_area_threshold": true
     },
     "QUANG_TRI": {
       "location_id": "QUANG_TRI",
@@ -9913,7 +10063,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 4739.8,
+      "area_rel_diff_pct": 1.61,
+      "exceeds_5pct_area_threshold": false
     },
     "SOC_TRANG": {
       "location_id": "SOC_TRANG",
@@ -10086,7 +10239,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 3298.2,
+      "area_rel_diff_pct": 0.39,
+      "exceeds_5pct_area_threshold": false
     },
     "SON_LA": {
       "location_id": "SON_LA",
@@ -10399,7 +10555,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 14123.5,
+      "area_rel_diff_pct": 2.32,
+      "exceeds_5pct_area_threshold": false
     },
     "TAY_NINH": {
       "location_id": "TAY_NINH",
@@ -10572,7 +10731,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 4041.7,
+      "area_rel_diff_pct": 5.26,
+      "exceeds_5pct_area_threshold": true
     },
     "THAI_BINH": {
       "location_id": "THAI_BINH",
@@ -10675,7 +10837,10 @@
             "contains_representative_point": true
           }
         ]
-      }
+      },
+      "official_area_km2": 1584.6,
+      "area_rel_diff_pct": -6.32,
+      "exceeds_5pct_area_threshold": true
     },
     "THAI_NGUYEN": {
       "location_id": "THAI_NGUYEN",
@@ -10834,7 +10999,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 3536.4,
+      "area_rel_diff_pct": -1.58,
+      "exceeds_5pct_area_threshold": false
     },
     "THANH_HOA": {
       "location_id": "THANH_HOA",
@@ -11105,7 +11273,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 11114.7,
+      "area_rel_diff_pct": -5.4,
+      "exceeds_5pct_area_threshold": true
     },
     "THUA_THIEN_HUE": {
       "location_id": "THUA_THIEN_HUE",
@@ -11292,7 +11463,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 5048.2,
+      "area_rel_diff_pct": -4.56,
+      "exceeds_5pct_area_threshold": false
     },
     "TIEN_GIANG": {
       "location_id": "TIEN_GIANG",
@@ -11437,7 +11611,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 2556.4,
+      "area_rel_diff_pct": -12.41,
+      "exceeds_5pct_area_threshold": true
     },
     "TRA_VINH": {
       "location_id": "TRA_VINH",
@@ -11610,7 +11787,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 2390.8,
+      "area_rel_diff_pct": -2.18,
+      "exceeds_5pct_area_threshold": false
     },
     "TRUONG_SA": {
       "location_id": "TRUONG_SA",
@@ -12777,7 +12957,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 20.0,
+      "area_rel_diff_pct": 43113.65,
+      "exceeds_5pct_area_threshold": true
     },
     "TUYEN_QUANG": {
       "location_id": "TUYEN_QUANG",
@@ -12964,7 +13147,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 5867.9,
+      "area_rel_diff_pct": -2.03,
+      "exceeds_5pct_area_threshold": false
     },
     "VINH_LONG": {
       "location_id": "VINH_LONG",
@@ -13137,7 +13323,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 1525.7,
+      "area_rel_diff_pct": -6.06,
+      "exceeds_5pct_area_threshold": true
     },
     "VINH_PHUC": {
       "location_id": "VINH_PHUC",
@@ -13240,7 +13429,10 @@
             "contains_representative_point": true
           }
         ]
-      }
+      },
+      "official_area_km2": 1236.0,
+      "area_rel_diff_pct": 21.92,
+      "exceeds_5pct_area_threshold": true
     },
     "YEN_BAI": {
       "location_id": "YEN_BAI",
@@ -13483,7 +13675,10 @@
             "contains_representative_point": false
           }
         ]
-      }
+      },
+      "official_area_km2": 6887.7,
+      "area_rel_diff_pct": 2.2,
+      "exceeds_5pct_area_threshold": false
     }
   }
 }

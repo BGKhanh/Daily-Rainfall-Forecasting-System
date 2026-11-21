@@ -1641,6 +1641,33 @@ body {
   color: var(--ink-primary);
 }
 
+.area-warning-row {
+  margin-top: 6px;
+}
+
+.area-warning-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: #92400e;
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+}
+
+.estimated-radiation-banner {
+  margin-top: 8px;
+  margin-bottom: 10px;
+  padding: 9px 12px;
+  border-radius: 6px;
+  font-size: 0.84rem;
+  line-height: 1.4;
+  color: #78350f;
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+}
+
 @media (max-width: 768px) {
   .workspace-col,
   .main-content,

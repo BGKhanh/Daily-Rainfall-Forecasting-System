@@ -484,10 +484,11 @@ const MOCK_OBS_EMPTY_HANOI: ObservationsQueryResponse = {
 const VIETNAM_DIACRITIC_REGEX =
   /[àáảãạăằắẳẵặâầấẩẫậđèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵ]/i;
 
-function installFetchMock() {
+function installFetchMock(overrides?: { predict?: PredictResponse }) {
   const predictCalls: string[] = [];
   const observationCalls: string[] = [];
   const externalUrls: string[] = [];
+  const predictPayload = overrides?.predict ?? MOCK_PREDICT;
 
   const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
@@ -521,7 +522,7 @@ function installFetchMock() {
     }
     if (url.endsWith("/predict")) {
       predictCalls.push(String(init?.body ?? ""));
-      return new Response(JSON.stringify(MOCK_PREDICT), { status: 200 });
+      return new Response(JSON.stringify(predictPayload), { status: 200 });
     }
     return new Response("Not found", { status: 404 });
   });
@@ -840,5 +841,67 @@ describe("Round 10 English SPA, Single-Model Main, 2-Layer Map & Data Retrieval"
       expect(screen.getByText("No observations have been ingested for this location yet.")).toBeInTheDocument();
     });
     expect(screen.queryByTestId("latest-ingest-footnote")).not.toBeInTheDocument();
+  });
+
+  it("renders Round 13 per-cell area labels, Can Tho official-area warning badge, and P-c estimated radiation banner", async () => {
+    const r13Overlap: ProvinceGridOverlapData = {
+      ...MOCK_GRID_OVERLAP,
+      unit_count: 3,
+      units: {
+        ...MOCK_GRID_OVERLAP.units,
+        HCMC: {
+          ...MOCK_GRID_OVERLAP.units.HCMC,
+          official_area_km2: 2095.0,
+          area_rel_diff_pct: 0.28,
+          exceeds_5pct_area_threshold: false,
+          merra2_grid: {
+            ...MOCK_GRID_OVERLAP.units.HCMC.merra2_grid,
+            intersecting_cell_count: 4,
+          },
+          ceres_grid: {
+            ...MOCK_GRID_OVERLAP.units.HCMC.ceres_grid,
+            intersecting_cell_count: 3,
+          },
+        },
+        CAN_THO: {
+          ...MOCK_GRID_OVERLAP.units.HANOI,
+          location_id: "CAN_THO",
+          display_name: "Can Tho",
+          polygon_area_km2: 1826.91,
+          official_area_km2: 1440.4,
+          area_rel_diff_pct: 26.83,
+          exceeds_5pct_area_threshold: true,
+        },
+      },
+    };
+    installFetchMock({
+      predict: {
+        ...MOCK_PREDICT,
+        anchor_date: "2026-11-17",
+        data_as_of: "2026-11-17",
+        lag_days: 4,
+        effective_future_days: 3,
+        is_degraded_input: true,
+        ceres_policy_applied: "P-c_DOY_MEDIAN_11_SOLAR_V1",
+        imputed_variables: ["ALLSKY_SFC_SW_DWN", "CLRSKY_SFC_SW_DWN"],
+      },
+    });
+    render(<App initialGeoJson={MOCK_GEOJSON} initialGridOverlap={r13Overlap} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("estimated-radiation-banner")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("estimated-radiation-banner")).toHaveTextContent(
+      "Estimated radiation inputs: 2 pending NASA POWER solar variable(s)"
+    );
+    expect(screen.getByTestId("merra-per-cell-sub")).toHaveTextContent("3,796 km² per cell · 4 cells intersect");
+    expect(screen.getByTestId("ceres-per-cell-sub")).toHaveTextContent("12,146 km² per cell · 3 cells intersect");
+    expect(screen.queryByTestId("official-area-warning-badge")).not.toBeInTheDocument();
+
+    const dropdown = screen.getByLabelText(EN.gridScale.provinceSelectAria);
+    fireEvent.change(dropdown, { target: { value: "CAN_THO" } });
+    expect(screen.getByTestId("official-area-warning-badge")).toHaveTextContent(
+      "Simplified polygon differs from official GSO area by +26.8% (official: 1,440.4 km²) — overlap percentages are approximate"
+    );
   });
 });

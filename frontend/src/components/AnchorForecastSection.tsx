@@ -292,6 +292,15 @@ export const AnchorForecastSection: React.FC<AnchorForecastSectionProps> = ({
               </div>
             )}
 
+            {prediction.is_degraded_input && (
+              <div className="estimated-radiation-banner" role="status" data-testid="estimated-radiation-banner">
+                <strong>{EN.forecast.estimatedRadiationTitle}</strong>{" "}
+                <span>
+                  {EN.forecast.estimatedRadiationBody(prediction.imputed_variables?.length ?? 0)}
+                </span>
+              </div>
+            )}
+
             <div className="chart-toolbar">
               <div className="line-legend">
                 <span className="legend-item">
