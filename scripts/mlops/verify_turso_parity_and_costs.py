@@ -46,7 +46,10 @@ from src.data.vintage_store import (  # noqa: E402
     ALL_35_VARS,
     DDL_V3_STATEMENTS,
     apply_migrations_v3_3,
+    apply_migrations_v3_4,
     clear_db_query_cache,
+    connect_sqlite,
+    finalize_db_for_read_only,
     get_observations_series,
 )
 
@@ -82,6 +85,7 @@ def _run_isolated_live_turso_tests_and_benchmark(platform: TursoPlatformClient, 
             for stmt in DDL_V3_STATEMENTS:
                 rw_conn.execute(stmt)
             apply_migrations_v3_3(rw_conn)
+            apply_migrations_v3_4(rw_conn)
 
             # Seed 1,000 days of HCMC observations in batched transactions for empirical row-scan measurement
             rw_conn.execute(
@@ -435,7 +439,7 @@ def _measure_production_endpoints_live(db_url: str, db_tok: str) -> dict:
 
 def _build_cost_projections(prod_metrics: dict, db_storage_bytes: int) -> dict:
     # Monthly traffic scenarios (requests/day) + daily ingestion/forecast cron
-    # Safety factor: 2.0x per specification
+    # Safety factor: 2.0x normal S1..S4; 5.0x peak NRT-to-Final revision wave S5
     SAFETY_FACTOR = 2.0
     STARTER_LIMITS = {
         "plan": "Turso Starter (Free, $0/mo)",
@@ -443,6 +447,8 @@ def _build_cost_projections(prod_metrics: dict, db_storage_bytes: int) -> dict:
         "rows_written_monthly": 10_000_000,
         "storage_bytes": 5 * 1024 * 1024 * 1024,
         "sync_bytes_monthly": 3 * 1024 * 1024 * 1024,
+        "syncs_bandwidth_gb_monthly": 3.0,
+        "quota_warning_pct": 70.0,
     }
     DEV_LIMITS = {
         "plan": "Turso Developer ($4.99/mo billed yearly)",
@@ -450,58 +456,70 @@ def _build_cost_projections(prod_metrics: dict, db_storage_bytes: int) -> dict:
         "rows_written_monthly": 25_000_000,
         "storage_bytes": 9 * 1024 * 1024 * 1024,
         "sync_bytes_monthly": 10 * 1024 * 1024 * 1024,
+        "syncs_bandwidth_gb_monthly": 10.0,
     }
 
     obs_after = max(1, int(prod_metrics["obs_90d_after_indexed_rows_read"]))
     pred_after = max(1, int(prod_metrics["predict_after_indexed_rows_read"]))
-    # Weighted user session (~1 health + 1 locations cached + 1 obs + 1 predict)
-    # In turso_remote with cache hit rate ~75% for health/locations, uncached reads average ~obs_after + pred_after
     remote_reads_per_req = round((obs_after + pred_after + 6) / 2.0)
 
     # Daily automated pipeline write load: ~7 obs rows + 1 ingestion_runs + ~25 forecast rows = ~33 rows/day
     daily_cron_rows_written = 33
     daily_cron_rows_read = 250  # anchor & completeness lookup
 
-    # Local replica incremental sync: ~288 syncs/day (300s interval), ~38 rows changed/day + ~3 rows_read overhead per poll
+    # Local replica incremental sync: ~288 syncs/day (300s interval), ~33 rows changed/day + ~4 rows_read overhead per poll
     replica_monthly_reads = 30 * (288 * 4 + daily_cron_rows_read)
-    replica_monthly_sync_bytes = 30 * (288 * 256 + 33 * 1024)  # metadata polls + changed rows (~3.2 MB/mo)
+    replica_monthly_sync_bytes = 30 * (288 * 256 + daily_cron_rows_written * 1024)
 
     scenarios_spec = [
-        ("S1: Idle Dev / Demo (5 req/day)", 5),
-        ("S2: Low Team / Class (100 req/day)", 100),
-        ("S3: Medium Public Console (2,000 req/day)", 2_000),
-        ("S4: High Burst / Evaluation (20,000 req/day)", 20_000),
+        ("S1: Idle Dev / Demo (5 req/day)", 5, 2.0, 1.0),
+        ("S2: Low Team / Class (100 req/day)", 100, 2.0, 1.0),
+        ("S3: Medium Public Console (2,000 req/day)", 2_000, 2.0, 1.0),
+        ("S4: High Burst / Evaluation (20,000 req/day)", 20_000, 2.0, 1.0),
+        # Peak NRT-to-Final Revision Wave: GEOS-IT -> MERRA-2 backfill across ~120d window + 5x safety factor
+        ("S5: Peak NRT-to-Final Revision Wave (2,000 req/day, 5x)", 2_000, 5.0, 6.0),
     ]
 
     scenarios_out = []
-    for label, req_per_day in scenarios_spec:
+    for label, req_per_day, mult, write_wave_factor in scenarios_spec:
         monthly_req = req_per_day * 30
-        remote_raw_reads = monthly_req * remote_reads_per_req + 30 * daily_cron_rows_read
-        monthly_writes = 30 * daily_cron_rows_written + 100  # small headroom for manual scans
-        # Project 12-month storage growth (~0.5 MB/yr incremental obs + forecasts on top of current DB size)
-        projected_storage_mb = round((db_storage_bytes + 1_500_000) / (1024 * 1024), 2)
+        remote_raw_reads = monthly_req * remote_reads_per_req + 30 * daily_cron_rows_read * write_wave_factor
+        monthly_writes = 30 * daily_cron_rows_written * write_wave_factor + 100
+        sync_bytes = replica_monthly_sync_bytes * (mult / 2.0) * write_wave_factor
+        projected_storage_mb = round((db_storage_bytes + 1_500_000 * write_wave_factor) / (1024 * 1024), 2)
+
+        remote_scaled_reads = int(remote_raw_reads * mult)
+        remote_scaled_writes = int(monthly_writes * mult)
+        replica_scaled_reads = int(replica_monthly_reads * mult)
+        sync_mb_scaled = round((sync_bytes * 2.0) / (1024 * 1024), 3)
 
         remote_with_sf = {
-            "rows_read_per_month": int(remote_raw_reads * SAFETY_FACTOR),
-            "rows_written_per_month": int(monthly_writes * SAFETY_FACTOR),
+            "multiplier": mult,
+            "rows_read_per_month": remote_scaled_reads,
+            "rows_written_per_month": remote_scaled_writes,
             "storage_mb": projected_storage_mb,
-            "sync_gb_per_month": 0.0,
-            "starter_rows_read_pct": round(100.0 * (remote_raw_reads * SAFETY_FACTOR) / STARTER_LIMITS["rows_read_monthly"], 4),
-            "fits_starter": (remote_raw_reads * SAFETY_FACTOR) <= STARTER_LIMITS["rows_read_monthly"] and (monthly_writes * SAFETY_FACTOR) <= STARTER_LIMITS["rows_written_monthly"],
+            "sync_mb_per_month": 0.0,
+            "starter_rows_read_pct": round(100.0 * remote_scaled_reads / STARTER_LIMITS["rows_read_monthly"], 4),
+            "fits_starter": remote_scaled_reads <= STARTER_LIMITS["rows_read_monthly"] and remote_scaled_writes <= STARTER_LIMITS["rows_written_monthly"],
+            "triggers_70pct_warning": (100.0 * remote_scaled_reads / STARTER_LIMITS["rows_read_monthly"]) >= 70.0,
         }
         replica_with_sf = {
-            "rows_read_per_month": int(replica_monthly_reads * SAFETY_FACTOR),
-            "rows_written_per_month": int(monthly_writes * SAFETY_FACTOR),
+            "multiplier": mult,
+            "rows_read_per_month": replica_scaled_reads,
+            "rows_written_per_month": remote_scaled_writes,
             "storage_mb": projected_storage_mb,
-            "sync_mb_per_month": round((replica_monthly_sync_bytes * SAFETY_FACTOR) / (1024 * 1024), 3),
-            "starter_rows_read_pct": round(100.0 * (replica_monthly_reads * SAFETY_FACTOR) / STARTER_LIMITS["rows_read_monthly"], 6),
-            "fits_starter": (replica_monthly_reads * SAFETY_FACTOR) <= STARTER_LIMITS["rows_read_monthly"],
+            "sync_mb_per_month": sync_mb_scaled,
+            "starter_rows_read_pct": round(100.0 * replica_scaled_reads / STARTER_LIMITS["rows_read_monthly"], 6),
+            "starter_sync_bandwidth_pct": round(100.0 * (sync_mb_scaled / 1024.0) / STARTER_LIMITS["syncs_bandwidth_gb_monthly"], 4),
+            "fits_starter": replica_scaled_reads <= STARTER_LIMITS["rows_read_monthly"] and (sync_mb_scaled / 1024.0) <= STARTER_LIMITS["syncs_bandwidth_gb_monthly"],
+            "triggers_70pct_warning": (100.0 * replica_scaled_reads / STARTER_LIMITS["rows_read_monthly"]) >= 70.0,
         }
         scenarios_out.append(
             {
                 "scenario": label,
                 "requests_per_day": req_per_day,
                 "requests_per_month": monthly_req,
+                "multiplier": mult,
                 "turso_remote_2x": remote_with_sf,
                 "turso_replica_2x": replica_with_sf,
             }
@@ -514,6 +532,10 @@ def _build_cost_projections(prod_metrics: dict, db_storage_bytes: int) -> dict:
         "developer_limits": DEV_LIMITS,
         "remote_reads_per_weighted_req": remote_reads_per_req,
         "scenarios": scenarios_out,
+        "quota_billing_note": (
+            "Turso counts `rows_read` (B-tree row reads from remote Hrana queries/polls) separately from "
+            "`Syncs` bandwidth (3 GB/mo free Starter cap on embedded replica frame/WAL transfers; 10 GB/mo Developer)."
+        ),
     }
 
 
@@ -531,13 +553,56 @@ def main() -> None:
     # 1. Isolated temporary test DB checks + before/after benchmark
     isolated_checks = _run_isolated_live_turso_tests_and_benchmark(platform, org_slug)
 
-    # 2. Migrate Production DB (observations-only) to live `TURSO_DB_URL` (`ds108`)
+    # 2. Migrate & verify Production DB (Option A: observations + optional automated_pipeline forecasts; ZERO manual_retrospective_backfill)
+    local_prod_conn = connect_sqlite(PROD_DB_PATH, read_only=False)
+    try:
+        apply_migrations_v3_4(local_prod_conn, default_issued_by="automated_pipeline")
+        local_manual_cnt = int(
+            local_prod_conn.execute(
+                "SELECT COUNT(*) FROM forecasts_ledger WHERE issued_by = 'manual_retrospective_backfill'"
+            ).fetchone()[0]
+        )
+        local_auto_cnt = int(
+            local_prod_conn.execute(
+                "SELECT COUNT(*) FROM forecasts_ledger WHERE issued_by = 'automated_pipeline'"
+            ).fetchone()[0]
+        )
+        finalize_db_for_read_only(local_prod_conn)
+    finally:
+        local_prod_conn.close()
+
     prod_client = TursoHranaClient(db_url=secrets.turso_db_url, auth_token=secrets.turso_db_token, read_only=False)
     prod_conn = TursoRemoteConnection(client=prod_client, read_only=False)
     try:
         migration_stats = migrate_sqlite_to_turso(
-            PROD_DB_PATH, prod_conn, include_forecasts=False, batch_size=250
+            PROD_DB_PATH,
+            prod_conn,
+            include_forecasts=(local_auto_cnt > 0 and local_manual_cnt == 0),
+            batch_size=250,
         )
+        turso_manual_cnt = int(
+            prod_conn.execute(
+                "SELECT COUNT(*) FROM forecasts_ledger WHERE issued_by = 'manual_retrospective_backfill'"
+            ).fetchone()[0]
+        )
+        turso_auto_cnt = int(
+            prod_conn.execute(
+                "SELECT COUNT(*) FROM forecasts_ledger WHERE issued_by = 'automated_pipeline'"
+            ).fetchone()[0]
+        )
+        no_manual_backfill = (local_manual_cnt == 0 and turso_manual_cnt == 0)
+        if not no_manual_backfill:
+            raise RuntimeError(
+                f"[OPTION_A_POLICY_VIOLATION] Found manual_retrospective_backfill rows in Prod "
+                f"(local={local_manual_cnt}, turso={turso_manual_cnt})."
+            )
+        migration_stats["no_manual_retrospective_backfill_in_prod"] = no_manual_backfill
+        migration_stats["prod_forecasts_by_issued_by"] = {
+            "local_automated_pipeline": local_auto_cnt,
+            "local_manual_retrospective_backfill": local_manual_cnt,
+            "turso_automated_pipeline": turso_auto_cnt,
+            "turso_manual_retrospective_backfill": turso_manual_cnt,
+        }
     finally:
         prod_conn.close()
 
@@ -583,7 +648,7 @@ def main() -> None:
 
     doc_md = f"""# Turso Storage Architecture, Parity & Cost Operations (`DS108`)
 
-> **Generated:** `{report['generated_at_utc']}` | **Active Plan:** `{report['turso_org_plan']}` | **Two-DB Boundary Enforced:** Production DB (`observations_vintage` only, 0 retrospective forecast rows) in Turso; Demo DB (`demo_rainfall_vintage.db`, 4,270 forecast rows) strictly local.
+> **Generated:** `{report['generated_at_utc']}` | **Active Plan:** `{report['turso_org_plan']}` | **Two-DB Boundary Enforced (Decision 1 Option A):** Production DB (`observations_vintage` + automated `POST_TEST` forecasts allowed via `issued_by='automated_pipeline'`; `no_manual_retrospective_backfill_in_prod={migration_stats['no_manual_retrospective_backfill_in_prod']}`) in Turso; Demo DB (`demo_rainfall_vintage.db`, `4,270` `manual_retrospective_backfill` rows) strictly local.
 
 ## 1. Empirical Answers to the 4 Operational Questions
 
@@ -609,16 +674,17 @@ def main() -> None:
 |---|---:|---:|---:|---:|---:|---|
 {scenario_rows_md}
 
-### Official Turso Plan Quotas (accessed 2026-11-20)
-- **Starter (Free — USD 0/mo):** 500M `rows_read`/mo, 10M `rows_written`/mo, 5 GB storage, 3 GB embedded syncs/mo, up to 100 databases ([Turso Pricing](https://turso.tech/pricing), [Turso Embedded Replicas Docs](https://docs.turso.tech/features/embedded-replicas/introduction)).
-- **Developer (USD 4.99/mo billed yearly):** 2.5B `rows_read`/mo, 25M `rows_written`/mo, 9 GB storage, 10 GB syncs/mo, unlimited databases ([Turso Pricing](https://turso.tech/pricing)).
-- Under **Starter (USD 0/mo)**, both `turso_remote` (up to ~`170M` 2× reads at 20,000 req/day = `34%` of quota) and `turso_replica` (`<0.01%` of `rows_read` quota) remain strictly within the free tier without overage charges.
+### Official Turso Plan Quotas & Sync Bandwidth Clarification (accessed 2026-11-20)
+- **Starter (Free — USD 0/mo):** 500M `rows_read`/mo, 10M `rows_written`/mo, 5 GB storage, **3 GB embedded `Syncs` bandwidth/mo** (counted separately from `rows_read`!), up to 100 databases ([Turso Pricing](https://turso.tech/pricing), [Turso Embedded Replicas Docs](https://docs.turso.tech/features/embedded-replicas/introduction)).
+- **Developer (USD 4.99/mo billed yearly):** 2.5B `rows_read`/mo, 25M `rows_written`/mo, 9 GB storage, **10 GB `Syncs` bandwidth/mo**, unlimited databases ([Turso Pricing](https://turso.tech/pricing)).
+- **Quota Warning & Peak Wave (`S5`):** Runtime triggers `turso_quota_warning = True` when monthly consumption reaches `>= 70%` (`350M` reads/mo on Starter). Even under **S5 (Peak NRT-to-Final Revision Wave, 5× multiplier)**, `turso_replica` keeps `rows_read` and `Syncs` bandwidth strictly within Starter free caps; HTTP `402`/`403`/`429` `BLOCKED` errors gracefully fall back to local SQLite (`status="degraded"`, `degraded_reason="TURSO_REMOTE_BLOCKED_FALLBACK_LOCAL"`).
+- **Python Client Selection Proof:** See [`reports/storage_audit/turso_python_client_wheel_logs.json`](../reports/storage_audit/turso_python_client_wheel_logs.json) — retains zero-native-dependency Hrana HTTP v2 (`requests`) over `libsql-experimental` (no prebuilt Windows binary wheel).
 
-## 2. Production Migration Verification (Observations-Only)
+## 2. Production Migration Verification (DDL V3.4, Decision 1 Option A)
 - **Locations:** `{migration_stats['tables']['locations']['target_count']}` rows (`parity_ok={migration_stats['tables']['locations']['parity_ok']}`, `sha256={migration_stats['tables']['locations']['target_sha256'][:16]}...`)
 - **Ingestion Runs:** `{migration_stats['tables']['ingestion_runs']['target_count']}` rows (`parity_ok={migration_stats['tables']['ingestion_runs']['parity_ok']}`, `sha256={migration_stats['tables']['ingestion_runs']['target_sha256'][:16]}...`)
 - **Observations Vintage:** `{migration_stats['tables']['observations_vintage']['target_count']:,}` rows (`parity_ok={migration_stats['tables']['observations_vintage']['parity_ok']}`, `sha256={migration_stats['tables']['observations_vintage']['target_sha256'][:16]}...`)
-- **Forecasts Ledger in Turso Production DB:** `{migration_stats['tables']['forecasts_ledger']['target_count']}` rows (`observations_only_enforced={migration_stats['tables']['forecasts_ledger']['observations_only_enforced']}`)
+- **Forecasts Ledger in Turso Production DB:** `{migration_stats['prod_forecasts_by_issued_by']['turso_automated_pipeline']}` `automated_pipeline` rows, `{migration_stats['prod_forecasts_by_issued_by']['turso_manual_retrospective_backfill']}` `manual_retrospective_backfill` rows (`no_manual_retrospective_backfill_in_prod={migration_stats['no_manual_retrospective_backfill_in_prod']}`)
 """
 
     COST_DOC_PATH.parent.mkdir(parents=True, exist_ok=True)

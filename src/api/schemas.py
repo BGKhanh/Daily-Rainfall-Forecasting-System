@@ -132,6 +132,15 @@ class HealthResponse(BaseModel):
     anchor_range: Optional[AnchorRange] = None
     data_latency: Optional[DataLatencyInfo] = None
     journal_mode: Optional[str] = None
+    degraded_reason: Optional[str] = None
+    turso_quota_warning: bool = False
+    replica_sync_count: Optional[int] = None
+    replica_last_sync_at_utc: Optional[str] = None
+    replica_last_sync_duration_ms: Optional[float] = None
+    replica_sync_lag_sec: Optional[float] = None
+    replica_hash_verified: Optional[bool] = None
+    replica_consecutive_failures: Optional[int] = None
+    replica_last_sync_error: Optional[str] = None
     serving_model: HealthServingModel
     shadow_models: List[HealthShadowModel]
     baselines: List[HealthBaselineModel]

@@ -28,11 +28,18 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.config.clock import today_hcmc  # noqa: E402
-from src.config.settings import compute_config_sha256, load_settings  # noqa: E402
+from src.config.settings import (  # noqa: E402
+    compute_config_sha256,
+    compute_operational_config_sha256,
+    compute_result_config_sha256,
+    load_settings,
+)
 from src.data.turso_backend import (  # noqa: E402
+    TursoQuotaBlockedError,
     TursoRemoteConnection,
     get_replica_manager,
     open_store_connection,
+    redact_secrets,
     resolve_store_backend,
 )
 from src.data.vintage_store import (  # noqa: E402
@@ -103,6 +110,7 @@ def run_probe_headers_step(
     end_iso = end_date or (today_d - timedelta(days=1)).isoformat()
     start_iso = start_date or (today_d - timedelta(days=210)).isoformat()
     cfg_sha = compute_config_sha256()
+    op_cfg_sha = compute_operational_config_sha256()
 
     sparse_dates = build_sparse_probe_dates(start_iso=start_iso, end_iso=end_iso, step_days=10)
     session = requests.Session() if fetcher is None else None
@@ -220,8 +228,8 @@ def run_probe_headers_step(
                 scan_window_start, scan_window_end, nasa_api_version, nasa_sources_header_json,
                 rows_scanned, rows_inserted_v0, rows_new_vintage, rows_late_fill_only,
                 rows_value_change, rows_unchanged, rows_unpublished_skipped,
-                latest_valid_by_group_json, revision_stats_json, git_sha, config_sha256, error_message
-            ) VALUES (?, 'audit_probe', ?, ?, 'SUCCESS', ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, 0, 0, ?, ?, ?, ?, NULL)
+                latest_valid_by_group_json, revision_stats_json, git_sha, config_sha256, operational_config_sha256, error_message
+            ) VALUES (?, 'audit_probe', ?, ?, 'SUCCESS', ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, 0, 0, ?, ?, ?, ?, ?, NULL)
             """,
             (
                 run_id,
@@ -236,6 +244,7 @@ def run_probe_headers_step(
                 json.dumps({"pipeline": "automated_pipeline.probe-headers"}),
                 resolve_git_sha(),
                 cfg_sha,
+                op_cfg_sha,
             ),
         )
         conn.commit()
@@ -273,6 +282,7 @@ def run_ingest_window_step(
 ) -> Dict[str, Any]:
     """Idempotently ingest NASA POWER daily window, stamping config_sha256."""
     cfg_sha = compute_config_sha256()
+    op_cfg_sha = compute_operational_config_sha256()
     summary = ingest_nasa_power_window(
         conn,
         lookback_days=lookback_days,
@@ -287,6 +297,7 @@ def run_ingest_window_step(
         "status": summary.get("status", "SUCCESS"),
         "run_id": summary.get("run_id"),
         "config_sha256": cfg_sha,
+        "operational_config_sha256": op_cfg_sha,
         "rows_scanned": summary.get("rows_scanned", 0),
         "rows_inserted_v0": summary.get("rows_inserted_v0", 0),
         "rows_new_vintage": summary.get("rows_new_vintage", 0),
@@ -308,6 +319,7 @@ def run_issue_forecasts_step(
     Logs `SKIPPED` when no new complete anchor is ready and executes ZERO `UPDATE`s.
     """
     cfg_sha = compute_config_sha256()
+    res_cfg_sha = compute_result_config_sha256()
     effective_end = end_date or today_hcmc().isoformat()
     complete_anchors = list_complete_anchor_dates(
         conn,
@@ -376,18 +388,21 @@ def run_issue_forecasts_step(
         anchor_dates=pending_anchors,
         location_id=location_id,
         artifact_dir=artifact_dir,
+        issued_by="automated_pipeline",
     )
     if not isinstance(conn, TursoRemoteConnection):
         finalize_db_for_read_only(conn)
     return {
         "command": "issue-forecasts",
         "status": "SUCCESS",
+        "issued_by": "automated_pipeline",
         "anchors_processed": issued_res["anchors_processed"],
         "rows_inserted": issued_res["rows_inserted"],
         "rows_skipped": issued_res["rows_skipped"],
         "updates_executed": 0,
         "latest_issued_anchor": pending_anchors[-1],
         "config_sha256": cfg_sha,
+        "result_config_sha256": res_cfg_sha,
     }
 
 
@@ -412,8 +427,12 @@ def run_refresh_cache_step(
 
     webhook_status: Optional[int] = None
     if webhook_url:
-        r = requests.get(webhook_url, timeout=15)
-        webhook_status = r.status_code
+        try:
+            r = requests.get(webhook_url, timeout=15)
+            webhook_status = r.status_code
+        except requests.RequestException as exc:
+            safe_exc = redact_secrets(str(exc), extra_secrets=[webhook_url])
+            raise RuntimeError(f"Webhook refresh failed: {safe_exc}") from exc
 
     return {
         "command": "refresh-cache",
@@ -461,40 +480,50 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p_ref.add_argument("--webhook-url", type=str, default=None)
 
     args = parser.parse_args(list(argv) if argv is not None else None)
-    if args.subcommand == "refresh-cache":
-        out = run_refresh_cache_step(
-            backend=args.backend, db_path=args.db_path, webhook_url=args.webhook_url
-        )
-    else:
-        conn, _, _ = _open_rw_store(args.backend, args.db_path)
-        try:
-            if args.subcommand == "probe-headers":
-                out = run_probe_headers_step(
-                    conn=conn,
-                    start_date=args.start_date,
-                    end_date=args.end_date,
-                    experiment_today=args.experiment_today,
-                    dry_run=args.dry_run,
-                )
-            elif args.subcommand == "ingest-window":
-                out = run_ingest_window_step(
-                    conn=conn,
-                    lookback_days=args.lookback_days,
-                    start_date=args.start_date,
-                    end_date=args.end_date,
-                )
-            elif args.subcommand == "issue-forecasts":
-                out = run_issue_forecasts_step(
-                    conn=conn,
-                    post_test_start=args.post_test_start,
-                    end_date=args.end_date,
-                    artifact_dir=args.artifact_dir,
-                    dry_run=args.dry_run,
-                )
-            else:
-                raise ValueError(f"Unknown subcommand: {args.subcommand}")
-        finally:
-            conn.close()
+    try:
+        if args.subcommand == "refresh-cache":
+            out = run_refresh_cache_step(
+                backend=args.backend, db_path=args.db_path, webhook_url=args.webhook_url
+            )
+        else:
+            conn, _, _ = _open_rw_store(args.backend, args.db_path)
+            try:
+                if args.subcommand == "probe-headers":
+                    out = run_probe_headers_step(
+                        conn=conn,
+                        start_date=args.start_date,
+                        end_date=args.end_date,
+                        experiment_today=args.experiment_today,
+                        dry_run=args.dry_run,
+                    )
+                elif args.subcommand == "ingest-window":
+                    out = run_ingest_window_step(
+                        conn=conn,
+                        lookback_days=args.lookback_days,
+                        start_date=args.start_date,
+                        end_date=args.end_date,
+                    )
+                elif args.subcommand == "issue-forecasts":
+                    out = run_issue_forecasts_step(
+                        conn=conn,
+                        post_test_start=args.post_test_start,
+                        end_date=args.end_date,
+                        artifact_dir=args.artifact_dir,
+                        dry_run=args.dry_run,
+                    )
+                else:
+                    raise ValueError(f"Unknown subcommand: {args.subcommand}")
+            finally:
+                conn.close()
+    except TursoQuotaBlockedError as exc:
+        safe_err = redact_secrets(str(exc))
+        logger.warning("DEFERRED_QUOTA_BLOCKED (%s): %s", args.subcommand, safe_err)
+        out = {
+            "command": args.subcommand,
+            "status": "DEFERRED_QUOTA_BLOCKED",
+            "degraded_reason": "TURSO_REMOTE_BLOCKED",
+            "error": safe_err,
+        }
 
     if args.json_out is not None:
         args.json_out.parent.mkdir(parents=True, exist_ok=True)

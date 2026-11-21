@@ -79,6 +79,13 @@ def main() -> int:
         help="Single anchor date to issue (defaults to get_default_complete_anchor_date when --issue-post-test omitted).",
     )
     parser.add_argument(
+        "--issued-by",
+        type=str,
+        default="manual_retrospective_backfill",
+        choices=("automated_pipeline", "manual_retrospective_backfill"),
+        help="Provenance issuer label stamped on forecasts_ledger rows (Decision 1).",
+    )
+    parser.add_argument(
         "--report-json",
         type=Path,
         default=PROJECT_ROOT / "reports" / "storage_audit" / "post_test_retrospective_scores.json",
@@ -121,6 +128,7 @@ def main() -> int:
                 anchor_dates=anchors,
                 location_id=HCMC_LOCATION_ID,
                 artifact_dir=args.artifact_dir,
+                issued_by=args.issued_by,
             )
             output["issue_summary"] = issue_res
 
@@ -153,6 +161,7 @@ def main() -> int:
                 anchor_dates=[chosen],
                 location_id=HCMC_LOCATION_ID,
                 artifact_dir=args.artifact_dir,
+                issued_by=args.issued_by,
             )
             output["issue_summary"] = issue_res
     finally:

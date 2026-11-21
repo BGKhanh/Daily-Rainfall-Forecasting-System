@@ -16,7 +16,7 @@ Features:
 
 from contextlib import asynccontextmanager
 from copy import deepcopy
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 import json
 import logging
 import os
@@ -61,8 +61,11 @@ from src.data.provider import (
     resolve_sqlite_db_path_and_role,
 )
 from src.data.turso_backend import (
+    TursoQuotaBlockedError,
     get_replica_manager,
+    get_turso_runtime_status,
     open_store_connection,
+    redact_secrets,
     resolve_store_backend,
 )
 from src.data.vintage_store import (
@@ -309,13 +312,16 @@ async def lifespan(app: FastAPI):
         try:
             settings = load_settings()
             mgr = get_replica_manager()
-            mgr.sync_now()
+            try:
+                mgr.sync_now()
+            except Exception as exc:
+                _logger.warning("Turso replica startup sync deferred: %s", redact_secrets(str(exc)))
             mgr.start_background_sync(
                 interval_sec=float(settings.operational.turso_sync_interval_sec),
                 jitter_sec=float(settings.operational.turso_sync_jitter_sec),
             )
         except Exception as exc:
-            _logger.warning("Turso replica startup sync deferred: %s", exc)
+            _logger.warning("Turso replica manager initialization failed: %s", redact_secrets(str(exc)))
     try:
         yield
     finally:
@@ -443,7 +449,7 @@ def get_configured_locations():
         raise _api_error(
             503,
             "SERVER_DB_DATA_ERROR",
-            f"[SERVER_DB_DATA_ERROR] Failed to read locations table: {exc}",
+            f"[SERVER_DB_DATA_ERROR] Failed to read locations table: {redact_secrets(str(exc))}",
         ) from exc
 
     return {"db_role": db_role, "locations": items}
@@ -691,7 +697,7 @@ def get_observations(
         raise _api_error(
             503,
             "SERVER_DB_DATA_ERROR",
-            f"[SERVER_DB_DATA_ERROR] Failed reading observations archive: {exc}",
+            f"[SERVER_DB_DATA_ERROR] Failed reading observations archive: {redact_secrets(str(exc))}",
         ) from exc
     finally:
         if conn is not None:
@@ -739,6 +745,34 @@ def get_health():
     anchor_range: Optional[Dict[str, str]] = None
     data_latency: Optional[Dict[str, Any]] = None
     journal_mode: Optional[str] = None
+    replica_sync_count: Optional[int] = None
+    replica_last_sync_at_utc: Optional[str] = None
+    replica_last_sync_duration_ms: Optional[float] = None
+    replica_sync_lag_sec: Optional[float] = None
+    replica_hash_verified: Optional[bool] = None
+    replica_consecutive_failures: Optional[int] = None
+    replica_last_sync_error: Optional[str] = None
+    mgr_degraded_reason: Optional[str] = None
+    if db_role == "turso_replica":
+        try:
+            mgr = get_replica_manager()
+            replica_sync_count = mgr.sync_count
+            replica_last_sync_at_utc = mgr.last_sync_at_utc
+            replica_last_sync_duration_ms = mgr.last_sync_duration_ms
+            replica_hash_verified = getattr(mgr, "last_hash_verified", None)
+            if mgr.last_sync_at_utc:
+                try:
+                    sync_dt = datetime.fromisoformat(str(mgr.last_sync_at_utc).replace("Z", "+00:00"))
+                    replica_sync_lag_sec = round(max(0.0, (datetime.now(timezone.utc) - sync_dt).total_seconds()), 2)
+                except Exception:
+                    replica_sync_lag_sec = None
+            replica_consecutive_failures = mgr.consecutive_failures
+            replica_last_sync_error = redact_secrets(mgr.last_sync_error) if mgr.last_sync_error else None
+            if mgr.is_degraded:
+                mgr_degraded_reason = mgr.degraded_reason
+        except Exception:
+            pass
+
     if conn is not None:
         try:
             try:
@@ -789,11 +823,17 @@ def get_health():
                 journal_mode = h_stats["journal_mode"]
             finally:
                 conn.close()
+        except TursoQuotaBlockedError:
+            pass
         except Exception:
             pass
 
+    rt_status = get_turso_runtime_status()
+    degraded_reason = rt_status.get("degraded_reason") or mgr_degraded_reason
+    turso_quota_warning = bool(rt_status.get("quota_warning", False))
+
     return {
-        "status": "healthy",
+        "status": "degraded" if degraded_reason else "healthy",
         "service": "HCMC Rainfall Forecasting Engine",
         "version": "1.2.0",
         "predictor_loaded": predictor is not None,
@@ -810,6 +850,15 @@ def get_health():
         "anchor_range": anchor_range,
         "data_latency": data_latency,
         "journal_mode": journal_mode,
+        "degraded_reason": degraded_reason,
+        "turso_quota_warning": turso_quota_warning,
+        "replica_sync_count": replica_sync_count,
+        "replica_last_sync_at_utc": replica_last_sync_at_utc,
+        "replica_last_sync_duration_ms": replica_last_sync_duration_ms,
+        "replica_sync_lag_sec": replica_sync_lag_sec,
+        "replica_hash_verified": replica_hash_verified,
+        "replica_consecutive_failures": replica_consecutive_failures,
+        "replica_last_sync_error": replica_last_sync_error,
         "serving_model": {
             "scenario_id": "SC-35",
             "model_name": "xgboost_tweedie_F3",
@@ -1015,7 +1064,7 @@ def predict_rainfall(request: PredictionRequest):
                 {"anchor_date": e.anchor_date, "completeness_regime": e.completeness_regime},
             ) from e
         except Exception as e:
-            detail_str = str(e)
+            detail_str = redact_secrets(str(e))
             if "[SERVER_DB_DATA_ERROR]" not in detail_str:
                 detail_str = f"[SERVER_DB_DATA_ERROR] Server history provider failed: {detail_str}"
             raise _api_error(503, "SERVER_DB_DATA_ERROR", detail_str) from e
@@ -1282,7 +1331,7 @@ def get_scores(
         raise _api_error(
             503,
             "SERVER_DB_DATA_ERROR",
-            f"[SERVER_DB_DATA_ERROR] Failed to evaluate /scores from SQLite store: {exc}",
+            f"[SERVER_DB_DATA_ERROR] Failed to evaluate /scores from SQLite store: {redact_secrets(str(exc))}",
         ) from exc
 
     boot = eval_res.get("block_bootstrap", {})
