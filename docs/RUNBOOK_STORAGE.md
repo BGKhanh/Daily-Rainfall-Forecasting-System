@@ -69,11 +69,12 @@ python scripts/mlops/run_forecast_ledger.py \
 
 ---
 
-## 4. Schema Migration `V3.3`, Chế độ Turso (`STORE_BACKEND`) & Pipeline Tự động (Round 11)
+## 4. Schema Migration `V3.5`, Chế độ Turso (`STORE_BACKEND`) & Pipeline Tự động (Round 13)
 
-1. **DDL `V3.3` & Provenance `config_sha256`**:
-   - Bảng `schema_migrations` (`V3.3`) xác nhận đã thêm cột `config_sha256` cho `ingestion_runs` và `forecasts_ledger` cùng composite index `idx_obs_vintage_loc_date_ingested` trên `(location_id, obs_date, ingested_at_utc, version_num DESC)`.
-   - Các truy vấn API `/observations`, `/health`, `/locations`, `/predict`, `/scores` đẩy bộ lọc ngày trực tiếp xuống bảng gốc thay vì quét toàn bộ view `v_observations_latest`, kết hợp cache trong bộ nhớ theo khóa `(db_identifier, latest_run_id, max_forecast_rowid)`.
+1. **DDL `V3.5`, Imputed Solar Provenance & Giám sát Đồng nhất (`homogeneous monitoring`)**:
+   - Bảng `forecasts_ledger` (`schema_migrations = 'V3.5'`) bổ sung `imputed_values_json TEXT NOT NULL DEFAULT '{}'`, `doy_table_sha256 TEXT`, chính sách `'P-c_DOY_MEDIAN_11_SOLAR_V1'` trong `ceres_policy_applied`, và bắt buộc truyền tường minh `issued_by` (không có SQL `DEFAULT`; cho phép `'automated_pipeline'`, `'manual_retrospective_backfill'`, `'manual_operational'`).
+   - `v_forecast_scores` xuất thêm `imputed_values_json`, `doy_table_sha256`, `issued_by`; mọi tổng hợp drift/chất lượng trên `/scores` phải phân tầng đồng nhất (**homogeneous monitoring**) theo đủ 5 chiều `(eval_split_regime, is_prospective, is_degraded_input, ceres_policy_applied, issued_by)` để không trộn lẫn giai đoạn `COMPLETE_ALL_35` và giai đoạn `P-c` degraded solar. Việc lưu `imputed_values_json` (`~280 B` JSON rút gọn có sắp xếp key cho 11 biến bức xạ trên các dòng ML, `'{}'` trên baseline) tiêu tốn `~5.9 KB/ngày` (`~2.15 MB/năm`) và hỗ trợ truy vấn hậu kiểm trực tiếp qua `json_extract()`.
+   - Bảng `schema_migrations` (`V3.3`–`V3.5`) cũng duy trì `config_sha256`, `result_config_sha256` (gắn `solar_doy_table_sha256` + `radiation_imputation_policy`), `operational_config_sha256` (gắn ngưỡng quota Turso từ Layer 3 `[application]`), và index `idx_obs_vintage_loc_date_ingested`.
 2. **Ba chế độ `STORE_BACKEND` (`src/data/turso_backend.py`)**:
    - `local` (mặc định trong CI & Docker, không cần token): đọc SQLite local (`rainfall_vintage.db` / `demo_rainfall_vintage.db`).
    - `turso_replica`: đồng bộ incremental từ Turso về file replica cục bộ (`TURSO_REPLICA_PATH`, mặc định `data/vintage/turso_replica.db`) khi khởi động và theo chu kỳ nền `300s ± 30s` jitter; API đọc từ replica cục bộ với `0` `rows_read` từ xa mỗi request người dùng.

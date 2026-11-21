@@ -2,6 +2,22 @@
 
 All notable canonical reconciliation, MLOps tracking, runtime optimization, and operational limitation updates are recorded in this file.
 
+## [1.7.0-serving / Round 13: P-c Solar DOY Imputation, DDL V3.5 Ledger & UI Area Warnings] - 2026-11-21
+
+### Added & Changed
+- **True Future Days Audit, Validation Gate & `P-c` Serving Integration (`research/imputer_benchmark/run_pc_integration_experiment.py`, `src/inference/solar_imputation.py`)**:
+  - Audited `P-0` (`0/0/0`), `P-a/P-b` (`0/0/0`), and `P-c` / `P-c-ffill7` (`5/4/3` effective future days on Nov 19/20/21) across 724 Validation & 2,184 Test purged origins (`h=1..7`, `h=1..3`, `h=4..7`); pre-declared 3-clause Val Gate passed on `p_c_doy_median_all_11_solar` (`max |ΔMAE_val| = 0.005294 mm <= 0.020 mm`).
+  - Integrated pure-runtime `P-c_DOY_MEDIAN_11_SOLAR_V1` (`artifacts/models/solar_doy_climatology_dev_train.json`, circular `r=7` with explicit `"366"` leap-day key), filling missing solar cells strictly in-memory while keeping `observations_vintage` unmutated, computing `input_window_hash` pre-imputation, preserving FLASHFlux values, and enforcing strict fail-fast on all 24 `METEO_24_VARS` (`HTTP 422 INCOMPLETE_METEOROLOGY_AT_ANCHOR`).
+  - Added Layer 4 contract fields in `metadata.json` / `ModelContractConfig` (`radiation_imputation_policy`, `leap_day_doy_policy`, `solar_doy_table_sha256`), `PredictResponse` provenance fields, updated `docs/openapi_snapshot.json`, and 3 contract tests in `tests/test_pc_solar_imputation_contract.py`.
+- **DDL `V3.5` Audited Ledger Migration & Full `POST_TEST` Issuance (`src/data/vintage_store.py`, `scripts/mlops/migrate_ledger_v35_audited.py`)**:
+  - Rebuilt `forecasts_ledger` with `imputed_values_json`, `doy_table_sha256`, `'P-c_DOY_MEDIAN_11_SOLAR_V1'`, and strict non-default `issued_by` (`'automated_pipeline'`, `'manual_retrospective_backfill'`, `'manual_operational'`).
+  - Audited `demo_rainfall_vintage.db` (`4,270` rows, `29/29` columns SHA-256 bit-identical, 5/5 trigger & constraint probes passing in `reports/storage_audit/immutable_ledger_migration_proof_v35.json`).
+  - Migrated `data/vintage/rainfall_vintage.db` & live Turso `ds108` to V3.5 and issued `7,035` `automated_pipeline` rows (`201` anchors `2026-05-01..2026-11-17`, 100% parity across all 4 tables, `0` manual backfill rows).
+- **Layer 3 Turso Quota Externalization & Usage Source (`config/runtime_config.toml`, `src/data/turso_backend.py`)**:
+  - Moved `"Free"` plan quotas (`500M` reads, `10M` writes, `3 GB` sync, `5 GB` storage, `0.70` warn ratio) to `[application]`, exposed `turso_usage_source` in `/health`, and documented `libsql 0.1.11` maintenance trade-offs + `~5.9 KB/day` `imputed_values_json` impact.
+- **UI Area Warning Badges, Per-Cell Copy, `P-c` Banner & Docker `1.7.0-serving` (`frontend/`, `.github/workflows/ci.yml`)**:
+  - Enriched `province_grid_overlap.json` with official GSO areas, surfaced `"3,796 km² per cell · 4 cells intersect"` / `"12,146 km² per cell · 3 cells intersect"`, added amber `> 5%` official-area warning badges (`Can Tho +26.8%`), `"Estimated radiation inputs"` forecast banner, `24/63` mainland + `2` islands Can Tho–Hau Giang geometric hypothesis docs, uncropped `r13_*.png` Playwright screenshots, and CI/Docker tag `1.7.0-serving`.
+
 ## [1.6.0-serving / Round 12: CERES-8 Imputer Audit, Turso Resilience, DDL V3.4 & UI Polish] - 2026-11-21
 
 ### Added & Changed

@@ -38,15 +38,15 @@ jobs:
 
       - name: Run Ruff lint on serving backend & storage DDL V3
         run: |
-          ruff check src/api src/config/clock.py src/config/settings.py src/inference src/data/provider.py src/data/vintage_store.py src/data/grid_overlap.py src/data/turso_backend.py src/featurengineering/builder.py scripts/mlops/export_from_registry.py scripts/mlops/run_operational_checks.py scripts/mlops/run_forecast_ledger.py scripts/mlops/ensure_demo_db.py scripts/mlops/automated_pipeline.py scripts/mlops/verify_turso_parity_and_costs.py tests/serving tests/storage
+          ruff check src/api src/config/clock.py src/config/settings.py src/inference src/data/provider.py src/data/vintage_store.py src/data/grid_overlap.py src/data/turso_backend.py src/featurengineering/builder.py scripts/mlops/export_from_registry.py scripts/mlops/run_operational_checks.py scripts/mlops/run_forecast_ledger.py scripts/mlops/ensure_demo_db.py scripts/mlops/automated_pipeline.py scripts/mlops/verify_turso_parity_and_costs.py scripts/mlops/migrate_ledger_v35_audited.py tests/serving tests/storage tests/test_pc_solar_imputation_contract.py
 
-      - name: Run Tier 1 suite (API OpenAPI/Scores Contract, Clock, Column Guard, 2184-Origin Parity, DDL V3.2)
+      - name: Run Tier 1 suite (API OpenAPI/Scores Contract, Clock, Column Guard, 2184-Origin Parity, DDL V3.5, P-c Solar Imputation)
         env:
           SERVING_MODEL_SOURCE: local
           WEATHER_DB_BACKEND: local
           CI_REQUIRE_PARITY: "1"
         run: |
-          python -m pytest tests/serving/ tests/storage/ -v -rs
+          python -m pytest tests/serving/ tests/storage/ tests/test_pc_solar_imputation_contract.py -v -rs
 
       - name: Set up Node.js 24 & verify frontend SPA tests + production build
         uses: actions/setup-node@v4
@@ -89,12 +89,12 @@ jobs:
 
       - name: Build serving Docker image
         run: |
-          docker build -t kgb0630/ds_108:1.6.0-serving .
+          docker build -t kgb0630/ds_108:1.7.0-serving .
 
       - name: Run container & verify /, /locations, /observations, /health, /models, /predict, /scores, and RSS <= 350 MB
         run: |
           set -e
-          docker run -d --name ds108-smoke -p 8000:8000 kgb0630/ds_108:1.6.0-serving
+          docker run -d --name ds108-smoke -p 8000:8000 kgb0630/ds_108:1.7.0-serving
           trap "docker rm -f ds108-smoke || true" EXIT
 
           for i in $(seq 1 30); do
@@ -137,12 +137,12 @@ jobs:
               health = json.load(f)
           assert health["status"] == "healthy", health
           assert health["db_role"] == "bundled_demo_db", health
-          assert health["default_complete_anchor_date"] == "2026-08-30", health
+          assert health["default_complete_anchor_date"] == "2026-11-17", health
           assert health["data_snapshot_date"] is not None, health
           assert health["scan_window_start"] is not None and health["scan_window_total_days"] > 0, health
           assert health["latest_precip_obs_date"] is not None, health
           assert health["latest_partial_obs_explanation"], health
-          assert health["anchor_range"] == {"min": "2001-02-04", "max": "2026-08-30"}, health
+          assert health["anchor_range"] == {"min": "2001-02-04", "max": "2026-11-17"}, health
           assert set(health["data_latency"]["groups"].keys()) == {"METEO_GEOSIT", "RAD_FLASHFLUX", "RAD_CERES_SYN1DEG"}
           assert health["journal_mode"] == "delete", health
 
@@ -179,11 +179,11 @@ jobs:
           with open("/tmp/predict_demo.json", "r", encoding="utf-8") as f:
               pdemo = json.load(f)
           assert pdemo["history_backend"] == "sqlite", pdemo
-          assert pdemo["anchor_date"] == "2026-08-30", pdemo
+          assert pdemo["anchor_date"] == "2026-11-17", pdemo
           assert pdemo["anchor_split_regime"] == "POST_TEST", pdemo
           assert pdemo["run_timezone"] == "Asia/Ho_Chi_Minh", pdemo
-          assert pdemo["effective_future_days"] == 0, pdemo
-          assert pdemo["future_forecast_notice"] is not None
+          assert pdemo["is_degraded_input"] is True, pdemo
+          assert pdemo["ceres_policy_applied"] == "P-c_DOY_MEDIAN_11_SOLAR_V1", pdemo
           assert len(pdemo["daily_forecasts"]) == 7
 
           with open("/tmp/predict_anchor.json", "r", encoding="utf-8") as f:
