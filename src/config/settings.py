@@ -57,7 +57,9 @@ class OperationalConfig(BaseModel):
     nasa_api_base_url: str = "https://power.larc.nasa.gov/api/temporal/daily/point"
     nasa_api_timeout_sec: int = Field(default=120, ge=5, le=600)
     nasa_api_max_params: int = Field(default=20, ge=1, le=20)
-    scan_window_days: int = Field(default=210, ge=35, le=1000)
+    scan_window_days: int = Field(default=150, ge=35, le=1000)
+    short_scan_window_days: int = Field(default=14, ge=1, le=365)
+    deep_scan_window_days: int = Field(default=150, ge=35, le=1000)
     provisional_window_days: int = Field(default=120, ge=1, le=365)
     sqlite_cache_size_kb: int = Field(default=16000, ge=1000, le=512000)
     cors_allowed_origins: List[str] = Field(default_factory=list)
@@ -81,6 +83,8 @@ class ApplicationConfig(BaseModel):
     turso_monthly_sync_bytes_quota: int = Field(default=3221225472, ge=1)
     turso_storage_bytes_quota: int = Field(default=5368709120, ge=1)
     turso_quota_warn_ratio: float = Field(default=0.70, gt=0.0, le=1.0)
+    short_scan_window_days: int = Field(default=14, ge=1, le=365)
+    deep_scan_window_days: int = Field(default=150, ge=35, le=1000)
 
 
 class ModelContractConfig(BaseModel):

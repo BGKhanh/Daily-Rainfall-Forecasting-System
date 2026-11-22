@@ -92,7 +92,7 @@ def run_probe_headers_step(
     experiment_today: Optional[str] = None,
     dry_run: bool = False,
     auto_ingest: bool = True,
-    ingest_lookback_days: int = 210,
+    ingest_lookback_days: int = 150,
     fetcher: Optional[Callable[[str, str], Dict[str, Any]]] = None,
     window_fetcher: Optional[Callable[..., Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
@@ -108,7 +108,7 @@ def run_probe_headers_step(
     today_d = today_hcmc()
     exp_today = experiment_today or today_d.isoformat()
     end_iso = end_date or (today_d - timedelta(days=1)).isoformat()
-    start_iso = start_date or (today_d - timedelta(days=210)).isoformat()
+    start_iso = start_date or (today_d - timedelta(days=ingest_lookback_days)).isoformat()
     cfg_sha = compute_config_sha256()
     op_cfg_sha = compute_operational_config_sha256()
 
@@ -274,7 +274,7 @@ def run_probe_headers_step(
 def run_ingest_window_step(
     *,
     conn: Any,
-    lookback_days: int = 210,
+    lookback_days: int = 150,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     location_id: str = HCMC_LOCATION_ID,
@@ -305,6 +305,26 @@ def run_ingest_window_step(
     }
 
 
+def _skipped_issue_forecasts_result(
+    reason: str,
+    cfg_sha: str,
+    *,
+    latest_complete_anchor: Optional[str] = None,
+) -> Dict[str, Any]:
+    out: Dict[str, Any] = {
+        "command": "issue-forecasts",
+        "status": "SKIPPED",
+        "reason": reason,
+        "anchors_processed": 0,
+        "rows_inserted": 0,
+        "updates_executed": 0,
+        "config_sha256": cfg_sha,
+    }
+    if latest_complete_anchor is not None:
+        out["latest_complete_anchor"] = latest_complete_anchor
+    return out
+
+
 def run_issue_forecasts_step(
     *,
     conn: Any,
@@ -313,10 +333,12 @@ def run_issue_forecasts_step(
     end_date: Optional[str] = None,
     artifact_dir: Path = DEFAULT_ARTIFACT_DIR,
     dry_run: bool = False,
+    latest_only: bool = False,
 ) -> Dict[str, Any]:
     """
-    Issue 5-model x 7-horizon forecasts ONLY for unissued COMPLETE_ALL_35 anchor dates.
-    Logs `SKIPPED` when no new complete anchor is ready and executes ZERO `UPDATE`s.
+    Issue 5-model x 7-horizon forecasts ONLY for unissued meteo-complete anchor dates.
+    When `latest_only=True`, inspects ONLY the single newest complete anchor (`complete_anchors[-1]`)
+    without backfilling older unissued anchors. Logs `SKIPPED` when nothing new is ready.
     """
     cfg_sha = compute_config_sha256()
     res_cfg_sha = compute_result_config_sha256()
@@ -331,16 +353,8 @@ def run_issue_forecasts_step(
         required_vars=METEO_24_VARS,
     )
     if not complete_anchors:
-        logger.info("SKIPPED issue-forecasts: no COMPLETE_ALL_35 anchors found in [%s, %s].", post_test_start, effective_end)
-        return {
-            "command": "issue-forecasts",
-            "status": "SKIPPED",
-            "reason": "no_complete_anchor_in_window",
-            "anchors_processed": 0,
-            "rows_inserted": 0,
-            "updates_executed": 0,
-            "config_sha256": cfg_sha,
-        }
+        logger.info("SKIPPED issue-forecasts: no meteo-complete anchors found in [%s, %s].", post_test_start, effective_end)
+        return _skipped_issue_forecasts_result("no_complete_anchor_in_window", cfg_sha)
 
     counts_rows = conn.execute(
         """
@@ -354,9 +368,21 @@ def run_issue_forecasts_step(
         (location_id, post_test_start, effective_end),
     ).fetchall()
     issued_counts = {str(r["data_as_of"]): int(r["cnt"]) for r in counts_rows}
-    pending_anchors = [
-        a for a in complete_anchors if issued_counts.get(a, 0) < _EXPECTED_ROWS_PER_ANCHOR
-    ]
+    if latest_only:
+        latest_anchor = complete_anchors[-1]
+        if issued_counts.get(latest_anchor, 0) >= _EXPECTED_ROWS_PER_ANCHOR:
+            logger.info(
+                "SKIPPED issue-forecasts (--latest-only): newest complete anchor %s is already issued.",
+                latest_anchor,
+            )
+            return _skipped_issue_forecasts_result(
+                "no_new_complete_anchor", cfg_sha, latest_complete_anchor=latest_anchor
+            )
+        pending_anchors = [latest_anchor]
+    else:
+        pending_anchors = [
+            a for a in complete_anchors if issued_counts.get(a, 0) < _EXPECTED_ROWS_PER_ANCHOR
+        ]
 
     if not pending_anchors:
         logger.info(
@@ -364,16 +390,9 @@ def run_issue_forecasts_step(
             len(complete_anchors),
             complete_anchors[-1],
         )
-        return {
-            "command": "issue-forecasts",
-            "status": "SKIPPED",
-            "reason": "no_new_complete_anchor",
-            "latest_complete_anchor": complete_anchors[-1],
-            "anchors_processed": 0,
-            "rows_inserted": 0,
-            "updates_executed": 0,
-            "config_sha256": cfg_sha,
-        }
+        return _skipped_issue_forecasts_result(
+            "no_new_complete_anchor", cfg_sha, latest_complete_anchor=complete_anchors[-1]
+        )
 
     if dry_run:
         return {
@@ -469,20 +488,33 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p_probe.add_argument("--dry-run", action="store_true")
 
     p_ing = sub.add_parser("ingest-window", help="Ingest incremental NASA POWER observations.")
-    p_ing.add_argument("--lookback-days", type=int, default=settings.operational.scan_window_days)
+    p_ing.add_argument(
+        "--days",
+        "--lookback-days",
+        dest="lookback_days",
+        type=int,
+        default=settings.operational.short_scan_window_days,
+    )
     p_ing.add_argument("--start-date", type=str, default=None)
     p_ing.add_argument("--end-date", type=str, default=None)
 
-    p_fc = sub.add_parser("issue-forecasts", help="Issue forecasts strictly for new COMPLETE_ALL_35 anchors.")
+    p_fc = sub.add_parser("issue-forecasts", help="Issue forecasts strictly for new meteo-complete anchors.")
     p_fc.add_argument("--post-test-start", type=str, default="2026-05-01")
     p_fc.add_argument("--end-date", type=str, default=None)
     p_fc.add_argument("--artifact-dir", type=Path, default=DEFAULT_ARTIFACT_DIR)
     p_fc.add_argument("--dry-run", action="store_true")
+    p_fc.add_argument(
+        "--latest-only",
+        action="store_true",
+        help="Inspect and issue only for the newest meteo-complete anchor without historical backfill.",
+    )
 
     p_ref = sub.add_parser("refresh-cache", help="Sync Turso replica & refresh in-process cache state.")
     p_ref.add_argument("--webhook-url", type=str, default=None)
 
     args = parser.parse_args(list(argv) if argv is not None else None)
+    if args.subcommand == "ingest-window" and not (1 <= int(args.lookback_days) <= 1000):
+        parser.error("--days / --lookback-days must be between 1 and 1000.")
     try:
         if args.subcommand == "refresh-cache":
             out = run_refresh_cache_step(
@@ -513,6 +545,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         end_date=args.end_date,
                         artifact_dir=args.artifact_dir,
                         dry_run=args.dry_run,
+                        latest_only=args.latest_only,
                     )
                 else:
                     raise ValueError(f"Unknown subcommand: {args.subcommand}")

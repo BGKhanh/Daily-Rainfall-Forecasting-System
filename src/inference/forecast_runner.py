@@ -629,7 +629,8 @@ def _compute_4_metrics(y_true: np.ndarray, y_pred: np.ndarray, scale: float) -> 
     }
 
 
-def _summarize_bootstrap_samples(samples: np.ndarray, point_estimate: float) -> Dict[str, float]:
+def summarize_bootstrap_samples(samples: np.ndarray, point_estimate: float) -> Dict[str, float]:
+    """Compute percentile 95% CI bounds, width, and sample SE from bootstrap draws."""
     lo, hi = np.percentile(samples, [2.5, 97.5])
     return {
         "point_estimate": round(float(point_estimate), 6),
@@ -638,6 +639,26 @@ def _summarize_bootstrap_samples(samples: np.ndarray, point_estimate: float) -> 
         "ci_width": round(float(hi - lo), 6),
         "bootstrap_se": round(float(np.std(samples, ddof=1)), 6),
     }
+
+
+_summarize_bootstrap_samples = summarize_bootstrap_samples
+
+
+def build_block_bootstrap_indices(
+    n_origins: int,
+    *,
+    block_length: int = 7,
+    n_bootstrap: int = 2000,
+    seed: int = 42,
+) -> np.ndarray:
+    """Build deterministic (n_bootstrap, n_origins) Moving Block Bootstrap index matrix."""
+    eff_block = max(1, min(int(block_length), n_origins))
+    num_blocks = n_origins - eff_block + 1
+    blocks_per_sample = int(np.ceil(n_origins / eff_block))
+    rng = np.random.default_rng(int(seed))
+    starts = rng.integers(0, num_blocks, size=(int(n_bootstrap), blocks_per_sample))
+    offsets = np.arange(eff_block, dtype=np.int64)
+    return (starts[:, :, None] + offsets[None, None, :]).reshape(int(n_bootstrap), -1)[:, :n_origins]
 
 
 def classify_pairwise_decision_label(pair_key: str, summary: Mapping[str, Any]) -> str:
@@ -722,12 +743,11 @@ def compute_block_bootstrap_ci(
         sq_err_by_model[m_id] = diff ** 2
 
     # Generate deterministic Moving Block Bootstrap index matrix of shape (n_bootstrap, n_origins)
-    rng = np.random.default_rng(int(seed))
     num_blocks = n_origins - eff_block + 1
     blocks_per_sample = int(np.ceil(n_origins / eff_block))
-    starts = rng.integers(0, num_blocks, size=(int(n_bootstrap), blocks_per_sample))
-    offsets = np.arange(eff_block, dtype=np.int64)
-    idx_matrix = (starts[:, :, None] + offsets[None, None, :]).reshape(int(n_bootstrap), -1)[:, :n_origins]
+    idx_matrix = build_block_bootstrap_indices(
+        n_origins, block_length=eff_block, n_bootstrap=int(n_bootstrap), seed=int(seed)
+    )
 
     overall_mae_samples: Dict[str, np.ndarray] = {}
     models_ci: Dict[str, Any] = {}

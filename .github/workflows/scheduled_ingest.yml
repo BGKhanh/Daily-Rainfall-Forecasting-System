@@ -2,21 +2,36 @@ name: Scheduled NASA POWER Ingest & Forecast Issuance
 
 on:
   schedule:
-    # Off-peak 20:23 UTC (~03:23 Asia/Ho_Chi_Minh) to avoid top-of-hour queue congestion.
-    # Note (GitHub Docs, accessed 2026-11-20):
+    # 2-Tier off-peak schedule at 20:23 UTC (~03:23 Asia/Ho_Chi_Minh) to avoid top-of-hour queue congestion:
+    #   - Mon-Sat (14d short scan): ingest-window --days 14 -> issue-forecasts --latest-only -> refresh-cache
+    #   - Sunday (150d deep scan):  probe-headers -> ingest-window --days 150 -> issue-forecasts --latest-only -> refresh-cache
+    # Official GitHub Docs constraints (accessed 2026-11-20):
     # - Scheduled workflows can be delayed or dropped under heavy GitHub Actions load
     #   (https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/events-that-trigger-workflows#schedule).
     # - Public repositories with no commit activity for 60 consecutive days automatically
     #   disable scheduled triggers until manually re-enabled or a new commit is pushed
     #   (https://docs.github.com/en/actions/managing-workflow-runs-and-deployments/managing-workflow-runs/disabling-and-enabling-a-workflow).
-    - cron: "23 20 * * *"
+    - cron: "23 20 * * 1-6"
+    - cron: "23 20 * * 0"
   workflow_dispatch:
     inputs:
+      scan_tier:
+        description: "Ingestion tier to execute (auto selects weekly_150d on Sunday UTC / daily_14d on Mon-Sat)"
+        required: false
+        default: "auto"
+        type: choice
+        options:
+          - auto
+          - daily_14d
+          - weekly_150d
       dry_run:
         description: "Run probe/forecast issuance in dry-run mode without mutating Turso"
         required: false
         default: false
         type: boolean
+
+permissions:
+  contents: read
 
 concurrency:
   group: ds108-vintage-ingest
@@ -24,7 +39,7 @@ concurrency:
 
 jobs:
   daily-vintage-pipeline:
-    name: Daily NASA POWER Scan & Idempotent Forecast Issuance
+    name: 2-Tier NASA POWER Scan & Latest-Only Forecast Issuance
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
@@ -48,8 +63,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-serving.txt
 
-      - name: Check Turso secret availability
-        id: creds
+      - name: Resolve credentials & 2-tier scan parameters (14d vs 150d)
+        id: ctx
+        env:
+          INPUT_SCAN_TIER: ${{ inputs.scan_tier || 'auto' }}
+          EVENT_SCHEDULE: ${{ github.event.schedule }}
         run: |
           if [ -n "${TURSO_DB_URL}" ] && [ -n "${TURSO_DB_TOKEN}" ]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
@@ -58,28 +76,60 @@ jobs:
             echo "Turso secrets not configured in this context; remote pipeline steps skipped safely."
           fi
 
-      - name: Probe NASA POWER header.sources transition cutoffs
-        if: steps.creds.outputs.ready == 'true'
-        run: |
-          DRY_FLAG=""
-          if [ "${{ inputs.dry_run }}" = "true" ]; then DRY_FLAG="--dry-run"; fi
-          python scripts/mlops/automated_pipeline.py --backend turso_remote probe-headers $DRY_FLAG
+          REQ_TIER="${INPUT_SCAN_TIER:-auto}"
+          if [ "$REQ_TIER" = "weekly_150d" ]; then
+            TIER="weekly_150d"
+          elif [ "$REQ_TIER" = "daily_14d" ]; then
+            TIER="daily_14d"
+          elif [ "$EVENT_SCHEDULE" = "23 20 * * 0" ] || [ "$(date -u +%u)" = "7" ]; then
+            TIER="weekly_150d"
+          else
+            TIER="daily_14d"
+          fi
 
-      - name: Incremental NASA POWER window ingestion
-        if: steps.creds.outputs.ready == 'true' && inputs.dry_run != true
-        run: |
-          python scripts/mlops/automated_pipeline.py --backend turso_remote ingest-window
+          if [ "$TIER" = "weekly_150d" ]; then
+            echo "scan_days=150" >> "$GITHUB_OUTPUT"
+            echo "run_probe=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "scan_days=14" >> "$GITHUB_OUTPUT"
+            echo "run_probe=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "scan_tier=${TIER}" >> "$GITHUB_OUTPUT"
 
-      - name: Issue forecasts only for new COMPLETE_ALL_35 anchors
-        if: steps.creds.outputs.ready == 'true'
+      - name: Probe NASA POWER header.sources transition cutoffs (Sunday 150d deep scan)
+        if: steps.ctx.outputs.ready == 'true' && steps.ctx.outputs.run_probe == 'true'
+        env:
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          DRY_FLAG=""
-          if [ "${{ inputs.dry_run }}" = "true" ]; then DRY_FLAG="--dry-run"; fi
-          python scripts/mlops/automated_pipeline.py --backend turso_remote issue-forecasts $DRY_FLAG
+          if [ "$INPUT_DRY_RUN" = "true" ]; then
+            python scripts/mlops/automated_pipeline.py --backend turso_remote probe-headers --dry-run
+          else
+            python scripts/mlops/automated_pipeline.py --backend turso_remote probe-headers
+          fi
+
+      - name: Incremental NASA POWER window ingestion (${{ steps.ctx.outputs.scan_days }}d)
+        if: steps.ctx.outputs.ready == 'true' && inputs.dry_run != true
+        env:
+          SCAN_DAYS: ${{ steps.ctx.outputs.scan_days }}
+        run: |
+          python scripts/mlops/automated_pipeline.py --backend turso_remote ingest-window --days "$SCAN_DAYS"
+
+      - name: Issue forecasts strictly for newest meteo-complete anchor (--latest-only)
+        if: steps.ctx.outputs.ready == 'true'
+        env:
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          if [ "$INPUT_DRY_RUN" = "true" ]; then
+            python scripts/mlops/automated_pipeline.py --backend turso_remote issue-forecasts --latest-only --dry-run
+          else
+            python scripts/mlops/automated_pipeline.py --backend turso_remote issue-forecasts --latest-only
+          fi
 
       - name: Refresh store state key and optional serving webhook
-        if: steps.creds.outputs.ready == 'true' && inputs.dry_run != true
+        if: steps.ctx.outputs.ready == 'true' && inputs.dry_run != true
         run: |
-          WEBHOOK_ARGS=""
-          if [ -n "${REFRESH_WEBHOOK_URL}" ]; then WEBHOOK_ARGS="--webhook-url ${REFRESH_WEBHOOK_URL}"; fi
-          python scripts/mlops/automated_pipeline.py --backend turso_remote refresh-cache $WEBHOOK_ARGS
+          if [ -n "${REFRESH_WEBHOOK_URL}" ]; then
+            python scripts/mlops/automated_pipeline.py --backend turso_remote refresh-cache --webhook-url "${REFRESH_WEBHOOK_URL}"
+          else
+            python scripts/mlops/automated_pipeline.py --backend turso_remote refresh-cache
+          fi
