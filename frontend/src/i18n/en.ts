@@ -46,7 +46,17 @@ export const EN = {
     brandSubtitle: "Single-model rainfall forecast & archive explorer",
     menuButtonLabel: "Open navigation menu",
     navAriaLabel: "Primary sections",
-    summaryStripPrefix: "Single location (Ho Chi Minh City) · evaluated on completed data · real-time forecasting not supported",
+    summaryStripStatus: (
+      prediction?: { effective_future_days: number; is_degraded_input?: boolean } | null
+    ) => {
+      if (prediction && prediction.effective_future_days > 0 && prediction.is_degraded_input) {
+        return "Single location (Ho Chi Minh City) · Operational forecast uses observed meteorology & estimated solar radiation";
+      }
+      if (prediction && prediction.effective_future_days > 0 && !prediction.is_degraded_input) {
+        return "Single location (Ho Chi Minh City) · Operational forecast uses completed meteorology & solar radiation";
+      }
+      return "Single location (Ho Chi Minh City) · Retrospective archive replay on completed history";
+    },
     summaryStripLink: "Read limitations",
     coldStartNotice: "Backend container is initializing model artifacts; first response may take a few seconds.",
     footerDbLabel: "Active store",
@@ -139,7 +149,10 @@ export const EN = {
     noSearchMatches: "No matching province or island found.",
     clearSelectionBtn: "Clear selection",
     selectedCountBadge: (count: number) => `${count} selected`,
-    selectedScrollMore: (extra: number) => `Scroll for ${extra} more`,
+    selectedScrollMore: (hiddenCount: number, visibleCount?: number, totalCount?: number) =>
+      visibleCount !== undefined && totalCount !== undefined
+        ? `Scroll for ${hiddenCount} more (showing ${visibleCount} of ${totalCount})`
+        : `Scroll for ${hiddenCount} more`,
     deselectBtnLabel: (name: string) => `Deselect ${name}`,
     deselectSymbol: "×",
     zoomInLabel: "+",
@@ -194,11 +207,13 @@ export const EN = {
     ceresOtherLabel: "CERES / FLASHFlux (1.0° × 1.0°)",
     northArrowLabel: "N ↑",
     scaleBarText: (km: number) => `${km} km`,
-    timelineHeading: "Empirical source transition & documentation notes (as of 2026-11-19 probe)",
-    timelineCeres: "Radiation transitions SYN1deg → FLASHFlux on 31 Aug 2026 (verified ~81-day lag as of 2026-11-19 probe).",
-    timelineMerra: "Meteorology transitions MERRA-2 → GEOS-IT on 1 Oct 2026 (verified ~50-day lag as of 2026-11-19 probe).",
+    timelineHeading: "Official NASA POWER | Data Availability & source transitions (verified 2026-11-21, Temporal LST)",
+    timelineCeres:
+      "Radiation transitions CERES SYN1deg Ed 4.1 (1° × 1°, Jan 1, 2001 – Aug 30, 2026; median latency 93 days, current 83 days) → CERES FLASHFlux v4A (1° × 1°, Aug 31, 2026 – Nov 15, 2026; median latency 5 days, current 6 days). GEWEX SRB R4-IP ended Dec 31, 2000.",
+    timelineMerra:
+      "Meteorology transitions GMAO MERRA-2 (0.5° × 0.625°, Jan 1, 1981 – Sep 30, 2026; median latency 38 days, current 52 days) → GMAO GEOS-IT (0.5° × 0.625°, Oct 1, 2026 – Nov 18, 2026; median latency 3 days, current 3 days).",
     timelineFaqNote:
-      "Solar FAQ note: NASA POWER Solar FAQ mentions 1/2° × 1/2°, while Services Documentation and our empirical boundary probe across all 11 solar variables confirm 1.0° × 1.0°.",
+      "Grid resolution & Solar FAQ note: NASA POWER | Data Availability (https://power.larc.nasa.gov/status/data/, accessed 2026-11-21) officially confirms CERES FLASHFlux v4A is 1° × 1° (closing the legacy 1/2° × 1/2° Solar FAQ discrepancy) alongside our multi-province API boundary probes across all 11 solar variables.",
     catalogHeading: "Canonical 35 serving input variables by verified spatial grid",
     catalogGroupMerra: "0.5° × 0.625° MERRA-2 / GEOS-IT meteorology & surface variables (24)",
     catalogGroupCeres: "1.0° × 1.0° CERES SYN1deg / FLASHFlux radiation & UV variables (11)",
@@ -211,12 +226,51 @@ export const EN = {
     },
   },
   forecast: {
-    mainHeading: (anchorDateStr: string, todayDateStr: string) =>
-      `Forecast issued from data up to ${anchorDateStr} (latest complete input). Today: ${todayDateStr}`,
+    mainHeading: (anchorDateStr: string, todayDateStr: string, isDegradedInput = false) =>
+      isDegradedInput
+        ? `Forecast issued from data up to ${anchorDateStr} (latest complete meteorology; solar estimated). Today: ${todayDateStr}`
+        : `Forecast issued from data up to ${anchorDateStr} (latest complete input). Today: ${todayDateStr}`,
     retrospectiveBanner: (lagDays: number) =>
       `Retrospective replay: latest complete archive input lags today by ${lagDays} days, so observed rainfall is shown beside the model line.`,
+    operationalLagBanner: (
+      lagDays: number,
+      dailyForecasts: Array<{ target_date: string; status: string }>
+    ) => {
+      const unverified = dailyForecasts.filter((d) => d.status === "past_unverified");
+      const todayRows = dailyForecasts.filter((d) => d.status === "today");
+      const futureRows = dailyForecasts.filter((d) => d.status === "future_forecast");
+      const formatSpan = (rows: Array<{ target_date: string }>) => {
+        if (rows.length === 0) return "";
+        if (rows.length === 1) return formatReadableDate(rows[0].target_date);
+        return `${formatReadableDate(rows[0].target_date)}–${formatReadableDate(rows[rows.length - 1].target_date)}`;
+      };
+      const parts: string[] = [];
+      if (unverified.length > 0) {
+        parts.push(
+          `${formatSpan(unverified)} ${unverified.length === 1 ? "is" : "are"} unverified past`
+        );
+      }
+      if (todayRows.length > 0) {
+        parts.push(`${formatSpan(todayRows)} is operational today`);
+      }
+      if (futureRows.length > 0) {
+        const dayUnit = futureRows.length === 1 ? "future day" : "future days";
+        const verb = futureRows.length === 1 ? "is a future forecast" : "are future forecasts";
+        parts.push(`${formatSpan(futureRows)} ${verb} (${futureRows.length} ${dayUnit})`);
+      }
+      if (parts.length === 0) {
+        return `NASA meteorology lags today by ${lagDays} days.`;
+      }
+      const summary =
+        parts.length === 1
+          ? parts[0]
+          : `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}`;
+      return `NASA meteorology lags today by ${lagDays} days: ${summary}.`;
+    },
     technicalBannerTooltip:
-      "Technical note: Satellite CERES radiation (SYN1deg) lags real time by ~80 days. When all 7 forecasted days precede today, zero future days remain unobserved.",
+      "Technical note: Satellite CERES radiation (SYN1deg) lags real time by ~80–93 days. When all 7 forecasted days precede today, zero future days remain unobserved.",
+    operationalBannerTooltip:
+      "Technical note: NASA POWER GMAO GEOS-IT daily meteorology lags real time by ~3–4 days (median 3 days). Across a 7-day window from the latest meteorology anchor, days before today are unverified past, today is operational today, and remaining ahead dates are true future forecasts.",
     estimatedRadiationTitle: "Estimated radiation inputs:",
     estimatedRadiationBody: (count: number) =>
       `${count} pending NASA POWER solar variable(s) at the anchor date were filled in-memory using Dev Train (2001–2018) DOY medians while keeping all 24 meteorology variables strictly observed.`,
@@ -347,13 +401,14 @@ export const EN = {
         body: "Model weights and FeatureBuilder statistics were fit strictly on Dev Train (1 Jan 2001 to 30 Apr 2018). Neither post-2018 archive data nor 2026 records have been used to retrain model parameters.",
       },
       {
-        title: "Evaluated on completed data · Latency & NRT status",
-        body: "Meteorology from MERRA-2 transitions to near-real-time GEOS-IT around a verified ~50-day cutoff (30 Sep 2026 in the Nov 2026 probe), while CERES SYN1deg radiation lags by ~80–81 days (~30 Aug 2026). NRT-to-Final revision bias has not yet been quantified in this v0 store, and prospective forward operational testing has not been executed.",
+        title: "Official NASA POWER data availability & prospective monitoring",
+        body: "Per NASA POWER | Data Availability (accessed 2026-11-21, Temporal LST): GMAO GEOS-IT (0.5° × 0.625°, Oct 1 – Nov 18, 2026) has 3-day median/current latency; CERES FLASHFlux v4A (confirmed 1° × 1°, Aug 31 – Nov 15, 2026) has 5-day median / 6-day current latency; finalized MERRA-2 (Jan 1, 1981 – Sep 30, 2026) has 38-day median / 52-day current latency; and CERES SYN1deg Ed 4.1 (Jan 1, 2001 – Aug 30, 2026; GEWEX SRB R4-IP ended Dec 31, 2000) has 93-day median / 83-day current latency. When solar variables lag, P-c DOY medians fill only missing solar inputs in-memory; operational forward verification filters strictly by is_prospective = 1.",
       },
       {
         title: "Spatial representativeness",
-        body: "NASA POWER meteorology inputs come from a gridded MERRA-2 / GEOS-IT cell of 0.5° × 0.625° (~56 × 68 km), not a point rain gauge or provincial average; any coordinates inside the same cell receive the exact same series. For Ho Chi Minh City (10.7769°N, 106.7009°E), the representative MERRA-2 cell [10.75°N, 11.25°N] × [106.5625°E, 107.1875°E] covers 29.11% of Ho Chi Minh City's polygon area, and only 16.12% of that cell lies inside the city. Because the anchor point is only ~3.0 km (0.0269°) north of the 10.75°N cell boundary, a reference point chosen > 3 km further south falls in the southern cell [10.25°N, 10.75°N] × [106.5625°E, 107.1875°E] (46.43% of the city). The representative 1.0° × 1.0° CERES radiation cell [10.0°N, 11.0°N] × [106.0°E, 107.0°E] covers 90.30% of the city (15.60% of the cell lies inside the city; note that NASA POWER Solar FAQ mentions ½° × ½°, whereas POWER Services and Data Sources documentation & our empirical boundary probes confirm 1° × 1°).",
+        body: "NASA POWER meteorology inputs come from a gridded MERRA-2 / GEOS-IT cell of 0.5° × 0.625° (~56 × 68 km), not a point rain gauge or provincial average; any coordinates inside the same cell receive the exact same series. For Ho Chi Minh City (10.7769°N, 106.7009°E), the representative MERRA-2 cell [10.75°N, 11.25°N] × [106.5625°E, 107.1875°E] covers 29.11% of Ho Chi Minh City's polygon area, and only 16.12% of that cell lies inside the city. Because the anchor point is only ~3.0 km (0.0269°) north of the 10.75°N cell boundary, a reference point chosen > 3 km further south falls in the southern cell [10.25°N, 10.75°N] × [106.5625°E, 107.1875°E] (46.43% of the city). The representative 1.0° × 1.0° CERES radiation cell [10.0°N, 11.0°N] × [106.0°E, 107.0°E] covers 90.30% of the city (15.60% of the cell lies inside the city; NASA POWER | Data Availability accessed 2026-11-21 confirms CERES FLASHFlux v4A is 1° × 1°, closing out the legacy ½° × ½° Solar FAQ note).",
         links: [
+          { label: "NASA POWER | Data Availability (accessed 2026-11-21)", url: "https://power.larc.nasa.gov/status/data/" },
           { label: "NASA POWER Services Documentation (accessed 2026-11-19)", url: "https://power.larc.nasa.gov/docs/services/" },
           { label: "NASA POWER Solar FAQs (accessed 2026-11-19)", url: "https://power.larc.nasa.gov/docs/faqs/solar/" },
           { label: "NASA POWER Methodology & Data Sources (accessed 2026-11-19)", url: "https://power.larc.nasa.gov/docs/methodology/data/sources/" },

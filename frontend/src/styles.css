@@ -1308,11 +1308,25 @@ body {
   gap: 8px;
 }
 
+.map-sidebar-col,
+.selected-locations-box,
+.selected-table-wrap {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .selected-table-scroll {
-  max-height: 195px;
+  max-height: 174px;
+  max-width: 100%;
+  overflow-x: auto;
   overflow-y: auto;
   border: 1px solid var(--border-hairline);
   border-radius: 6px;
+}
+
+.selected-table-scroll .data-table--compact th,
+.selected-table-scroll .data-table--compact td {
+  white-space: nowrap;
 }
 
 .sticky-head-table thead th {

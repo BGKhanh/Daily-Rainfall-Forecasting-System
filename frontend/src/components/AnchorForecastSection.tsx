@@ -157,7 +157,7 @@ export const AnchorForecastSection: React.FC<AnchorForecastSectionProps> = ({
   const anchorIso = prediction?.anchor_date ?? health?.default_complete_anchor_date ?? "";
   const todayIso = prediction?.run_date ?? health?.scan_window_end ?? "";
 
-  const svgW = 700;
+  const svgW = 760;
   const svgH = 260;
   const padL = 48;
   const padR = 30;
@@ -165,9 +165,13 @@ export const AnchorForecastSection: React.FC<AnchorForecastSectionProps> = ({
   const padB = 46;
   const plotW = svgW - padL - padR;
   const plotH = svgH - padT - padB;
+  const plotInsetX = 38;
+  const usableW = plotW - 2 * plotInsetX;
   const yToPx = (val: number) => padT + plotH - (Math.min(val, yMax) / yMax) * plotH;
   const xAtIdx = (idx: number) =>
-    timelinePoints.length <= 1 ? padL + plotW / 2 : padL + (idx / (timelinePoints.length - 1)) * plotW;
+    timelinePoints.length <= 1
+      ? padL + plotW / 2
+      : padL + plotInsetX + (idx / (timelinePoints.length - 1)) * usableW;
 
   const observedPathD = buildPolylinePath(
     timelinePoints.map((pt, idx) => (pt.observedMm !== null ? { x: xAtIdx(idx), y: yToPx(pt.observedMm) } : null))
@@ -258,7 +262,11 @@ export const AnchorForecastSection: React.FC<AnchorForecastSectionProps> = ({
             <div className="dock-header">
               <div>
                 <h3>
-                  {EN.forecast.mainHeading(formatReadableDate(anchorIso), formatReadableDate(todayIso))}
+                  {EN.forecast.mainHeading(
+                    formatReadableDate(anchorIso),
+                    formatReadableDate(todayIso),
+                    Boolean(prediction.is_degraded_input)
+                  )}
                 </h3>
                 <div className="dock-meta-row">
                   <span>
@@ -279,18 +287,28 @@ export const AnchorForecastSection: React.FC<AnchorForecastSectionProps> = ({
               </label>
             </div>
 
-            {prediction.lag_days > 0 && (
-              <div className="retrospective-banner" role="status" data-testid="retrospective-banner">
-                <span>{EN.forecast.retrospectiveBanner(prediction.lag_days)}</span>{" "}
-                <span
-                  className="tooltip-badge"
-                  title={EN.forecast.technicalBannerTooltip}
-                  aria-label={EN.forecast.technicalBannerTooltip}
-                >
-                  i
-                </span>
-              </div>
-            )}
+            {prediction.lag_days > 0 && (() => {
+              const bannerTooltip =
+                prediction.effective_future_days === 0
+                  ? EN.forecast.technicalBannerTooltip
+                  : EN.forecast.operationalBannerTooltip;
+              return (
+                <div className="retrospective-banner" role="status" data-testid="retrospective-banner">
+                  <span>
+                    {prediction.effective_future_days === 0
+                      ? EN.forecast.retrospectiveBanner(prediction.lag_days)
+                      : EN.forecast.operationalLagBanner(prediction.lag_days, prediction.daily_forecasts)}
+                  </span>{" "}
+                  <span
+                    className="tooltip-badge"
+                    title={bannerTooltip}
+                    aria-label={bannerTooltip}
+                  >
+                    i
+                  </span>
+                </div>
+              );
+            })()}
 
             {prediction.is_degraded_input && (
               <div className="estimated-radiation-banner" role="status" data-testid="estimated-radiation-banner">
@@ -367,11 +385,10 @@ export const AnchorForecastSection: React.FC<AnchorForecastSectionProps> = ({
                     labelStep > 1 &&
                     timelinePoints.length - 1 - idx < Math.max(2, Math.floor(labelStep * 0.5));
                   const showX = isLast || (idx % labelStep === 0 && !tooCloseToLast);
-                  const anchor = isLast ? "end" : idx === 0 ? "start" : "middle";
                   return (
                     <g key={`${pt.isPriorContext ? "prior" : "fwd"}_${pt.date}`}>
                       {showX && (
-                        <text x={cx} y={svgH - 12} textAnchor={anchor} className="chart-axis-text">
+                        <text x={cx} y={svgH - 12} textAnchor="middle" className="chart-axis-text">
                           {formatReadableDate(pt.date)}
                         </text>
                       )}

@@ -306,7 +306,7 @@ export const App: React.FC<AppProps> = ({ initialGeoJson, initialGridOverlap }) 
 
       <div className="workspace-col">
         <div className="persistent-summary-strip" role="region" aria-label={EN.tabs.governance}>
-          <span>{EN.app.summaryStripPrefix}</span>
+          <span>{EN.app.summaryStripStatus(prediction)}</span>
           <button
             type="button"
             className="strip-link-btn"

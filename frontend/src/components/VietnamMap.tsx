@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { EN, stripDiacriticsForSearch } from "../i18n/en";
 import type { LocationItem, ProvinceFeature, ProvinceGeoJson } from "../types/api";
 
@@ -302,6 +302,56 @@ export const VietnamMap: React.FC<VietnamMapProps> = ({
     () => Array.from(activeLocationsById.values()),
     [activeLocationsById]
   );
+
+  const selectedScrollRef = useRef<HTMLDivElement | null>(null);
+  const [scrollStats, setScrollStats] = useState<{
+    hiddenBelow: number;
+    visible: number;
+    total: number;
+  }>({ hiddenBelow: 0, visible: selectedLocationIds.length, total: selectedLocationIds.length });
+
+  const recomputeScrollStats = useCallback(() => {
+    const total = selectedLocationIds.length;
+    const container = selectedScrollRef.current;
+    if (!container || container.clientHeight === 0) {
+      const visible = Math.min(total, 5);
+      setScrollStats({
+        hiddenBelow: Math.max(0, total - visible),
+        visible,
+        total,
+      });
+      return;
+    }
+    const rows = Array.from(container.querySelectorAll("tbody tr")) as HTMLTableRowElement[];
+    if (rows.length === 0) {
+      setScrollStats({ hiddenBelow: 0, visible: 0, total: 0 });
+      return;
+    }
+    const viewTop = container.scrollTop;
+    const viewBottom = viewTop + container.clientHeight;
+    let hiddenBelow = 0;
+    let hiddenAbove = 0;
+    for (const row of rows) {
+      const rowTop = row.offsetTop;
+      const rowBottom = rowTop + row.offsetHeight;
+      if (rowBottom > viewBottom + 2) {
+        hiddenBelow += 1;
+      } else if (rowBottom <= viewTop + 1) {
+        hiddenAbove += 1;
+      }
+    }
+    const visible = Math.max(0, rows.length - hiddenBelow - hiddenAbove);
+    setScrollStats({ hiddenBelow, visible, total: rows.length });
+  }, [selectedLocationIds]);
+
+  useLayoutEffect(() => {
+    recomputeScrollStats();
+    const container = selectedScrollRef.current;
+    if (!container || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => recomputeScrollStats());
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [recomputeScrollStats]);
 
   return (
     <section className="panel map-panel" aria-label={EN.map.heading}>
@@ -622,7 +672,11 @@ export const VietnamMap: React.FC<VietnamMapProps> = ({
               )}
             </div>
             <div className="selected-table-wrap">
-              <div className="selected-table-scroll">
+              <div
+                className="selected-table-scroll"
+                ref={selectedScrollRef}
+                onScroll={recomputeScrollStats}
+              >
                 <table className="data-table data-table--compact sticky-head-table">
                   <thead>
                     <tr>
@@ -666,9 +720,9 @@ export const VietnamMap: React.FC<VietnamMapProps> = ({
                   </tbody>
                 </table>
               </div>
-              {selectedLocationIds.length > 5 && (
+              {scrollStats.hiddenBelow > 0 && (
                 <div className="selected-scroll-more-hint" data-testid="selected-scroll-more-badge">
-                  {EN.map.selectedScrollMore(selectedLocationIds.length - 5)}
+                  {EN.map.selectedScrollMore(scrollStats.hiddenBelow, scrollStats.visible, scrollStats.total)}
                 </div>
               )}
             </div>
