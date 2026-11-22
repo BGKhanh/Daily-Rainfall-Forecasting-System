@@ -38,7 +38,7 @@ jobs:
 
       - name: Run Ruff lint on serving backend & storage DDL V3
         run: |
-          ruff check src/api src/config/clock.py src/config/settings.py src/inference src/data/provider.py src/data/vintage_store.py src/data/grid_overlap.py src/data/turso_backend.py src/featurengineering/builder.py scripts/mlops/export_from_registry.py scripts/mlops/run_operational_checks.py scripts/mlops/run_forecast_ledger.py scripts/mlops/ensure_demo_db.py scripts/mlops/automated_pipeline.py scripts/mlops/verify_turso_parity_and_costs.py scripts/mlops/migrate_ledger_v35_audited.py tests/serving tests/storage tests/test_pc_solar_imputation_contract.py
+          ruff check src/api src/config/clock.py src/config/settings.py src/inference src/data/provider.py src/data/vintage_store.py src/data/grid_overlap.py src/data/turso_backend.py src/featurengineering/builder.py scripts/mlops/export_from_registry.py scripts/mlops/run_operational_checks.py scripts/mlops/run_forecast_ledger.py scripts/mlops/ensure_demo_db.py scripts/mlops/automated_pipeline.py scripts/mlops/verify_turso_parity_and_costs.py scripts/mlops/migrate_ledger_v35_audited.py scripts/audit/audit_db_storage_footprint.py research/imputer_benchmark/run_pc_integration_experiment.py tests/serving tests/storage tests/test_pc_solar_imputation_contract.py
 
       - name: Run Tier 1 suite (API OpenAPI/Scores Contract, Clock, Column Guard, 2184-Origin Parity, DDL V3.5, P-c Solar Imputation)
         env:
