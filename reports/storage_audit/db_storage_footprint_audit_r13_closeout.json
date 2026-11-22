@@ -1,0 +1,1029 @@
+{
+  "audited_at_utc": "2026-11-22T15:51:16.528656Z",
+  "prod_db": {
+    "path": "data/vintage/rainfall_vintage.db",
+    "read_only_snapshot": {
+      "file_size_bytes": 41775104,
+      "file_size_mb_decimal": 41.7751,
+      "file_size_mib": 39.8398,
+      "file_sha256": "d130e112acb2f9de21329b541d84580e2fa6912d3c3c5668509ff228a990f8e4",
+      "journal_mode": "delete",
+      "page_size_bytes": 4096,
+      "page_count": 10199,
+      "freelist_count": 0,
+      "freelist_bytes": 0,
+      "freelist_mb_decimal": 0.0,
+      "active_btree_pages_walked": 10199,
+      "expected_active_pages": 10199,
+      "table_row_counts": {
+        "locations": 1,
+        "ingestion_runs": 4,
+        "observations_vintage": 9454,
+        "forecasts_ledger": 7035,
+        "schema_migrations": 3
+      },
+      "objects": [
+        {
+          "type": "table",
+          "name": "sqlite_schema",
+          "tbl_name": "sqlite_schema",
+          "rootpage": 1,
+          "pages": 6,
+          "bytes": 24576
+        },
+        {
+          "type": "table",
+          "name": "locations",
+          "tbl_name": "locations",
+          "rootpage": 2,
+          "pages": 1,
+          "bytes": 4096
+        },
+        {
+          "type": "index",
+          "name": "sqlite_autoindex_locations_1",
+          "tbl_name": "locations",
+          "rootpage": 3,
+          "pages": 1,
+          "bytes": 4096
+        },
+        {
+          "type": "table",
+          "name": "ingestion_runs",
+          "tbl_name": "ingestion_runs",
+          "rootpage": 4,
+          "pages": 6,
+          "bytes": 24576
+        },
+        {
+          "type": "index",
+          "name": "sqlite_autoindex_ingestion_runs_1",
+          "tbl_name": "ingestion_runs",
+          "rootpage": 5,
+          "pages": 1,
+          "bytes": 4096
+        },
+        {
+          "type": "table",
+          "name": "observations_vintage",
+          "tbl_name": "observations_vintage",
+          "rootpage": 6,
+          "pages": 1357,
+          "bytes": 5558272
+        },
+        {
+          "type": "index",
+          "name": "sqlite_autoindex_observations_vintage_1",
+          "tbl_name": "observations_vintage",
+          "rootpage": 7,
+          "pages": 64,
+          "bytes": 262144
+        },
+        {
+          "type": "index",
+          "name": "idx_obs_vintage_loc_date_ver",
+          "tbl_name": "observations_vintage",
+          "rootpage": 9,
+          "pages": 64,
+          "bytes": 262144
+        },
+        {
+          "type": "index",
+          "name": "idx_obs_vintage_as_of_time",
+          "tbl_name": "observations_vintage",
+          "rootpage": 11,
+          "pages": 138,
+          "bytes": 565248
+        },
+        {
+          "type": "index",
+          "name": "idx_forecasts_ledger_target",
+          "tbl_name": "forecasts_ledger",
+          "rootpage": 13,
+          "pages": 70,
+          "bytes": 286720
+        },
+        {
+          "type": "table",
+          "name": "forecasts_ledger",
+          "tbl_name": "forecasts_ledger",
+          "rootpage": 18,
+          "pages": 8217,
+          "bytes": 33656832
+        },
+        {
+          "type": "index",
+          "name": "sqlite_autoindex_forecasts_ledger_1",
+          "tbl_name": "forecasts_ledger",
+          "rootpage": 1639,
+          "pages": 75,
+          "bytes": 307200
+        },
+        {
+          "type": "index",
+          "name": "idx_obs_vintage_loc_date_ingested",
+          "tbl_name": "observations_vintage",
+          "rootpage": 1641,
+          "pages": 123,
+          "bytes": 503808
+        },
+        {
+          "type": "table",
+          "name": "schema_migrations",
+          "tbl_name": "schema_migrations",
+          "rootpage": 1764,
+          "pages": 1,
+          "bytes": 4096
+        },
+        {
+          "type": "index",
+          "name": "sqlite_autoindex_schema_migrations_1",
+          "tbl_name": "schema_migrations",
+          "rootpage": 1765,
+          "pages": 1,
+          "bytes": 4096
+        },
+        {
+          "type": "index",
+          "name": "sqlite_autoindex_forecasts_ledger_2",
+          "tbl_name": "forecasts_ledger",
+          "rootpage": 1769,
+          "pages": 74,
+          "bytes": 303104
+        }
+      ],
+      "total_bytes_by_table_including_indexes": {
+        "sqlite_schema": 24576,
+        "locations": 8192,
+        "ingestion_runs": 28672,
+        "observations_vintage": 7151616,
+        "forecasts_ledger": 34553856,
+        "schema_migrations": 8192
+      },
+      "forecasts_ledger_column_bytes": {
+        "input_vintage_manifest_json": {
+          "total_bytes": 24558135,
+          "total_mb": 24.5581,
+          "avg_bytes_per_row": 3490.85
+        },
+        "artifact_sha256": {
+          "total_bytes": 450240,
+          "total_mb": 0.4502,
+          "avg_bytes_per_row": 64.0
+        },
+        "input_window_hash": {
+          "total_bytes": 450240,
+          "total_mb": 0.4502,
+          "avg_bytes_per_row": 64.0
+        },
+        "config_sha256": {
+          "total_bytes": 450240,
+          "total_mb": 0.4502,
+          "avg_bytes_per_row": 64.0
+        },
+        "result_config_sha256": {
+          "total_bytes": 450240,
+          "total_mb": 0.4502,
+          "avg_bytes_per_row": 64.0
+        },
+        "imputed_values_json": {
+          "total_bytes": 394275,
+          "total_mb": 0.3943,
+          "avg_bytes_per_row": 56.04,
+          "degraded_rows_count": 1659,
+          "degraded_rows_total_bytes": 383523,
+          "degraded_rows_avg_bytes": 231.18
+        },
+        "git_sha": {
+          "total_bytes": 281400,
+          "total_mb": 0.2814,
+          "avg_bytes_per_row": 40.0
+        },
+        "feature_builder_sha256": {
+          "total_bytes": 270144,
+          "total_mb": 0.2701,
+          "avg_bytes_per_row": 38.4
+        },
+        "forecast_id": {
+          "total_bytes": 216678,
+          "total_mb": 0.2167,
+          "avg_bytes_per_row": 30.8
+        },
+        "issued_at_utc": {
+          "total_bytes": 189945,
+          "total_mb": 0.1899,
+          "avg_bytes_per_row": 27.0
+        },
+        "ceres_policy_applied": {
+          "total_bytes": 141162,
+          "total_mb": 0.1412,
+          "avg_bytes_per_row": 20.07
+        },
+        "issued_by": {
+          "total_bytes": 126630,
+          "total_mb": 0.1266,
+          "avg_bytes_per_row": 18.0
+        },
+        "run_timezone": {
+          "total_bytes": 112560,
+          "total_mb": 0.1126,
+          "avg_bytes_per_row": 16.0
+        },
+        "doy_table_sha256": {
+          "total_bytes": 106176,
+          "total_mb": 0.1062,
+          "avg_bytes_per_row": 15.09
+        },
+        "pred_mm": {
+          "total_bytes": 105503,
+          "total_mb": 0.1055,
+          "avg_bytes_per_row": 15.0
+        },
+        "degraded_reason": {
+          "total_bytes": 101262,
+          "total_mb": 0.1013,
+          "avg_bytes_per_row": 14.39
+        },
+        "temporal_status_at_issue": {
+          "total_bytes": 91535,
+          "total_mb": 0.0915,
+          "avg_bytes_per_row": 13.01
+        },
+        "model_id": {
+          "total_bytes": 83013,
+          "total_mb": 0.083,
+          "avg_bytes_per_row": 11.8
+        },
+        "issued_run_date": {
+          "total_bytes": 70350,
+          "total_mb": 0.0703,
+          "avg_bytes_per_row": 10.0
+        },
+        "data_as_of": {
+          "total_bytes": 70350,
+          "total_mb": 0.0703,
+          "avg_bytes_per_row": 10.0
+        },
+        "target_date": {
+          "total_bytes": 70350,
+          "total_mb": 0.0703,
+          "avg_bytes_per_row": 10.0
+        },
+        "input_window_start": {
+          "total_bytes": 70350,
+          "total_mb": 0.0703,
+          "avg_bytes_per_row": 10.0
+        },
+        "input_window_end": {
+          "total_bytes": 70350,
+          "total_mb": 0.0703,
+          "avg_bytes_per_row": 10.0
+        },
+        "eval_split_regime": {
+          "total_bytes": 63315,
+          "total_mb": 0.0633,
+          "avg_bytes_per_row": 9.0
+        },
+        "model_kind": {
+          "total_bytes": 61908,
+          "total_mb": 0.0619,
+          "avg_bytes_per_row": 8.8
+        },
+        "registry_alias": {
+          "total_bytes": 61908,
+          "total_mb": 0.0619,
+          "avg_bytes_per_row": 8.8
+        },
+        "location_id": {
+          "total_bytes": 28140,
+          "total_mb": 0.0281,
+          "avg_bytes_per_row": 4.0
+        },
+        "input_provisional_days": {
+          "total_bytes": 10815,
+          "total_mb": 0.0108,
+          "avg_bytes_per_row": 1.54
+        },
+        "horizon_day": {
+          "total_bytes": 7035,
+          "total_mb": 0.007,
+          "avg_bytes_per_row": 1.0
+        },
+        "meteo_missing_count": {
+          "total_bytes": 7035,
+          "total_mb": 0.007,
+          "avg_bytes_per_row": 1.0
+        },
+        "flashflux_max_ffill_days": {
+          "total_bytes": 7035,
+          "total_mb": 0.007,
+          "avg_bytes_per_row": 1.0
+        },
+        "ceres_max_staleness_days": {
+          "total_bytes": 7035,
+          "total_mb": 0.007,
+          "avg_bytes_per_row": 1.0
+        },
+        "is_degraded_input": {
+          "total_bytes": 7035,
+          "total_mb": 0.007,
+          "avg_bytes_per_row": 1.0
+        },
+        "registry_model_version": {
+          "total_bytes": 4221,
+          "total_mb": 0.0042,
+          "avg_bytes_per_row": 0.6
+        }
+      }
+    },
+    "temp_copy_vacuum_simulation": {
+      "after_vacuum_file_size_bytes": 41566208,
+      "after_vacuum_file_size_mb_decimal": 41.5662,
+      "after_vacuum_file_size_mib": 39.6406,
+      "after_vacuum_page_count": 10148,
+      "after_vacuum_freelist_count": 0,
+      "after_vacuum_by_table_bytes": {
+        "sqlite_schema": 24576,
+        "locations": 8192,
+        "ingestion_runs": 28672,
+        "observations_vintage": 7032832,
+        "schema_migrations": 8192,
+        "forecasts_ledger": 34463744
+      }
+    }
+  },
+  "demo_db": {
+    "path": "artifacts/models/demo_rainfall_vintage.db",
+    "before_vacuum": {
+      "file_size_bytes": 58224640,
+      "file_size_mb_decimal": 58.2246,
+      "file_size_mib": 55.5273,
+      "file_sha256": "603bfb2e3e6c310c9e7f13b9f7934c61aab0c38f1fd9ab6fef63f3251218d0f1",
+      "journal_mode": "delete",
+      "page_size_bytes": 4096,
+      "page_count": 14215,
+      "freelist_count": 7282,
+      "freelist_bytes": 29827072,
+      "freelist_mb_decimal": 29.8271,
+      "active_btree_pages_walked": 6933,
+      "expected_active_pages": 6933,
+      "table_row_counts": {
+        "locations": 1,
+        "ingestion_runs": 4,
+        "observations_vintage": 9454,
+        "forecasts_ledger": 4270,
+        "schema_migrations": 3
+      },
+      "objects": [
+        {
+          "type": "table",
+          "name": "sqlite_schema",
+          "tbl_name": "sqlite_schema",
+          "rootpage": 1,
+          "pages": 6,
+          "bytes": 24576
+        },
+        {
+          "type": "table",
+          "name": "locations",
+          "tbl_name": "locations",
+          "rootpage": 2,
+          "pages": 1,
+          "bytes": 4096
+        },
+        {
+          "type": "index",
+          "name": "sqlite_autoindex_locations_1",
+          "tbl_name": "locations",
+          "rootpage": 3,
+          "pages": 1,
+          "bytes": 4096
+        },
+        {
+          "type": "table",
+          "name": "ingestion_runs",
+          "tbl_name": "ingestion_runs",
+          "rootpage": 4,
+          "pages": 6,
+          "bytes": 24576
+        },
+        {
+          "type": "index",
+          "name": "sqlite_autoindex_ingestion_runs_1",
+          "tbl_name": "ingestion_runs",
+          "rootpage": 5,
+          "pages": 1,
+          "bytes": 4096
+        },
+        {
+          "type": "table",
+          "name": "observations_vintage",
+          "tbl_name": "observations_vintage",
+          "rootpage": 6,
+          "pages": 1357,
+          "bytes": 5558272
+        },
+        {
+          "type": "index",
+          "name": "sqlite_autoindex_observations_vintage_1",
+          "tbl_name": "observations_vintage",
+          "rootpage": 7,
+          "pages": 57,
+          "bytes": 233472
+        },
+        {
+          "type": "index",
+          "name": "idx_forecasts_ledger_target",
+          "tbl_name": "forecasts_ledger",
+          "rootpage": 9,
+          "pages": 39,
+          "bytes": 159744
+        },
+        {
+          "type": "index",
+          "name": "idx_obs_vintage_loc_date_ver",
+          "tbl_name": "observations_vintage",
+          "rootpage": 14,
+          "pages": 57,
+          "bytes": 233472
+        },
+        {
+          "type": "index",
+          "name": "idx_obs_vintage_as_of_time",
+          "tbl_name": "observations_vintage",
+          "rootpage": 15,
+          "pages": 123,
+          "bytes": 503808
+        },
+        {
+          "type": "table",
+          "name": "forecasts_ledger",
+          "tbl_name": "forecasts_ledger",
+          "rootpage": 1609,
+          "pages": 5067,
+          "bytes": 20754432
+        },
+        {
+          "type": "index",
+          "name": "idx_obs_vintage_loc_date_ingested",
+          "tbl_name": "observations_vintage",
+          "rootpage": 6032,
+          "pages": 123,
+          "bytes": 503808
+        },
+        {
+          "type": "table",
+          "name": "schema_migrations",
+          "tbl_name": "schema_migrations",
+          "rootpage": 6155,
+          "pages": 1,
+          "bytes": 4096
+        },
+        {
+          "type": "index",
+          "name": "sqlite_autoindex_schema_migrations_1",
+          "tbl_name": "schema_migrations",
+          "rootpage": 6156,
+          "pages": 1,
+          "bytes": 4096
+        },
+        {
+          "type": "index",
+          "name": "sqlite_autoindex_forecasts_ledger_1",
+          "tbl_name": "forecasts_ledger",
+          "rootpage": 9057,
+          "pages": 47,
+          "bytes": 192512
+        },
+        {
+          "type": "index",
+          "name": "sqlite_autoindex_forecasts_ledger_2",
+          "tbl_name": "forecasts_ledger",
+          "rootpage": 9058,
+          "pages": 46,
+          "bytes": 188416
+        }
+      ],
+      "total_bytes_by_table_including_indexes": {
+        "sqlite_schema": 24576,
+        "locations": 8192,
+        "ingestion_runs": 28672,
+        "observations_vintage": 7032832,
+        "forecasts_ledger": 21295104,
+        "schema_migrations": 8192
+      },
+      "forecasts_ledger_column_bytes": {
+        "input_vintage_manifest_json": {
+          "total_bytes": 14811895,
+          "total_mb": 14.8119,
+          "avg_bytes_per_row": 3468.83
+        },
+        "artifact_sha256": {
+          "total_bytes": 273280,
+          "total_mb": 0.2733,
+          "avg_bytes_per_row": 64.0
+        },
+        "input_window_hash": {
+          "total_bytes": 273280,
+          "total_mb": 0.2733,
+          "avg_bytes_per_row": 64.0
+        },
+        "config_sha256": {
+          "total_bytes": 273280,
+          "total_mb": 0.2733,
+          "avg_bytes_per_row": 64.0
+        },
+        "result_config_sha256": {
+          "total_bytes": 273280,
+          "total_mb": 0.2733,
+          "avg_bytes_per_row": 64.0
+        },
+        "git_sha": {
+          "total_bytes": 170800,
+          "total_mb": 0.1708,
+          "avg_bytes_per_row": 40.0
+        },
+        "feature_builder_sha256": {
+          "total_bytes": 163968,
+          "total_mb": 0.164,
+          "avg_bytes_per_row": 38.4
+        },
+        "forecast_id": {
+          "total_bytes": 131516,
+          "total_mb": 0.1315,
+          "avg_bytes_per_row": 30.8
+        },
+        "issued_by": {
+          "total_bytes": 123830,
+          "total_mb": 0.1238,
+          "avg_bytes_per_row": 29.0
+        },
+        "issued_at_utc": {
+          "total_bytes": 115290,
+          "total_mb": 0.1153,
+          "avg_bytes_per_row": 27.0
+        },
+        "ceres_policy_applied": {
+          "total_bytes": 72590,
+          "total_mb": 0.0726,
+          "avg_bytes_per_row": 17.0
+        },
+        "run_timezone": {
+          "total_bytes": 68320,
+          "total_mb": 0.0683,
+          "avg_bytes_per_row": 16.0
+        },
+        "pred_mm": {
+          "total_bytes": 64075,
+          "total_mb": 0.0641,
+          "avg_bytes_per_row": 15.01
+        },
+        "temporal_status_at_issue": {
+          "total_bytes": 55510,
+          "total_mb": 0.0555,
+          "avg_bytes_per_row": 13.0
+        },
+        "model_id": {
+          "total_bytes": 50386,
+          "total_mb": 0.0504,
+          "avg_bytes_per_row": 11.8
+        },
+        "issued_run_date": {
+          "total_bytes": 42700,
+          "total_mb": 0.0427,
+          "avg_bytes_per_row": 10.0
+        },
+        "data_as_of": {
+          "total_bytes": 42700,
+          "total_mb": 0.0427,
+          "avg_bytes_per_row": 10.0
+        },
+        "target_date": {
+          "total_bytes": 42700,
+          "total_mb": 0.0427,
+          "avg_bytes_per_row": 10.0
+        },
+        "input_window_start": {
+          "total_bytes": 42700,
+          "total_mb": 0.0427,
+          "avg_bytes_per_row": 10.0
+        },
+        "input_window_end": {
+          "total_bytes": 42700,
+          "total_mb": 0.0427,
+          "avg_bytes_per_row": 10.0
+        },
+        "eval_split_regime": {
+          "total_bytes": 38430,
+          "total_mb": 0.0384,
+          "avg_bytes_per_row": 9.0
+        },
+        "model_kind": {
+          "total_bytes": 37576,
+          "total_mb": 0.0376,
+          "avg_bytes_per_row": 8.8
+        },
+        "registry_alias": {
+          "total_bytes": 37576,
+          "total_mb": 0.0376,
+          "avg_bytes_per_row": 8.8
+        },
+        "location_id": {
+          "total_bytes": 17080,
+          "total_mb": 0.0171,
+          "avg_bytes_per_row": 4.0
+        },
+        "imputed_values_json": {
+          "total_bytes": 8540,
+          "total_mb": 0.0085,
+          "avg_bytes_per_row": 2.0,
+          "degraded_rows_count": 0,
+          "degraded_rows_total_bytes": 0,
+          "degraded_rows_avg_bytes": 0.0
+        },
+        "input_provisional_days": {
+          "total_bytes": 5390,
+          "total_mb": 0.0054,
+          "avg_bytes_per_row": 1.26
+        },
+        "horizon_day": {
+          "total_bytes": 4270,
+          "total_mb": 0.0043,
+          "avg_bytes_per_row": 1.0
+        },
+        "meteo_missing_count": {
+          "total_bytes": 4270,
+          "total_mb": 0.0043,
+          "avg_bytes_per_row": 1.0
+        },
+        "flashflux_max_ffill_days": {
+          "total_bytes": 4270,
+          "total_mb": 0.0043,
+          "avg_bytes_per_row": 1.0
+        },
+        "ceres_max_staleness_days": {
+          "total_bytes": 4270,
+          "total_mb": 0.0043,
+          "avg_bytes_per_row": 1.0
+        },
+        "is_degraded_input": {
+          "total_bytes": 4270,
+          "total_mb": 0.0043,
+          "avg_bytes_per_row": 1.0
+        },
+        "registry_model_version": {
+          "total_bytes": 2562,
+          "total_mb": 0.0026,
+          "avg_bytes_per_row": 0.6
+        },
+        "degraded_reason": {
+          "total_bytes": 0,
+          "total_mb": 0.0,
+          "avg_bytes_per_row": 0.0
+        },
+        "doy_table_sha256": {
+          "total_bytes": 0,
+          "total_mb": 0.0,
+          "avg_bytes_per_row": 0.0
+        }
+      }
+    },
+    "vacuum_executed": true,
+    "after_vacuum": {
+      "file_size_bytes": 28356608,
+      "file_size_mb_decimal": 28.3566,
+      "file_size_mib": 27.043,
+      "file_sha256": "7466f39dcbbd71e1d70a13d5f3c81d7624094cce7edba637922c7341851bed08",
+      "journal_mode": "delete",
+      "page_size_bytes": 4096,
+      "page_count": 6923,
+      "freelist_count": 0,
+      "freelist_bytes": 0,
+      "freelist_mb_decimal": 0.0,
+      "active_btree_pages_walked": 6923,
+      "expected_active_pages": 6923,
+      "table_row_counts": {
+        "locations": 1,
+        "ingestion_runs": 4,
+        "observations_vintage": 9454,
+        "schema_migrations": 3,
+        "forecasts_ledger": 4270
+      },
+      "objects": [
+        {
+          "type": "table",
+          "name": "sqlite_schema",
+          "tbl_name": "sqlite_schema",
+          "rootpage": 1,
+          "pages": 6,
+          "bytes": 24576
+        },
+        {
+          "type": "table",
+          "name": "locations",
+          "tbl_name": "locations",
+          "rootpage": 2,
+          "pages": 1,
+          "bytes": 4096
+        },
+        {
+          "type": "index",
+          "name": "sqlite_autoindex_locations_1",
+          "tbl_name": "locations",
+          "rootpage": 3,
+          "pages": 1,
+          "bytes": 4096
+        },
+        {
+          "type": "table",
+          "name": "ingestion_runs",
+          "tbl_name": "ingestion_runs",
+          "rootpage": 4,
+          "pages": 6,
+          "bytes": 24576
+        },
+        {
+          "type": "index",
+          "name": "sqlite_autoindex_ingestion_runs_1",
+          "tbl_name": "ingestion_runs",
+          "rootpage": 5,
+          "pages": 1,
+          "bytes": 4096
+        },
+        {
+          "type": "table",
+          "name": "observations_vintage",
+          "tbl_name": "observations_vintage",
+          "rootpage": 6,
+          "pages": 1357,
+          "bytes": 5558272
+        },
+        {
+          "type": "index",
+          "name": "sqlite_autoindex_observations_vintage_1",
+          "tbl_name": "observations_vintage",
+          "rootpage": 7,
+          "pages": 57,
+          "bytes": 233472
+        },
+        {
+          "type": "table",
+          "name": "schema_migrations",
+          "tbl_name": "schema_migrations",
+          "rootpage": 9,
+          "pages": 1,
+          "bytes": 4096
+        },
+        {
+          "type": "index",
+          "name": "sqlite_autoindex_schema_migrations_1",
+          "tbl_name": "schema_migrations",
+          "rootpage": 10,
+          "pages": 1,
+          "bytes": 4096
+        },
+        {
+          "type": "table",
+          "name": "forecasts_ledger",
+          "tbl_name": "forecasts_ledger",
+          "rootpage": 13,
+          "pages": 5067,
+          "bytes": 20754432
+        },
+        {
+          "type": "index",
+          "name": "sqlite_autoindex_forecasts_ledger_1",
+          "tbl_name": "forecasts_ledger",
+          "rootpage": 14,
+          "pages": 42,
+          "bytes": 172032
+        },
+        {
+          "type": "index",
+          "name": "sqlite_autoindex_forecasts_ledger_2",
+          "tbl_name": "forecasts_ledger",
+          "rootpage": 15,
+          "pages": 41,
+          "bytes": 167936
+        },
+        {
+          "type": "index",
+          "name": "idx_obs_vintage_loc_date_ver",
+          "tbl_name": "observations_vintage",
+          "rootpage": 16,
+          "pages": 57,
+          "bytes": 233472
+        },
+        {
+          "type": "index",
+          "name": "idx_obs_vintage_as_of_time",
+          "tbl_name": "observations_vintage",
+          "rootpage": 17,
+          "pages": 123,
+          "bytes": 503808
+        },
+        {
+          "type": "index",
+          "name": "idx_obs_vintage_loc_date_ingested",
+          "tbl_name": "observations_vintage",
+          "rootpage": 18,
+          "pages": 123,
+          "bytes": 503808
+        },
+        {
+          "type": "index",
+          "name": "idx_forecasts_ledger_target",
+          "tbl_name": "forecasts_ledger",
+          "rootpage": 20,
+          "pages": 39,
+          "bytes": 159744
+        }
+      ],
+      "total_bytes_by_table_including_indexes": {
+        "sqlite_schema": 24576,
+        "locations": 8192,
+        "ingestion_runs": 28672,
+        "observations_vintage": 7032832,
+        "schema_migrations": 8192,
+        "forecasts_ledger": 21254144
+      },
+      "forecasts_ledger_column_bytes": {
+        "input_vintage_manifest_json": {
+          "total_bytes": 14811895,
+          "total_mb": 14.8119,
+          "avg_bytes_per_row": 3468.83
+        },
+        "artifact_sha256": {
+          "total_bytes": 273280,
+          "total_mb": 0.2733,
+          "avg_bytes_per_row": 64.0
+        },
+        "input_window_hash": {
+          "total_bytes": 273280,
+          "total_mb": 0.2733,
+          "avg_bytes_per_row": 64.0
+        },
+        "config_sha256": {
+          "total_bytes": 273280,
+          "total_mb": 0.2733,
+          "avg_bytes_per_row": 64.0
+        },
+        "result_config_sha256": {
+          "total_bytes": 273280,
+          "total_mb": 0.2733,
+          "avg_bytes_per_row": 64.0
+        },
+        "git_sha": {
+          "total_bytes": 170800,
+          "total_mb": 0.1708,
+          "avg_bytes_per_row": 40.0
+        },
+        "feature_builder_sha256": {
+          "total_bytes": 163968,
+          "total_mb": 0.164,
+          "avg_bytes_per_row": 38.4
+        },
+        "forecast_id": {
+          "total_bytes": 131516,
+          "total_mb": 0.1315,
+          "avg_bytes_per_row": 30.8
+        },
+        "issued_by": {
+          "total_bytes": 123830,
+          "total_mb": 0.1238,
+          "avg_bytes_per_row": 29.0
+        },
+        "issued_at_utc": {
+          "total_bytes": 115290,
+          "total_mb": 0.1153,
+          "avg_bytes_per_row": 27.0
+        },
+        "ceres_policy_applied": {
+          "total_bytes": 72590,
+          "total_mb": 0.0726,
+          "avg_bytes_per_row": 17.0
+        },
+        "run_timezone": {
+          "total_bytes": 68320,
+          "total_mb": 0.0683,
+          "avg_bytes_per_row": 16.0
+        },
+        "pred_mm": {
+          "total_bytes": 64075,
+          "total_mb": 0.0641,
+          "avg_bytes_per_row": 15.01
+        },
+        "temporal_status_at_issue": {
+          "total_bytes": 55510,
+          "total_mb": 0.0555,
+          "avg_bytes_per_row": 13.0
+        },
+        "model_id": {
+          "total_bytes": 50386,
+          "total_mb": 0.0504,
+          "avg_bytes_per_row": 11.8
+        },
+        "issued_run_date": {
+          "total_bytes": 42700,
+          "total_mb": 0.0427,
+          "avg_bytes_per_row": 10.0
+        },
+        "data_as_of": {
+          "total_bytes": 42700,
+          "total_mb": 0.0427,
+          "avg_bytes_per_row": 10.0
+        },
+        "target_date": {
+          "total_bytes": 42700,
+          "total_mb": 0.0427,
+          "avg_bytes_per_row": 10.0
+        },
+        "input_window_start": {
+          "total_bytes": 42700,
+          "total_mb": 0.0427,
+          "avg_bytes_per_row": 10.0
+        },
+        "input_window_end": {
+          "total_bytes": 42700,
+          "total_mb": 0.0427,
+          "avg_bytes_per_row": 10.0
+        },
+        "eval_split_regime": {
+          "total_bytes": 38430,
+          "total_mb": 0.0384,
+          "avg_bytes_per_row": 9.0
+        },
+        "model_kind": {
+          "total_bytes": 37576,
+          "total_mb": 0.0376,
+          "avg_bytes_per_row": 8.8
+        },
+        "registry_alias": {
+          "total_bytes": 37576,
+          "total_mb": 0.0376,
+          "avg_bytes_per_row": 8.8
+        },
+        "location_id": {
+          "total_bytes": 17080,
+          "total_mb": 0.0171,
+          "avg_bytes_per_row": 4.0
+        },
+        "imputed_values_json": {
+          "total_bytes": 8540,
+          "total_mb": 0.0085,
+          "avg_bytes_per_row": 2.0,
+          "degraded_rows_count": 0,
+          "degraded_rows_total_bytes": 0,
+          "degraded_rows_avg_bytes": 0.0
+        },
+        "input_provisional_days": {
+          "total_bytes": 5390,
+          "total_mb": 0.0054,
+          "avg_bytes_per_row": 1.26
+        },
+        "horizon_day": {
+          "total_bytes": 4270,
+          "total_mb": 0.0043,
+          "avg_bytes_per_row": 1.0
+        },
+        "meteo_missing_count": {
+          "total_bytes": 4270,
+          "total_mb": 0.0043,
+          "avg_bytes_per_row": 1.0
+        },
+        "flashflux_max_ffill_days": {
+          "total_bytes": 4270,
+          "total_mb": 0.0043,
+          "avg_bytes_per_row": 1.0
+        },
+        "ceres_max_staleness_days": {
+          "total_bytes": 4270,
+          "total_mb": 0.0043,
+          "avg_bytes_per_row": 1.0
+        },
+        "is_degraded_input": {
+          "total_bytes": 4270,
+          "total_mb": 0.0043,
+          "avg_bytes_per_row": 1.0
+        },
+        "registry_model_version": {
+          "total_bytes": 2562,
+          "total_mb": 0.0026,
+          "avg_bytes_per_row": 0.6
+        },
+        "degraded_reason": {
+          "total_bytes": 0,
+          "total_mb": 0.0,
+          "avg_bytes_per_row": 0.0
+        },
+        "doy_table_sha256": {
+          "total_bytes": 0,
+          "total_mb": 0.0,
+          "avg_bytes_per_row": 0.0
+        }
+      }
+    },
+    "reclaimed_bytes": 29868032,
+    "all_29_columns_bit_identical_after_vacuum": true
+  }
+}
