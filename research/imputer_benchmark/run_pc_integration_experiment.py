@@ -39,6 +39,10 @@ from research.imputer_benchmark.run_ceres8_vs_11_audit import (  # noqa: E402
 )
 from src.analysis.integrity import assert_no_purged_metrics  # noqa: E402
 from src.data.vintage_store import EN_TO_VI_CANONICAL, connect_sqlite  # noqa: E402
+from src.inference.forecast_runner import (  # noqa: E402
+    build_block_bootstrap_indices,
+    summarize_bootstrap_samples,
+)
 from src.inference.validation import CANONICAL_DATE_COL, CANONICAL_TARGET_COL  # noqa: E402
 
 ARTIFACT_DIR = PROJECT_ROOT / "artifacts" / "models"
@@ -214,6 +218,7 @@ def _slice_horizon_metrics(
     *,
     p90_thresh: float,
     h_slice: slice,
+    boot_idx_matrix: np.ndarray,
 ) -> Dict[str, Any]:
     yt_s = y_true[:, h_slice]
     yp_s = y_pred[:, h_slice]
@@ -223,9 +228,13 @@ def _slice_horizon_metrics(
     yp = yp_s.reshape(-1)
     yc = yc_s.reshape(-1)
 
-    abs_err = np.abs(yp - yt)
-    sq_err = (yp - yt) ** 2
-    abs_err_c = np.abs(yc - yt)
+    abs_err_2d = np.abs(yp_s - yt_s)
+    sq_err_2d = (yp_s - yt_s) ** 2
+    abs_err_c_2d = np.abs(yc_s - yt_s)
+
+    abs_err = abs_err_2d.reshape(-1)
+    sq_err = sq_err_2d.reshape(-1)
+    abs_err_c = abs_err_c_2d.reshape(-1)
     sq_err_c = (yc - yt) ** 2
 
     mae = float(np.mean(abs_err))
@@ -235,6 +244,15 @@ def _slice_horizon_metrics(
     rmse_c = float(math.sqrt(float(np.mean(sq_err_c))))
     mase = mae / MASE_SCALE
 
+    # Moving Block Bootstrap 95% CIs (block_length=7, n_bootstrap=2000, seed=42) via per-origin slice means
+    origin_abs = np.mean(abs_err_2d, axis=1)
+    origin_sq = np.mean(sq_err_2d, axis=1)
+    origin_delta_abs = origin_abs - np.mean(abs_err_c_2d, axis=1)
+
+    boot_mae = np.mean(origin_abs[boot_idx_matrix], axis=1)
+    boot_rmse = np.sqrt(np.mean(origin_sq[boot_idx_matrix], axis=1))
+    boot_delta_mae = np.mean(origin_delta_abs[boot_idx_matrix], axis=1)
+
     p90_mask = yt >= p90_thresh
     p90_mae = float(np.mean(abs_err[p90_mask]))
     p90_mae_c = float(np.mean(abs_err_c[p90_mask]))
@@ -242,16 +260,19 @@ def _slice_horizon_metrics(
     out = {
         "n_origins": int(y_true.shape[0]),
         "MAE": round(mae, 6),
+        "MAE_ci95": summarize_bootstrap_samples(boot_mae, mae),
         "MSE": round(mse, 6),
         "RMSE": round(rmse, 6),
+        "RMSE_ci95": summarize_bootstrap_samples(boot_rmse, rmse),
         "MASE": round(mase, 6),
         "delta_MAE": round(mae - mae_c, 6),
+        "delta_MAE_ci95": summarize_bootstrap_samples(boot_delta_mae, mae - mae_c),
         "delta_RMSE": round(rmse - rmse_c, 6),
         "p90_tail_mae": round(p90_mae, 6),
         "delta_p90_tail_mae": round(p90_mae - p90_mae_c, 6),
         "oracle_fidelity_mae": round(float(np.mean(np.abs(yp - yc))), 6),
     }
-    assert_no_purged_metrics(pd.DataFrame([out]))
+    assert_no_purged_metrics(pd.DataFrame([{k: v for k, v in out.items() if not isinstance(v, dict)}]))
     return out
 
 
@@ -261,11 +282,18 @@ def _evaluate_predictions_split_horizons(
     y_clean: np.ndarray,
     *,
     p90_thresh: float,
+    boot_idx_matrix: np.ndarray,
 ) -> Dict[str, Dict[str, Any]]:
     return {
-        "h1_to_7": _slice_horizon_metrics(y_true, y_pred, y_clean, p90_thresh=p90_thresh, h_slice=slice(0, 7)),
-        "h1_to_3": _slice_horizon_metrics(y_true, y_pred, y_clean, p90_thresh=p90_thresh, h_slice=slice(0, 3)),
-        "h4_to_7": _slice_horizon_metrics(y_true, y_pred, y_clean, p90_thresh=p90_thresh, h_slice=slice(3, 7)),
+        "h1_to_7": _slice_horizon_metrics(
+            y_true, y_pred, y_clean, p90_thresh=p90_thresh, h_slice=slice(0, 7), boot_idx_matrix=boot_idx_matrix
+        ),
+        "h1_to_3": _slice_horizon_metrics(
+            y_true, y_pred, y_clean, p90_thresh=p90_thresh, h_slice=slice(0, 3), boot_idx_matrix=boot_idx_matrix
+        ),
+        "h4_to_7": _slice_horizon_metrics(
+            y_true, y_pred, y_clean, p90_thresh=p90_thresh, h_slice=slice(3, 7), boot_idx_matrix=boot_idx_matrix
+        ),
     }
 
 
@@ -342,6 +370,7 @@ def main() -> int:
         y_true = sp["y_true"]
         raw_idx = sp["raw_indices"]
         dates = sp["origin_dates"]
+        boot_idx_matrix = build_block_bootstrap_indices(len(y_true), block_length=7, n_bootstrap=2000, seed=42)
 
         clean_preds = {
             mid: _predict_single(m_obj, X_clean, col_idx)
@@ -355,7 +384,7 @@ def main() -> int:
                     r_obj, r_idx = retrained_24[mid]
                     y_pred = _predict_single(r_obj, X_clean, r_idx)
                     split_out[mid][meth] = _evaluate_predictions_split_horizons(
-                        y_true, y_pred, clean_preds[mid], p90_thresh=p90_dev_train
+                        y_true, y_pred, clean_preds[mid], p90_thresh=p90_dev_train, boot_idx_matrix=boot_idx_matrix
                     )
                 continue
 
@@ -370,7 +399,7 @@ def main() -> int:
             for mid, (m_obj, col_idx) in frozen_models.items():
                 y_pred = _predict_single(m_obj, X_mod, col_idx)
                 split_out[mid][meth] = _evaluate_predictions_split_horizons(
-                    y_true, y_pred, clean_preds[mid], p90_thresh=p90_dev_train
+                    y_true, y_pred, clean_preds[mid], p90_thresh=p90_dev_train, boot_idx_matrix=boot_idx_matrix
                 )
         results_by_split[split_name] = split_out
 
@@ -513,17 +542,24 @@ def _append_pc_section_to_readme(payload: Dict[str, Any]) -> None:
         s30 = f"{pm['SC-30']['delta_MAE']:+.4f} / {pm['SC-30']['delta_RMSE']:+.4f} / {pm['SC-30']['delta_p90_tail_mae']:+.4f}"
         lines.append(f"| `{cand}` | `{ge['all_3_models_pass_all_3_clauses']}` | {s35} | {s31} | {s30} |")
 
-    lines.extend(["", "### Test (`2,184` Origins) Split-Horizon Breakdown (`h=1..7` vs `h=1..3` vs `h=4..7`)", ""])
-    lines.append("| Model | Method | Slice | MAE | delta MAE | MSE | RMSE | delta RMSE | P90-Tail MAE | delta P90-Tail |")
-    lines.append("|---|---|---|---:|---:|---:|---:|---:|---:|---:|")
+    lines.extend(["", "### Test (`2,184` Origins) Split-Horizon Breakdown (`h=1..7` vs `h=1..3` vs `h=4..7` with 95% Moving Block Bootstrap `block_length=7`)", ""])
+    lines.append("| Model | Method | Slice | MAE [95% CI] | delta MAE [95% CI] | MSE | RMSE [95% CI] | delta RMSE | P90-Tail MAE | delta P90-Tail | Fidelity-MAE |")
+    lines.append("|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|")
     for mid in ("SC-35", "SC-31", "SC-30"):
         for meth in ("clean", "p_c_doy_median_all_11_solar", "p_c_ffill7_lag3d", "p_c_ffill7_lag7d", "retrained_no_solar_24vars"):
             for sl in ("h1_to_7", "h1_to_3", "h4_to_7"):
                 m = payload["results_by_split"]["test_2184"][mid][meth][sl]
+                mae_ci = m["MAE_ci95"]
+                dmae_ci = m["delta_MAE_ci95"]
+                rmse_ci = m["RMSE_ci95"]
                 lines.append(
-                    f"| {mid} | `{meth}` | `{sl}` | {m['MAE']:.4f} | {m['delta_MAE']:+.4f} | "
-                    f"{m['MSE']:.4f} | {m['RMSE']:.4f} | {m['delta_RMSE']:+.4f} | "
-                    f"{m['p90_tail_mae']:.4f} | {m['delta_p90_tail_mae']:+.4f} |"
+                    f"| {mid} | `{meth}` | `{sl}` | "
+                    f"{m['MAE']:.4f} [{mae_ci['ci_lower']:.4f}, {mae_ci['ci_upper']:.4f}] | "
+                    f"{m['delta_MAE']:+.4f} [{dmae_ci['ci_lower']:+.4f}, {dmae_ci['ci_upper']:+.4f}] | "
+                    f"{m['MSE']:.4f} | "
+                    f"{m['RMSE']:.4f} [{rmse_ci['ci_lower']:.4f}, {rmse_ci['ci_upper']:.4f}] | "
+                    f"{m['delta_RMSE']:+.4f} | "
+                    f"{m['p90_tail_mae']:.4f} | {m['delta_p90_tail_mae']:+.4f} | {m['oracle_fidelity_mae']:.4f} |"
                 )
     OUT_README_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
