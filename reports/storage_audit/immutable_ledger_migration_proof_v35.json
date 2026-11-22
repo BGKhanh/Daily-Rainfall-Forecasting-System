@@ -123,5 +123,12 @@
     "degraded_reason": "0e57de6f3c380a2a476cf72511865ff8b64f09ef78c34e760a81385072173048",
     "git_sha": "3dc96344787634de8810de168d40c362cac68c207b6ad7d7f8209c9f49bd270f"
   },
-  "db_file_sha256": "603bfb2e3e6c310c9e7f13b9f7934c61aab0c38f1fd9ab6fef63f3251218d0f1"
+  "db_file_sha256": "7466f39dcbbd71e1d70a13d5f3c81d7624094cce7edba637922c7341851bed08",
+  "post_vacuum_audit": {
+    "vacuumed_at_utc": "2026-11-22T15:51:18.217715Z",
+    "file_size_bytes_before": 58224640,
+    "file_size_bytes_after": 28356608,
+    "freelist_count_after": 0,
+    "all_29_columns_bit_identical_after_vacuum": true
+  }
 }

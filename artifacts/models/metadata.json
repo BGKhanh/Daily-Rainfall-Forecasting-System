@@ -239,7 +239,7 @@
     "sc35_xgboost_tweedie_f3.joblib": "eee30d04c666dd099608cfba6c26ea3eec690bc7bfd9a6c6715983b74515653f",
     "standalone_inference.py": "0848ba6ec2302fde58b9ba8e479b404af17be927208af5ce0a3133c4132c86ec",
     "solar_doy_climatology_dev_train.json": "6d16431eeee0c44f55169c909d94bab3210e78dbe4a88a9435dc3c9dea6d9872",
-    "demo_rainfall_vintage.db": "603bfb2e3e6c310c9e7f13b9f7934c61aab0c38f1fd9ab6fef63f3251218d0f1"
+    "demo_rainfall_vintage.db": "7466f39dcbbd71e1d70a13d5f3c81d7624094cce7edba637922c7341851bed08"
   },
   "timezone": "Asia/Ho_Chi_Minh (UTC+7)"
 }
