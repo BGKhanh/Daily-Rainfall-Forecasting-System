@@ -256,3 +256,124 @@ def test_automated_pipeline_deferred_on_quota_blocked(tmp_path: Path, monkeypatc
     assert payload["degraded_reason"] == "TURSO_REMOTE_BLOCKED"
     assert secret_tok not in json.dumps(payload)
     assert secret_tok not in capsys.readouterr().out
+
+
+def test_issue_forecasts_latest_only_issues_only_newest_anchor_and_skips_repeat(tmp_path: Path):
+    """Verify `--latest-only` issues ONLY the newest complete anchor (never backfilling prior unissued dates) and skips on repeat."""
+    db_path = tmp_path / "pipeline_latest_only.db"
+    # Seed 2026-10-15..2026-11-17 (34 days) -> 3 meteo-complete anchors in [2026-11-15, 2026-11-17]
+    last_iso = _seed_40_complete_days(db_path, start_iso="2026-10-15", n_days=34)
+    assert last_iso == "2026-11-17"
+
+    out_json = tmp_path / "latest_only_cli.json"
+    rc = pipeline_main(
+        [
+            "--backend",
+            "local",
+            "--db-path",
+            str(db_path),
+            "--json-out",
+            str(out_json),
+            "issue-forecasts",
+            "--post-test-start",
+            "2026-11-15",
+            "--end-date",
+            "2026-11-17",
+            "--latest-only",
+        ]
+    )
+    assert rc == 0
+    cli_res = json.loads(out_json.read_text(encoding="utf-8"))
+    assert cli_res["status"] == "SUCCESS"
+    assert cli_res["anchors_processed"] == 1
+    assert cli_res["rows_inserted"] == 35
+    assert cli_res["latest_issued_anchor"] == "2026-11-17"
+
+    conn = connect_sqlite(db_path, read_only=False)
+    try:
+        counts = {
+            d: int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM forecasts_ledger WHERE data_as_of = ?",
+                    (d,),
+                ).fetchone()[0]
+            )
+            for d in ("2026-11-15", "2026-11-16", "2026-11-17")
+        }
+        assert counts == {"2026-11-15": 0, "2026-11-16": 0, "2026-11-17": 35}
+
+        # Second call with latest_only=True MUST SKIP and leave prior unissued dates at 0
+        repeat = run_issue_forecasts_step(
+            conn=conn,
+            post_test_start="2026-11-15",
+            end_date="2026-11-17",
+            latest_only=True,
+        )
+        assert repeat["status"] == "SKIPPED"
+        assert repeat["reason"] == "no_new_complete_anchor"
+        assert repeat["latest_complete_anchor"] == "2026-11-17"
+        assert repeat["rows_inserted"] == 0
+        assert (
+            int(conn.execute("SELECT COUNT(*) FROM forecasts_ledger WHERE data_as_of = '2026-11-15'").fetchone()[0])
+            == 0
+        )
+
+        # Empty anchor window with latest_only=True MUST SKIP cleanly without IndexError
+        empty_res = run_issue_forecasts_step(
+            conn=conn,
+            post_test_start="2026-12-01",
+            end_date="2026-12-05",
+            latest_only=True,
+        )
+        assert empty_res["status"] == "SKIPPED"
+        assert empty_res["reason"] == "no_complete_anchor_in_window"
+    finally:
+        conn.close()
+
+
+def test_ingest_window_days_cli_validation_and_audit_db_footprint_bounds(tmp_path: Path, monkeypatch):
+    """Verify `--days` CLI bounds enforcement and B-tree footprint auditor + truncated-header guards."""
+    import pytest
+    from scripts.audit.audit_db_storage_footprint import (
+        _calc_overflow_first_page,
+        _read_varint,
+        inspect_sqlite_footprint,
+        walk_btree_pages,
+    )
+
+    db_path = tmp_path / "days_and_audit.db"
+    _seed_40_complete_days(db_path, start_iso="2026-10-15", n_days=34)
+
+    # `--days 0` or `> 1000` must fail cleanly at CLI parse time
+    with pytest.raises(SystemExit) as exc_bad:
+        pipeline_main(["--backend", "local", "--db-path", str(db_path), "ingest-window", "--days", "0"])
+    assert exc_bad.value.code == 2
+
+    # `--days 14` alias resolves cleanly via patched ingest helper
+    captured: list[int] = []
+
+    def _fake_ingest(conn, *, lookback_days=0, **kwargs):
+        captured.append(int(lookback_days))
+        return {"status": "SUCCESS", "run_id": "mock_14d", "rows_scanned": 14}
+
+    monkeypatch.setattr("scripts.mlops.automated_pipeline.ingest_nasa_power_window", _fake_ingest)
+    rc = pipeline_main(["--backend", "local", "--db-path", str(db_path), "ingest-window", "--days", "14"])
+    assert rc == 0
+    assert captured == [14]
+
+    # Footprint inspector returns exact page accounting and column sizes
+    fp = inspect_sqlite_footprint(db_path)
+    assert fp["active_btree_pages_walked"] == fp["expected_active_pages"]
+    assert fp["table_row_counts"]["observations_vintage"] == 35
+
+    # Binary bounds guards reject truncated / invalid inputs cleanly
+    bad_file = tmp_path / "not_sqlite.db"
+    bad_file.write_bytes(b"short")
+    with pytest.raises(ValueError, match="hydrated SQLite"):
+        inspect_sqlite_footprint(bad_file)
+    with pytest.raises(ValueError, match="Truncated SQLite varint"):
+        _read_varint(b"\x81", 0)
+    with pytest.raises(ValueError, match="usable_size"):
+        _calc_overflow_first_page(b"\x0d" + b"\x00" * 30, 0, 0x0D, 16)
+    with pytest.raises(ValueError, match="Invalid or truncated SQLite"):
+        walk_btree_pages(b"bad", 1, 4096, 4096)

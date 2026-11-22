@@ -210,7 +210,9 @@ reports/storage_audit/*
 !reports/storage_audit/turso_python_client_wheel_logs.json
 !reports/storage_audit/SUMMARY_ROUND12.md
 !reports/storage_audit/SUMMARY_ROUND13.md
+!reports/storage_audit/SUMMARY_ROUND13_CLOSEOUT.md
 !reports/storage_audit/immutable_ledger_migration_proof_v35.json
+!reports/storage_audit/db_storage_footprint_audit_r13_closeout.json
 !reports/ui_screenshots/
 reports/ui_screenshots/*
 !reports/ui_screenshots/r12_*.png
@@ -241,6 +243,7 @@ scripts/*
 !scripts/audit/
 scripts/audit/*
 !scripts/audit/probe_nasa_header_sources.py
+!scripts/audit/audit_db_storage_footprint.py
 !scripts/data/
 scripts/data/*
 !scripts/data/ingest_nasa_vintage.py

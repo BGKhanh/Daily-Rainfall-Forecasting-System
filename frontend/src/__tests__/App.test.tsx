@@ -904,4 +904,95 @@ describe("Round 10 English SPA, Single-Model Main, 2-Layer Map & Data Retrieval"
       "Simplified polygon differs from official GSO area by +26.8% (official: 1,440.4 km²) — overlap percentages are approximate"
     );
   });
+
+  it("renders Round 13-Closeout dynamic top strip, heading, and operational vs retrospective banner branches", async () => {
+    const branch1Predict: PredictResponse = {
+      ...MOCK_PREDICT,
+      anchor_date: "2026-11-17",
+      data_as_of: "2026-11-17",
+      run_date: "2026-11-21",
+      lag_days: 4,
+      effective_future_days: 3,
+      is_degraded_input: true,
+      ceres_policy_applied: "P-c_DOY_MEDIAN_11_SOLAR_V1",
+      imputed_variables: ["ALLSKY_SFC_SW_DWN", "CLRSKY_SFC_SW_DWN"],
+      daily_forecasts: [
+        { target_date: "2026-11-18", horizon_day: 1, status: "past_unverified", observed_mm: null, predictions: { "SC-35": 4.1, "SC-30": 4.2, "SC-31": 4.0, BASELINE_CLIMATOLOGY_DOY: 3.0, BASELINE_PERSISTENCE: 2.0 } },
+        { target_date: "2026-11-19", horizon_day: 2, status: "past_unverified", observed_mm: null, predictions: { "SC-35": 4.5, "SC-30": 4.4, "SC-31": 4.3, BASELINE_CLIMATOLOGY_DOY: 3.0, BASELINE_PERSISTENCE: 2.0 } },
+        { target_date: "2026-11-20", horizon_day: 3, status: "past_unverified", observed_mm: null, predictions: { "SC-35": 5.0, "SC-30": 4.9, "SC-31": 4.8, BASELINE_CLIMATOLOGY_DOY: 3.0, BASELINE_PERSISTENCE: 2.0 } },
+        { target_date: "2026-11-21", horizon_day: 4, status: "today", observed_mm: null, predictions: { "SC-35": 5.2, "SC-30": 5.1, "SC-31": 5.0, BASELINE_CLIMATOLOGY_DOY: 3.0, BASELINE_PERSISTENCE: 2.0 } },
+        { target_date: "2026-11-22", horizon_day: 5, status: "future_forecast", observed_mm: null, predictions: { "SC-35": 4.8, "SC-30": 4.7, "SC-31": 4.6, BASELINE_CLIMATOLOGY_DOY: 3.0, BASELINE_PERSISTENCE: 2.0 } },
+        { target_date: "2026-11-23", horizon_day: 6, status: "future_forecast", observed_mm: null, predictions: { "SC-35": 4.2, "SC-30": 4.1, "SC-31": 4.0, BASELINE_CLIMATOLOGY_DOY: 3.0, BASELINE_PERSISTENCE: 2.0 } },
+        { target_date: "2026-11-24", horizon_day: 7, status: "future_forecast", observed_mm: null, predictions: { "SC-35": 3.9, "SC-30": 3.8, "SC-31": 3.7, BASELINE_CLIMATOLOGY_DOY: 3.0, BASELINE_PERSISTENCE: 2.0 } },
+      ],
+    };
+    installFetchMock({ predict: branch1Predict });
+    const { unmount } = render(<App initialGeoJson={MOCK_GEOJSON} initialGridOverlap={MOCK_GRID_OVERLAP} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("estimated-radiation-banner")).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByText(
+        "Single location (Ho Chi Minh City) · Operational forecast uses observed meteorology & estimated solar radiation"
+      )
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Forecast issued from data up to 17 Nov 2026 (latest complete meteorology; solar estimated). Today: 21 Nov 2026"
+      )
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("retrospective-banner")).toHaveTextContent(
+      "NASA meteorology lags today by 4 days: 18 Nov 2026–20 Nov 2026 are unverified past, 21 Nov 2026 is operational today, and 22 Nov 2026–24 Nov 2026 are future forecasts (3 future days)."
+    );
+    expect(screen.getByTestId("estimated-radiation-banner")).toBeInTheDocument();
+    unmount();
+
+    const branch2Predict: PredictResponse = {
+      ...MOCK_PREDICT,
+      anchor_date: "2026-08-30",
+      data_as_of: "2026-08-30",
+      run_date: "2026-11-21",
+      lag_days: 83,
+      effective_future_days: 0,
+      is_degraded_input: false,
+      ceres_policy_applied: "NONE",
+      imputed_variables: [],
+    };
+    installFetchMock({ predict: branch2Predict });
+    const { unmount: unmount2 } = render(<App initialGeoJson={MOCK_GEOJSON} initialGridOverlap={MOCK_GRID_OVERLAP} />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Single location (Ho Chi Minh City) · Retrospective archive replay on completed history")
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText("Forecast issued from data up to 30 Aug 2026 (latest complete input). Today: 21 Nov 2026")
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("retrospective-banner")).toHaveTextContent(
+      "Retrospective replay: latest complete archive input lags today by 83 days, so observed rainfall is shown beside the model line."
+    );
+    expect(screen.queryByTestId("estimated-radiation-banner")).not.toBeInTheDocument();
+    unmount2();
+
+    // Non-degraded operational branch (effective_future_days > 0 && !is_degraded_input)
+    installFetchMock({
+      predict: {
+        ...branch1Predict,
+        is_degraded_input: false,
+        ceres_policy_applied: "NONE",
+        imputed_variables: [],
+      },
+    });
+    render(<App initialGeoJson={MOCK_GEOJSON} initialGridOverlap={MOCK_GRID_OVERLAP} />);
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          "Single location (Ho Chi Minh City) · Operational forecast uses completed meteorology & solar radiation"
+        )
+      ).toBeInTheDocument();
+    });
+  });
 });
