@@ -1,6 +1,9 @@
 # Mini-Task Round 13-Closeout Summary — UI Copy & X-Axis Polish, 2-Tier NASA POWER Schedule (`14d`/`150d` + `--latest-only`), B-Tree Storage Audit (`58.22 -> 28.36 MB`) & Bootstrap CIs
 
 - **Previous Repository Rename Push (`f2f23c8`)**: `Backend Serving CI` Run [`44913877678`](https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System/actions/runs/44913877678) — `completed / success`
+- **Round 13-Closeout Head Commit (`31a042b`) CI Runs**:
+  - `Backend Serving CI` Run [`45044546308`](https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System/actions/runs/45044546308) — `completed / success` (Tier 1 CI, MLflow Registry Audit, Tier 2 Docker CI)
+  - `Scheduled NASA POWER Ingest & Forecast Issuance` Run [`45091703773`](https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System/actions/runs/45091703773) — `completed / success` (2-Tier NASA POWER Scan & Latest-Only Forecast Issuance)
 - **Live Production DB & Turso `ds108` Policy**: Kept **untouched** (`data/vintage/rainfall_vintage.db` local `41,775,104 B` / `41.78 MB` / `39.84 MiB`; `39.52 MB` reported on Turso `ds108`; `7,035` `automated_pipeline` rows across `2026-05-01..2026-11-17`). All prospective forward-testing queries must filter strictly by **`is_prospective = 1`**.
 
 ---

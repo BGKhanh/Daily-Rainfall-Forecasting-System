@@ -211,6 +211,7 @@ reports/storage_audit/*
 !reports/storage_audit/SUMMARY_ROUND12.md
 !reports/storage_audit/SUMMARY_ROUND13.md
 !reports/storage_audit/SUMMARY_ROUND13_CLOSEOUT.md
+!reports/storage_audit/SUMMARY_ROUND14.md
 !reports/storage_audit/immutable_ledger_migration_proof_v35.json
 !reports/storage_audit/db_storage_footprint_audit_r13_closeout.json
 !reports/ui_screenshots/
