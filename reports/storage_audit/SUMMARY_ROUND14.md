@@ -1,21 +1,21 @@
-# Mini-Task Round 14 Summary — Stage 1 H=11 Horizon Extension Feasibility Audit & Hard-Stop Gate Report
+# Mini-Task Round 14 Summary — Stage 1 H=11 Feasibility Audit, Canonical `70`/`65` Contract, Closeout Diagnostics & Option A Freeze
 
 - **Execution Policy**: Strict Two-Stage Hard Gate (`Step 0 -> Stage 1 Benchmark & Gate -> Conditional Step 2`).
 - **Final Stage 1 Gate Decision**: **`stop_and_report_triggered = True`** (`winning_H_star = None` across eligible targets $H^* \in \{11, 10\}$; diagnostics $H^* \in \{9, 8\}$ also failed `Clause B2` & `Clause B3`).
-- **Step 2 Status**: **NOT EXECUTED (Hard Stop Triggered)**. Serving remains locked at **`H = 7`**, Docker tag **`1.7.0-serving`**, SQLite **`DDL V3.5`**, MLflow `v1` aliases, and zero edits were made to `artifacts/models/`, `src/`, `frontend/`, `docs/`, `scripts/`, or `forecasts_ledger`.
+- **Round 14 Closeout Decision (Option A Locked)**:
+  - Keep production serving strictly locked at **`H = 7`**, Docker tag **`1.7.0-serving`**, SQLite **`DDL V3.5`**, and MLflow `v1` aliases.
+  - **Stage 2 Release is permanently closed**; **`input_window_manifests` (`DDL V3.6`)** is deferred to multi-province scaling (`39.52 MB` current DB size, `< 1%` of Turso Free 5 GB quota).
+  - Zero edits made to `src/`, `artifacts/models/`, `frontend/`, `docs/`, or `data/` (`forecasts_ledger`).
 
 ---
 
-## Step 0 — Verified GitHub Actions CI for Round 13-Closeout (`31a042b`)
+## Step 0 — Verified GitHub Actions CI (`31a042b` & Round 14 Push `6e3e283`)
 
-Queried via GitHub Actions REST API for `head_sha = 31a042b69ecda71ce7d1c91c6d466bd7d7580b44` on `BGKhanh/Daily-Rainfall-Forecasting-System`:
-
-1. **`Backend Serving CI`** — Run ID [`45044546308`](https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System/actions/runs/45044546308) — `status = completed`, `conclusion = success`
-   - `Tier 1 CI — Ruff Lint, Serving Unit/Golden Parity & SQLite DDL V3 Trigger Tests`: `completed / success`
-   - `DagsHub MLflow Registry Checksum Audit (Optional)`: `completed / success`
-   - `Tier 2 CI — Docker Container Build, Linux Parity & RSS Smoke Check`: `completed / success`
-2. **`Scheduled NASA POWER Ingest & Forecast Issuance`** — Run ID [`45091703773`](https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System/actions/runs/45091703773) — `status = completed`, `conclusion = success`
-   - `2-Tier NASA POWER Scan & Latest-Only Forecast Issuance`: `completed / success`
+1. **Round 13-Closeout Head (`31a042b69ecda71ce7d1c91c6d466bd7d7580b44`)**:
+   - **`Backend Serving CI`** — Run ID [`45044546308`](https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System/actions/runs/45044546308) — `completed / success` (`Tier 1 CI`, `DagsHub MLflow Registry Checksum Audit (Optional)`, `Tier 2 CI — Docker Build & RSS Smoke Check`).
+   - **`Scheduled NASA POWER Ingest & Forecast Issuance`** — Run ID [`45091703773`](https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System/actions/runs/45091703773) — `completed / success`.
+2. **Round 14 Stage 1 Push (`6e3e28351af2e6b85be226c8b4dd2b20939976cb`)**:
+   - **`Backend Serving CI`** — Run ID [`45114930563`](https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System/actions/runs/45114930563) — `completed / success`.
 
 ---
 
@@ -30,9 +30,21 @@ Queried via GitHub Actions REST API for `head_sha = 31a042b69ecda71ce7d1c91c6d46
   - `Validation` (`2018-05-01..2020-04-30`, `731` days, `context_df=dev_train.tail(30)`): **`720` origins** (`2018-05-01..2020-04-19`).
   - `Test` (`2020-05-01..2026-04-30`, `2,191` days, `context_df=val.tail(30)`): **`2,180` origins** (`2020-05-01..2026-04-19`).
 - **Evaluation Protocol**:
-  - Canonical model factories (`_create_sc35_model`, `_create_lgbm_config_a_model` from `scripts/mlops/package_models.py`) fit strictly on `6,289` clean `Dev Train` origins: `SC-35` (XGBoost Tweedie `F3`), `SC-31` (LightGBM Tweedie `F3` Config A), `SC-30` (LightGBM Tweedie `F2` Config A), `BASELINE_CLIMATOLOGY_DOY` (DOY `1..366` `PRECTOTCORR` mean fit strictly on `Dev Train`), `BASELINE_PERSISTENCE` (`PRECTOTCORR[t]`).
+  - Canonical model factories (`_create_sc35_model`, `_create_lgbm_config_a_model` from `scripts/mlops/package_models.py`) fit strictly on `6,289` clean `Dev Train` origins: `SC-35`, `SC-31`, `SC-30`, `BASELINE_CLIMATOLOGY_DOY` (DOY `1..366` `PRECTOTCORR` mean fit strictly on `Dev Train`), `BASELINE_PERSISTENCE` (`PRECTOTCORR[t]`).
   - Evaluated under `clean` (35 observed vars) and `P-c` (`solar_doy_climatology_dev_train.json`, SHA-256 `6d16431eeee0c44f55169c909d94bab3210e78dbe4a88a9435dc3c9dea6d9872`, transform parity diff `0.0 < 1e-12`).
   - Metrics: `MAE`, `RMSE`, `MSE`, `MASE` (`scale = 3.7015424361567635`), `P90-Tail MAE` (`>= 11.086 mm`), `Fidelity-MAE`, diffs vs `BASELINE_CLIMATOLOGY_DOY`, and **Moving Block Bootstrap 95% CIs** (`block_length = 11`, `n_bootstrap = 2000`, `seed = 42`). Purged-metrics firewall (`assert_no_purged_metrics`) passed across every flattened metric window.
+
+---
+
+### Canonical Feature Matrix Contract (`70` Columns `F3` / `65` Columns `F2`)
+
+Verified directly in [`run_h11_feasibility_audit.py`](../../research/horizon_extension/run_h11_feasibility_audit.py) (`len(f3_cols) == 70`, `len(f2_cols) == 65`, `f3_cols[:65] == f2_cols`) and against [`artifacts/feature_names.json`](../../artifacts/feature_names.json) (`all_70_features`, exact ordered equality `fn == f3_cols`) plus packaged `FeatureBuilder` and `.joblib` estimators (`n_features_in_`):
+
+| Model | Feature Set | `X_train.shape` | `X_val.shape` | `X_test.shape` | `len(feature_names)` |
+|---|---|---|---|---|---|
+| `SC-35` (XGBoost Tweedie) | `F3` (`f3_idx = list(range(70))`) | `(6289, 70)` | `(720, 70)` | `(2180, 70)` | `70` |
+| `SC-31` (LightGBM Tweedie Config A) | `F3` (`f3_idx = list(range(70))`) | `(6289, 70)` | `(720, 70)` | `(2180, 70)` | `70` |
+| `SC-30` (LightGBM Tweedie Config A) | `F2` (`f2_idx = list(range(65))`, first 65 of `F3`) | `(6289, 65)` | `(720, 65)` | `(2180, 65)` | `65` |
 
 ---
 
@@ -57,20 +69,21 @@ Queried via GitHub Actions REST API for `head_sha = 31a042b69ecda71ce7d1c91c6d46
 
 ---
 
-### Root-Cause Analysis of `Clause B2` & `Clause B3` Failure
+### Scientific Diagnostics & Roadmap v2.0 Conclusion (Round 14 Closeout — Option A Locked)
 
-1. **Overall `MAE` and `RMSE` remain positive skill through `h=11`, but Heavy-Rain Tail (`>= 11.086 mm`) breaks cleanly past `h=1..7`**:
-   - On `SC-35` under `P-c`, overall `MAE` beats `BASELINE_CLIMATOLOGY_DOY` at every single horizon `h=1..11` on both `Val` (`-0.4011` to `-0.7978 mm`) and `Test` (`-0.1865` to `-0.4986 mm`), with `95%` MBB CI upper bounds strictly `< 0.0` on every extended slice.
-   - However, on extreme rain events (`PRECTOTCORR >= 11.086 mm`), `SC-35` beats `BASELINE_CLIMATOLOGY_DOY` only at `h=1` (`ΔP90 = -1.4009 mm` Val, `-1.4789 mm` Test), tracks near parity across `h1_to_7` on Val (`-0.0706 mm`, already `+0.1013 mm` on Test), and degrades across **`h=8..11`**:
-     - **Val `P-c`**: `h8` `+0.2670`, `h9` `+0.2621`, `h10` `+0.4371`, `h11` `+0.3766 mm` (`h8_to_11 = +0.3357 mm`).
-     - **Test `P-c`**: `h8` `+0.4595`, `h9` `+0.5207`, `h10` `+0.7029`, `h11` `+0.5862 mm` (`h8_to_11 = +0.5673 mm`).
-2. **Intrinsic Predictability Limit, NOT a `P-c` Artifact**:
-   - Identical `P90-Tail MAE` degradation occurs under **`clean` 35-variable** evaluation (`SC-35` `h8_to_11` `clean`: `ΔP90 = +0.3381 mm` on Val, `+0.5787 mm` on Test), and across both `SC-31` (`+0.5463` Val / `+0.6976` Test under `P-c`) and `SC-30` (`+0.5938` Val / `+0.6498` Test under `P-c`).
-   - Direct Tweedie (`power = 1.5`) point regression regresses toward conservative conditional expectations once multi-day meteorological autocorrelation vanishes past ~7 days, under-predicting sudden heavy convective days (`>= 11.086 mm`) compared to the seasonal DOY climatological mean.
+1. **Diagnosis 1 — Positive `ΔP90-Tail MAE` on Test emerges immediately at `h=2`, not only `h=8`**:
+   - On **Held-Out Test (`n = 2,180`, `P-c`)**, `SC-35` outperforms `BASELINE_CLIMATOLOGY_DOY` on extreme rainfall (`PRECTOTCORR >= 11.086 mm`) strictly at **`h=1` (`-1.4789 mm`)**. Immediately from **`h=2` to `h=7`**, `ΔP90-Tail` turns continuously positive (`h=2: +0.2401`, `h=3: +0.4301`, `h=4: +0.4071`, `h=5: +0.3988`, `h=6: +0.3379`, `h=7: +0.3740 mm`), making `h1_to_7` on Test **`+0.1013 mm`** before expanding to `+0.4595..+0.7029 mm` across `h=8..11` (`h8_to_11 = +0.5673 mm`).
+   - On **Validation (`n = 720`, `P-c`)**, `h1_to_7` stays marginally negative (`-0.0706 mm`) solely because the **`h=1` pull (`-1.4009 mm`)** offsets `h=2..7` (`h=2: +0.0170`, `h=3: -0.0175`, `h=4: +0.1962`, `h=5: +0.3549`, `h=6: +0.1268`, `h=7: +0.2291 mm`). Every horizon window excluding `h=1` (`h4_to_10`, `h5_to_11`, `h8_to_11`) yields positive `ΔP90-Tail` on both Validation (`+0.2676..+0.3357 mm`) and Test (`+0.4573..+0.5673 mm`). Identical degradation under **`clean` 35-var** inputs (`+0.3381 mm` Val, `+0.5787 mm` Test on `h8_to_11`) confirms an intrinsic medium-range predictability barrier rather than a `P-c` imputation artifact.
+2. **Diagnosis 2 — Why `ΔMAE` flattens from `h=2` to `h=11` (`~ -0.20 mm`), while `ΔRMSE` captures convective skill decay**:
+   - `BASELINE_CLIMATOLOGY_DOY` predicts calendar-day arithmetic means ($\mathbb{E}[Y \mid \text{DOY}]$). On right-skewed tropical rainfall with `47.56%–56.60%` sub-threshold dry days (`PRECTOTCORR < 1.0 mm`; exact zero on `22.77%–27.32%` of days), the arithmetic mean is $L_2$-optimal (`RMSE`) but suboptimal for $L_1$ (`MAE`), whose optimizer is the lower conditional median. Consequently, Tweedie (`p = 1.5`) point predictions shrunk toward conservative conditional expectations automatically retain a structural $L_1$ advantage on dry/light-rain days, flattening Test `ΔMAE` from **`-0.2086 mm` (`h=2`)** to **`-0.2087 mm` (`h=11`)**.
+   - Conversely, **`RMSE` ($L_2$)** faithfully exposes convective skill decay: on Held-Out Test (`P-c`), `SC-35` `ΔRMSE vs Climatology DOY` falls from **`-0.5741 mm` at `h=1`** (`95% CI [-0.7172, -0.4533]`) to **`-0.0819 mm` at `h=7`** (`95% CI [-0.1755, +0.0233]`, crossing `0` from `h=3` onward) and **`-0.0262 mm` at `h=10`**, leaving **`h8_to_11` at `-0.0566 mm`** with **`95% MBB CI [-0.1630, +0.0522]` crossing `0`** (statistically non-significant).
+3. **Roadmap v2.0 & Option A Closeout Decision**:
+   - Overcoming the **3–4 true future days** (`effective_future_days`) limit imposed by GMAO GEOS-IT observation latency requires **NWP numerical weather prediction future covariates (`t+1..t+7`)** in v2.0 rather than stretching historical point-observation regression past day 7.
+   - **Option A Locked**: Operational serving stays at **`H = 7`, Docker `1.7.0-serving`, SQLite `DDL V3.5`, MLflow `v1` aliases**; Stage 2 is closed; **`input_window_manifests` (`DDL V3.6`)** is deferred to multi-province expansion (current production DB `39.52 MB`, `< 1%` of Turso Free 5 GB quota).
 
 ---
 
-### Full `SC-35` Slice & Extended Cross-Model Tables (`P-c` & `clean`, 95% MBB CIs)
+### Full `SC-35` Slice Tables (`Val n = 720` & `Test n = 2,180`, `P-c`, 95% MBB CIs)
 
 #### `SC-35` Validation (`n = 720`, `P-c`) — All Slices
 
@@ -100,17 +113,9 @@ Queried via GitHub Actions REST API for `head_sha = 31a042b69ecda71ce7d1c91c6d46
 
 ---
 
-## Recommendations
-
-1. **Keep Operational Serving Locked at `H = 7` (`1.7.0-serving`, `DDL V3.5`)**: Extending `H` to `10` or `11` with frozen Tweedie direct regressors degrades heavy-rain (`>= 11.086 mm`) tail accuracy across both Validation and Test, even though aggregate `MAE`/`RMSE` remain below Climatology DOY.
-2. **Future Storage Optimization (`DDL V3.6` `input_window_manifests`)**: Can be pursued independently in a storage-only release without changing model horizon `H = 7`, since `input_vintage_manifest_json` accounts for `~76%` of `forecasts_ledger` bytes (`24.56 MB`).
-3. **Future Medium-Range Research**: If days `+8..+11` are revisited later, evaluate hurdle/quantile or ensemble synoptic post-processing rather than pure Tweedie point regression, and retain the strict 4-clause Val+Test gate.
-
----
-
-## Verification & Reviews (Stage 1 Only)
+## Verification & Reviews
 
 - **Ruff Check**: `ruff check research/horizon_extension/` — `All checks passed!`
-- **Stage 1 Unit & Contract Tests**: `pytest research/horizon_extension/test_h11_feasibility_audit.py` — **`8 passed`** (`39.14s`)
-- **Core Serving Regression Check**: Not modified (`src/`, `artifacts/models/`, `frontend/`, `tests/` untouched).
-- **Subagent Reviews**: Executed independent Standards (`48c501e8`), Spec Conformance (`9814c66c`), and Security/Differential (`32ee2b40`) reviews on Stage 1 diff; resolved all actionable findings prior to atomic commits and push.
+- **Stage 1 & Closeout Contract Tests**: `pytest research/horizon_extension/test_h11_feasibility_audit.py` — **`9 passed`**
+- **Core Serving Protection**: Zero changes in `src/`, `artifacts/models/`, `frontend/`, `docs/`, `data/`.
+- **Round 14-Closeout Commit & CI Verification**: Recorded on `main` (`Backend Serving CI` completed `success`).
