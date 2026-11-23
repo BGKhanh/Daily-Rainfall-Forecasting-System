@@ -9,13 +9,15 @@
 
 ---
 
-## Step 0 — Verified GitHub Actions CI (`31a042b` & Round 14 Push `6e3e283`)
+## Step 0 — Verified GitHub Actions CI (`31a042b`, `6e3e283` & Closeout `e95b6d1`)
 
 1. **Round 13-Closeout Head (`31a042b69ecda71ce7d1c91c6d466bd7d7580b44`)**:
    - **`Backend Serving CI`** — Run ID [`45044546308`](https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System/actions/runs/45044546308) — `completed / success` (`Tier 1 CI`, `DagsHub MLflow Registry Checksum Audit (Optional)`, `Tier 2 CI — Docker Build & RSS Smoke Check`).
    - **`Scheduled NASA POWER Ingest & Forecast Issuance`** — Run ID [`45091703773`](https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System/actions/runs/45091703773) — `completed / success`.
 2. **Round 14 Stage 1 Push (`6e3e28351af2e6b85be226c8b4dd2b20939976cb`)**:
    - **`Backend Serving CI`** — Run ID [`45114930563`](https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System/actions/runs/45114930563) — `completed / success`.
+3. **Round 14-Closeout Push (`71ec7a0` / `e95b6d1a830785df61341e9dc5258075500f5801`)**:
+   - **`Backend Serving CI`** — Run ID [`45119684631`](https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System/actions/runs/45119684631) — `completed / success` (`Tier 1 CI`, `DagsHub MLflow Registry Checksum Audit (Optional)`, `Tier 2 CI`).
 
 ---
 
@@ -118,4 +120,6 @@ Verified directly in [`run_h11_feasibility_audit.py`](../../research/horizon_ext
 - **Ruff Check**: `ruff check research/horizon_extension/` — `All checks passed!`
 - **Stage 1 & Closeout Contract Tests**: `pytest research/horizon_extension/test_h11_feasibility_audit.py` — **`9 passed`**
 - **Core Serving Protection**: Zero changes in `src/`, `artifacts/models/`, `frontend/`, `docs/`, `data/`.
-- **Round 14-Closeout Commit & CI Verification**: Recorded on `main` (`Backend Serving CI` completed `success`).
+- **Round 14-Closeout Commits & CI Verification**:
+  - `71ec7a0` (`docs(research): document 70/65 feature contract and Stage 1 closeout diagnostics`) + `e95b6d1` (`docs(reports): finalize SUMMARY_ROUND14 with 70/65 contract and Option A diagnostics`)
+  - **`Backend Serving CI`** Run ID [`45119684631`](https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System/actions/runs/45119684631) — `completed / success`.
