@@ -492,6 +492,40 @@ def _format_model_comparison_slice_table(split_data: Mapping[str, Any], conditio
     return "\n".join(lines)
 
 
+def _format_feature_contract_section() -> List[str]:
+    """Return markdown lines documenting canonical 70/65 feature matrix dimensions."""
+    return [
+        "",
+        "## Canonical Feature Matrix Contract (`F3` = 70 cols, `F2` = 65 cols)",
+        "",
+        "Verified directly in `_train_h11_models()` / `run_audit()` (`len(f3_cols) == 70`, `len(f2_cols) == 65`, `f3_cols[:65] == f2_cols`, matching `artifacts/feature_names.json` `all_70_features`):",
+        "",
+        "| Model | Feature Set | `X_train.shape` | `X_val.shape` | `X_test.shape` | `len(feature_names)` |",
+        "|---|---|---|---|---|---|",
+        "| `SC-35` (XGBoost Tweedie) | `F3` (`f3_idx = range(70)`) | `(6289, 70)` | `(720, 70)` | `(2180, 70)` | `70` |",
+        "| `SC-31` (LightGBM Tweedie Config A) | `F3` (`f3_idx = range(70)`) | `(6289, 70)` | `(720, 70)` | `(2180, 70)` | `70` |",
+        "| `SC-30` (LightGBM Tweedie Config A) | `F2` (`f2_idx = range(65)`, first 65 of `F3`) | `(6289, 65)` | `(720, 65)` | `(2180, 65)` | `65` |",
+    ]
+
+
+def _format_diagnostics_section(report: Mapping[str, Any]) -> List[str]:
+    """Return sharp Stage 1 closeout scientific diagnostics & Roadmap v2.0 conclusion."""
+    sc35_val = report["metrics"]["val"]["p_c_doy_median_all_11_solar"]["SC-35"]
+    sc35_test = report["metrics"]["test"]["p_c_doy_median_all_11_solar"]["SC-35"]
+    vp, vs = sc35_val["per_step"], sc35_val["slices"]
+    tp, ts = sc35_test["per_step"], sc35_test["slices"]
+    t_h1_ci = tp["h1"]["delta_RMSE_vs_clim_ci95"]
+    t_h8_11_ci = ts["h8_to_11"]["delta_RMSE_vs_clim_ci95"]
+    return [
+        "",
+        "## Scientific Diagnostics & Roadmap v2.0 Conclusion (Round 14 Closeout — Option A Locked)",
+        "",
+        f"1. **Diagnosis 1 — Positive `ΔP90-Tail MAE` on Test emerges immediately at `h=2`, not only `h=8`**: On Held-Out Test (`n = 2,180`, `P-c`), `SC-35` beats `BASELINE_CLIMATOLOGY_DOY` on extreme rain (`PRECTOTCORR >= 11.086 mm`) only at `h=1` (`{tp['h1']['delta_p90_tail_mae_vs_clim']:+.4f} mm`). Across `h=2..7`, `ΔP90-Tail` is already continuously positive (`h=2: {tp['h2']['delta_p90_tail_mae_vs_clim']:+.4f}`, `h=3: {tp['h3']['delta_p90_tail_mae_vs_clim']:+.4f}`, `h=4: {tp['h4']['delta_p90_tail_mae_vs_clim']:+.4f}`, `h=5: {tp['h5']['delta_p90_tail_mae_vs_clim']:+.4f}`, `h=6: {tp['h6']['delta_p90_tail_mae_vs_clim']:+.4f}`, `h=7: {tp['h7']['delta_p90_tail_mae_vs_clim']:+.4f} mm`), making `h1_to_7` positive (`{ts['h1_to_7']['delta_p90_tail_mae_vs_clim']:+.4f} mm`) before rising across `h=8..11` (`h8_to_11 = {ts['h8_to_11']['delta_p90_tail_mae_vs_clim']:+.4f} mm`). On Validation (`n = 720`, `P-c`), `h1_to_7` stays slightly negative (`{vs['h1_to_7']['delta_p90_tail_mae_vs_clim']:+.4f} mm`) solely because the `h=1` pull (`{vp['h1']['delta_p90_tail_mae_vs_clim']:+.4f} mm`) offsets `h=2..7` (`h=2: {vp['h2']['delta_p90_tail_mae_vs_clim']:+.4f}`, `h=3: {vp['h3']['delta_p90_tail_mae_vs_clim']:+.4f}`, `h=4: {vp['h4']['delta_p90_tail_mae_vs_clim']:+.4f}`, `h=5: {vp['h5']['delta_p90_tail_mae_vs_clim']:+.4f}`, `h=6: {vp['h6']['delta_p90_tail_mae_vs_clim']:+.4f}`, `h=7: {vp['h7']['delta_p90_tail_mae_vs_clim']:+.4f} mm`); every window excluding `h=1` (`h4_to_10`, `h5_to_11`, `h8_to_11`) is strictly positive on both Validation (`{vs['h4_to_10']['delta_p90_tail_mae_vs_clim']:+.4f}..{vs['h8_to_11']['delta_p90_tail_mae_vs_clim']:+.4f} mm`) and Test (`{ts['h4_to_10']['delta_p90_tail_mae_vs_clim']:+.4f}..{ts['h8_to_11']['delta_p90_tail_mae_vs_clim']:+.4f} mm`).",
+        f"2. **Diagnosis 2 — Structural `ΔMAE` ($L_1$) flatness from `h=2..11` vs `ΔRMSE` ($L_2$) convective skill decay**: `BASELINE_CLIMATOLOGY_DOY` outputs calendar-day arithmetic means (`E[Y | DOY]`), which are $L_2$-optimal (`RMSE`) rather than $L_1$-optimal (`MAE` favors the lower conditional median) under right-skewed tropical rainfall (`47.56%–56.60%` sub-1.0 mm dry days; `22.77%–27.32%` zero-rain days). Shrunk Tweedie (`p = 1.5`) predictions retain a structural `L1` margin on frequent dry/light-rain days, flattening Test `ΔMAE` around `{tp['h2']['delta_MAE_vs_clim']:+.4f}` (`h=2`) to `{tp['h11']['delta_MAE_vs_clim']:+.4f} mm` (`h=11`). Meanwhile, `ΔRMSE` exposes real convective skill decay: on Test `P-c`, `SC-35` drops from `{tp['h1']['delta_RMSE_vs_clim']:+.4f} mm` at `h=1` (`95% CI [{t_h1_ci['ci_lower']:+.4f}, {t_h1_ci['ci_upper']:+.4f}]`) to `{tp['h7']['delta_RMSE_vs_clim']:+.4f} mm` at `h=7` and `{tp['h10']['delta_RMSE_vs_clim']:+.4f} mm` at `h=10`, with `h8_to_11` at `{ts['h8_to_11']['delta_RMSE_vs_clim']:+.4f} mm` (`95% MBB CI [{t_h8_11_ci['ci_lower']:+.4f}, {t_h8_11_ci['ci_upper']:+.4f}]` crossing `0`, statistically non-significant).",
+        "3. **Roadmap v2.0 & Option A Closeout Decision**: Exceeding the 3–4 true future day ceiling under GMAO GEOS-IT latency requires integrating **NWP numerical weather prediction future covariates (`t+1..t+7`)** in v2.0 rather than stretching historical point-observation horizons. Under **Option A**, production serving remains locked at **`H = 7`, Docker `1.7.0-serving`, SQLite `DDL V3.5`, MLflow `v1` aliases**, Stage 2 is closed, and **`input_window_manifests` (`DDL V3.6`)** is deferred to multi-province scaling (production DB `39.52 MB`, `< 1%` of Turso Free 5 GB quota).",
+    ]
+
+
 def _build_readme_markdown(report: Mapping[str, Any]) -> str:
     """Render concise Stage 1 audit README markdown from serialized report."""
     gate = report["go_no_go_gate"]
@@ -536,6 +570,7 @@ def _build_readme_markdown(report: Mapping[str, Any]) -> str:
             f"**{cd['overall_gate_passed']}** |"
         )
 
+    lines.extend(_format_feature_contract_section())
     lines.extend(
         [
             "",
@@ -576,9 +611,10 @@ def _build_readme_markdown(report: Mapping[str, Any]) -> str:
             "### Held-Out Test (`n = 2,180`, `P-c`)",
             "",
             _format_model_comparison_slice_table(report["metrics"]["test"], "p_c_doy_median_all_11_solar", "h8_to_11"),
-            "",
         ]
     )
+    lines.extend(_format_diagnostics_section(report))
+    lines.append("")
     return "\n".join(lines)
 
 

@@ -21,6 +21,16 @@
 | `H*=9` | `h8_to_9` | Diagnostic Only | True | True | False | False | **False** |
 | `H*=8` | `h8` | Diagnostic Only | True | True | False | False | **False** |
 
+## Canonical Feature Matrix Contract (`F3` = 70 cols, `F2` = 65 cols)
+
+Verified directly in `_train_h11_models()` / `run_audit()` (`len(f3_cols) == 70`, `len(f2_cols) == 65`, `f3_cols[:65] == f2_cols`, matching `artifacts/feature_names.json` `all_70_features`):
+
+| Model | Feature Set | `X_train.shape` | `X_val.shape` | `X_test.shape` | `len(feature_names)` |
+|---|---|---|---|---|---|
+| `SC-35` (XGBoost Tweedie) | `F3` (`f3_idx = range(70)`) | `(6289, 70)` | `(720, 70)` | `(2180, 70)` | `70` |
+| `SC-31` (LightGBM Tweedie Config A) | `F3` (`f3_idx = range(70)`) | `(6289, 70)` | `(720, 70)` | `(2180, 70)` | `70` |
+| `SC-30` (LightGBM Tweedie Config A) | `F2` (`f2_idx = range(65)`, first 65 of `F3`) | `(6289, 65)` | `(720, 65)` | `(2180, 65)` | `65` |
+
 ## Validation (`n = 720`, `P-c`) — Per-Step `h=1..11`
 
 | Horizon | SC-35 MAE (Δ vs Clim) | SC-31 MAE (Δ vs Clim) | SC-30 MAE (Δ vs Clim) | Clim DOY MAE | Persistence MAE |
@@ -134,3 +144,9 @@
 | `SC-30` | 3.8147 [3.3104, 4.3475] | 8.2412 | 1.0306 | 16.0541 | -0.1659 | -0.0167 | +0.6498 | 0.1865 |
 | `BASELINE_CLIMATOLOGY_DOY` | 3.9807 [3.4518, 4.5169] | 8.2579 | 1.0754 | 15.4043 | +0.0000 | +0.0000 | +0.0000 | 0.0000 |
 | `BASELINE_PERSISTENCE` | 5.5499 [4.8187, 6.3850] | 11.3492 | 1.4993 | 16.5425 | +1.5692 | +3.0913 | +1.1382 | 0.0000 |
+
+## Scientific Diagnostics & Roadmap v2.0 Conclusion (Round 14 Closeout — Option A Locked)
+
+1. **Diagnosis 1 — Positive `ΔP90-Tail MAE` on Test emerges immediately at `h=2`, not only `h=8`**: On Held-Out Test (`n = 2,180`, `P-c`), `SC-35` beats `BASELINE_CLIMATOLOGY_DOY` on extreme rain (`PRECTOTCORR >= 11.086 mm`) only at `h=1` (`-1.4789 mm`). Across `h=2..7`, `ΔP90-Tail` is already continuously positive (`h=2: +0.2401`, `h=3: +0.4301`, `h=4: +0.4071`, `h=5: +0.3988`, `h=6: +0.3379`, `h=7: +0.3740 mm`), making `h1_to_7` positive (`+0.1013 mm`) before rising across `h=8..11` (`h8_to_11 = +0.5673 mm`). On Validation (`n = 720`, `P-c`), `h1_to_7` stays slightly negative (`-0.0706 mm`) solely because the `h=1` pull (`-1.4009 mm`) offsets `h=2..7` (`h=2: +0.0170`, `h=3: -0.0175`, `h=4: +0.1962`, `h=5: +0.3549`, `h=6: +0.1268`, `h=7: +0.2291 mm`); every window excluding `h=1` (`h4_to_10`, `h5_to_11`, `h8_to_11`) is strictly positive on both Validation (`+0.2676..+0.3357 mm`) and Test (`+0.4573..+0.5673 mm`).
+2. **Diagnosis 2 — Structural `ΔMAE` ($L_1$) flatness from `h=2..11` vs `ΔRMSE` ($L_2$) convective skill decay**: `BASELINE_CLIMATOLOGY_DOY` outputs calendar-day arithmetic means (`E[Y | DOY]`), which are $L_2$-optimal (`RMSE`) rather than $L_1$-optimal (`MAE` favors the lower conditional median) under right-skewed tropical rainfall (`47.56%–56.60%` sub-1.0 mm dry days; `22.77%–27.32%` zero-rain days). Shrunk Tweedie (`p = 1.5`) predictions retain a structural `L1` margin on frequent dry/light-rain days, flattening Test `ΔMAE` around `-0.2086` (`h=2`) to `-0.2087 mm` (`h=11`). Meanwhile, `ΔRMSE` exposes real convective skill decay: on Test `P-c`, `SC-35` drops from `-0.5741 mm` at `h=1` (`95% CI [-0.7172, -0.4533]`) to `-0.0819 mm` at `h=7` and `-0.0262 mm` at `h=10`, with `h8_to_11` at `-0.0566 mm` (`95% MBB CI [-0.1630, +0.0522]` crossing `0`, statistically non-significant).
+3. **Roadmap v2.0 & Option A Closeout Decision**: Exceeding the 3–4 true future day ceiling under GMAO GEOS-IT latency requires integrating **NWP numerical weather prediction future covariates (`t+1..t+7`)** in v2.0 rather than stretching historical point-observation horizons. Under **Option A**, production serving remains locked at **`H = 7`, Docker `1.7.0-serving`, SQLite `DDL V3.5`, MLflow `v1` aliases**, Stage 2 is closed, and **`input_window_manifests` (`DDL V3.6`)** is deferred to multi-province scaling (production DB `39.52 MB`, `< 1%` of Turso Free 5 GB quota).

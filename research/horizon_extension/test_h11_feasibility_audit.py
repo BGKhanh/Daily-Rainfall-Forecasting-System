@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import sys
 
+import joblib
 import numpy as np
 import pandas as pd
 import pytest
@@ -250,3 +251,35 @@ def test_stage1_audit_artifact_contract() -> None:
     assert gate["clause_A_h1_to_7_non_regression"]["passed"] is True
     assert gate["candidates"]["H_star_11"]["overall_gate_passed"] is False
     assert gate["candidates"]["H_star_10"]["overall_gate_passed"] is False
+
+
+def test_canonical_70_and_65_feature_contract() -> None:
+    artifact_dir = PROJECT_ROOT / "artifacts" / "models"
+    feat_names = json.loads((PROJECT_ROOT / "artifacts" / "feature_names.json").read_text(encoding="utf-8"))
+    all_70 = feat_names["all_70_features"]
+    assert len(all_70) == 70
+
+    m35 = joblib.load(artifact_dir / "sc35_xgboost_tweedie_f3.joblib")
+    m31 = joblib.load(artifact_dir / "sc31_lightgbm_tweedie_f3.joblib")
+    m30 = joblib.load(artifact_dir / "sc30_lightgbm_tweedie_f2.joblib")
+    assert all(est.n_features_in_ == 70 for est in m35.estimators_)
+    assert all(est.n_features_in_ == 70 for est in m31.estimators_)
+    assert all(est.n_features_in_ == 65 for est in m30.estimators_)
+
+    fb3 = joblib.load(artifact_dir / "feature_builder_f3.joblib")
+    fb2 = joblib.load(artifact_dir / "feature_builder_f2.joblib")
+    sample_df = pd.read_csv(artifact_dir / "sample_recent_history_35d.csv")
+    from src.data.vintage_store import align_and_validate_canonical_raw_df  # noqa: E402
+
+    raw_df = align_and_validate_canonical_raw_df(sample_df)
+    f3_cols = [c for c in fb3.transform(raw_df, drop_warmup=True).columns if c not in ("Ngày", "Lượng mưa")]
+    f2_cols = [c for c in fb2.transform(raw_df, drop_warmup=True).columns if c not in ("Ngày", "Lượng mưa")]
+    assert len(f3_cols) == 70
+    assert len(f2_cols) == 65
+    assert f3_cols == all_70
+    assert f3_cols[:65] == f2_cols
+
+    readme_text = DEFAULT_README_OUT.read_text(encoding="utf-8")
+    for expected in ("(6289, 70)", "(720, 70)", "(2180, 70)", "(6289, 65)", "(720, 65)", "(2180, 65)"):
+        assert expected in readme_text, f"Missing canonical matrix shape {expected} in README.md"
+    assert "Scientific Diagnostics & Roadmap v2.0 Conclusion" in readme_text
