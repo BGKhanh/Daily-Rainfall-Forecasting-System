@@ -1,0 +1,49 @@
+services:
+  app:
+    image: kgb0630/ds_108:${IMAGE_TAG:-1.8.0-serving}
+    env_file:
+      - .env.serving
+    expose:
+      - "8000"
+    volumes:
+      - replica_data:/var/lib/rainfall
+    restart: unless-stopped
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - BACKEND_DOMAIN=${BACKEND_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  replica_data:
+  caddy_data:
+  caddy_config:

@@ -9,7 +9,13 @@ import type {
   ProvinceGridOverlapData,
 } from "../types/api";
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "");
+const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").trim().replace(/\/+$/, "");
+
+if (import.meta.env.PROD && !API_BASE) {
+  console.warn(
+    "[ds108-ui] VITE_API_BASE_URL is unset in production build; defaulting API requests to same-origin."
+  );
+}
 
 export const COLD_START_THRESHOLD_MS = Number(
   import.meta.env.VITE_COLD_START_THRESHOLD_MS ?? "3000"
