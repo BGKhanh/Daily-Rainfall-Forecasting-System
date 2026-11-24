@@ -85,4 +85,5 @@
   - `pytest tests/serving/ tests/storage/ tests/test_pc_solar_imputation_contract.py -q` (with `SERVING_MODEL_SOURCE=local`, `WEATHER_DB_BACKEND=local`, `CI_REQUIRE_PARITY=1`): **`143 passed, 24 warnings in 188.77s`** (includes new [`tests/serving/test_env_and_prod_hardening.py`](../../tests/serving/test_env_and_prod_hardening.py), [`test_config_contract.py`](../../tests/serving/test_config_contract.py) polygon catalog check, and full OpenAPI snapshot parity).
   - `cd frontend && npm test && npm run build`: **`11 passed`**, `vite build` clean (`583ms`).
 - **Independent Subagent Reviews**: Executed Standards, Spec Conformance, and Security/Differential reviews across the full Round 15 diff before commit & push.
-- **GitHub Actions CI Status on Final `main` Push**: Recorded upon push completion.
+- **GitHub Actions CI Status on Final Code/Docker `main` Push (`a17f47801171dd8e27294b7b691fcfc224f974a8`)**:
+  - `Backend Serving CI`: Run ID [`45370495578`](https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System/actions/runs/45370495578) — **`completed / success`** across all 3 jobs (`Tier 1 CI — Ruff Lint, Serving Unit/Golden Parity & SQLite DDL V3 Trigger Tests`, `DagsHub MLflow Registry Checksum Audit (Optional)`, and `Tier 2 CI — Docker Container Build, Linux Parity & RSS Smoke Check`).
