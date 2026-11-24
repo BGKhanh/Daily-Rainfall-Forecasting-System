@@ -35,7 +35,7 @@ import numpy as np
 import requests
 
 from src.config.clock import now_utc_iso
-from src.config.settings import PROJECT_ROOT, SecretsEnvView, load_settings
+from src.config.settings import PROJECT_ROOT, SecretsEnvView, load_settings, resolve_turso_replica_path
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +79,8 @@ _KV_SECRET_RE = re.compile(
     r"((?:TURSO_(?:DB|READONLY_AUTH|AUTH|API)_TOKEN|DAGSHUB(?:_USER)?_TOKEN|MLFLOW_TRACKING_PASSWORD|Authorization)\s*[:=]\s*)([^\s,;'\"]+)",
     re.IGNORECASE,
 )
+_TURSO_HOST_URL_RE = re.compile(r"(?:libsql|https?)://[^\s/\"':@]+?\.turso\.io(?::\d+)?[^\s\"']*", re.IGNORECASE)
+_REPLICA_FS_PATH_RE = re.compile(r"/var/lib/rainfall[^\s\"']*", re.IGNORECASE)
 
 _TURSO_RUNTIME_LOCK = threading.Lock()
 _TURSO_RUNTIME_STATE: Dict[str, Any] = {
@@ -97,7 +99,7 @@ class TursoQuotaBlockedError(sqlite3.OperationalError):
 
 
 def redact_secrets(text: Optional[str], extra_secrets: Sequence[str] = ()) -> str:
-    """Redact bearer tokens, JWTs, and credential env values before logging or returning diagnostics."""
+    """Redact bearer tokens, JWTs, Turso DB URLs, and internal paths before logging or returning diagnostics."""
     if not text:
         return ""
     out = str(text)
@@ -113,6 +115,24 @@ def redact_secrets(text: Optional[str], extra_secrets: Sequence[str] = ()) -> st
         val = os.environ.get(env_key, "").strip()
         if len(val) >= 6 and val in out:
             out = out.replace(val, "[REDACTED]")
+    for url_env_key in ("TURSO_DB_URL", "TURSO_DATABASE_URL"):
+        url_val = os.environ.get(url_env_key, "").strip()
+        if len(url_val) >= 8:
+            if url_val in out:
+                out = out.replace(url_val, "[REDACTED_TURSO_URL]")
+            host_part = normalize_turso_http_url(url_val)
+            if host_part and host_part in out:
+                out = out.replace(host_part, "[REDACTED_TURSO_URL]")
+            raw_host = host_part.replace("https://", "").replace("http://", "")
+            if len(raw_host) >= 8 and raw_host in out:
+                out = out.replace(raw_host, "[REDACTED_TURSO_HOST]")
+    for path_env_key in ("TURSO_REPLICA_PATH", "VINTAGE_DB_PATH"):
+        path_val = os.environ.get(path_env_key, "").strip()
+        if len(path_val) >= 4 and path_val in out:
+            out = out.replace(path_val, "[REDACTED_PATH]")
+    proj_str = str(PROJECT_ROOT)
+    if len(proj_str) >= 4 and proj_str in out:
+        out = re.sub(re.escape(proj_str) + r"(?=$|[\s'\":;/\\])", "[REDACTED_PATH]", out)
     for sec in extra_secrets:
         s = (sec or "").strip()
         if len(s) >= 6 and s in out:
@@ -121,6 +141,8 @@ def redact_secrets(text: Optional[str], extra_secrets: Sequence[str] = ()) -> st
     out = _URL_USERINFO_RE.sub(r"\1[REDACTED]:[REDACTED]@", out)
     out = _QUERY_SECRET_RE.sub(r"\1[REDACTED]", out)
     out = _KV_SECRET_RE.sub(r"\1[REDACTED]", out)
+    out = _TURSO_HOST_URL_RE.sub("[REDACTED_TURSO_URL]", out)
+    out = _REPLICA_FS_PATH_RE.sub("[REDACTED_PATH]", out)
     out = _JWT_RE.sub("[REDACTED_JWT]", out)
     return out
 
@@ -611,7 +633,11 @@ class TursoRemoteConnection:
         if not cleaned:
             return
         if (self.read_only or self._query_only) and not _READ_ONLY_SQL_RE.match(cleaned):
-            if _BEGIN_RE.match(cleaned) or _ROLLBACK_RE.match(cleaned):
+            if _BEGIN_RE.match(cleaned) and not re.match(
+                r"^BEGIN\s+(?:IMMEDIATE|EXCLUSIVE)\b", cleaned, re.IGNORECASE
+            ):
+                return
+            if _ROLLBACK_RE.match(cleaned):
                 return
             raise sqlite3.OperationalError("attempt to write a readonly database")
 
@@ -633,6 +659,7 @@ class TursoRemoteConnection:
                 if "=" in norm:
                     val = norm.split("=", 1)[1].strip()
                     self._foreign_keys = val in ("1", "ON", "TRUE")
+                    return HranaCursor((), [], rowcount=0)
                 elif self._baton is None:
                     return HranaCursor(("foreign_keys",), [HranaRow(("foreign_keys",), (1 if self._foreign_keys else 0,))])
             if norm.startswith("PRAGMA RECURSIVE_TRIGGERS") or norm.startswith("PRAGMA JOURNAL_MODE") or norm.startswith("PRAGMA SYNCHRONOUS") or norm.startswith("PRAGMA CACHE_SIZE") or norm.startswith("PRAGMA BUSY_TIMEOUT"):
@@ -648,7 +675,7 @@ class TursoRemoteConnection:
 
         if is_begin:
             reqs: List[Dict[str, Any]] = []
-            if self._foreign_keys:
+            if (not self.read_only) and self._foreign_keys:
                 reqs.append({"type": "execute", "stmt": {"sql": "PRAGMA foreign_keys = ON;"}})
             reqs.append({"type": "execute", "stmt": {"sql": cleaned}})
             body = self.client.pipeline(reqs, baton=None, base_url=None)
@@ -686,7 +713,7 @@ class TursoRemoteConnection:
             res = (body["results"][0].get("response") or {}).get("result") or {}
         else:
             reqs = []
-            need_fk = self._foreign_keys and not _READ_ONLY_SQL_RE.match(cleaned)
+            need_fk = (not self.read_only) and self._foreign_keys and not _READ_ONLY_SQL_RE.match(cleaned)
             if need_fk:
                 reqs.append({"type": "execute", "stmt": {"sql": "PRAGMA foreign_keys = ON;"}})
             reqs.append(stmt_req)
@@ -1310,9 +1337,7 @@ def get_replica_manager(
 ) -> TursoReplicaManager:
     from src.data.vintage_store import clear_db_query_cache
 
-    resolved = Path(
-        replica_path or os.environ.get("TURSO_REPLICA_PATH", "") or DEFAULT_TURSO_REPLICA_PATH
-    ).resolve()
+    resolved = resolve_turso_replica_path(replica_path).resolve()
     key = str(resolved)
     with _REPLICA_MANAGERS_LOCK:
         mgr = _REPLICA_MANAGERS.get(key)
@@ -1521,6 +1546,16 @@ class TursoPlatformClient:
         return data
 
 
+def _format_canonical_hash_cell(v: Any) -> str:
+    """Format SQLite / Hrana cell deterministically across platforms for cross-engine SHA-256 parity."""
+    if v is None:
+        return ""
+    if isinstance(v, float):
+        normalized = 0.0 if abs(v) < 5e-9 else v
+        return f"{normalized:.8f}"
+    return str(v)
+
+
 def compute_table_content_sha256(conn: Any, table_name: str) -> Tuple[int, str]:
     """Compute canonical `(row_count, sha256)` over ordered rows of a given table."""
     from src.data.vintage_store import ALL_35_VARS
@@ -1536,14 +1571,14 @@ def compute_table_content_sha256(conn: Any, table_name: str) -> Tuple[int, str]:
         cols = "location_id, obs_date, version_num, run_id, ingest_origin, missing_count, completeness_regime, row_value_hash, PRECTOTCORR, " + ", ".join(ALL_35_VARS[:3])
     elif table_name == "forecasts_ledger":
         order = "location_id, model_id, data_as_of, horizon_day, target_date"
-        cols = "location_id, model_id, eval_split_regime, data_as_of, horizon_day, target_date, ROUND(pred_mm, 8), input_window_hash, config_sha256, issued_by, result_config_sha256, ceres_policy_applied, is_degraded_input, imputed_values_json, doy_table_sha256"
+        cols = "location_id, model_id, eval_split_regime, data_as_of, horizon_day, target_date, pred_mm, input_window_hash, config_sha256, issued_by, result_config_sha256, ceres_policy_applied, is_degraded_input, imputed_values_json, doy_table_sha256"
     else:
         raise ValueError(f"Unsupported verification table: {table_name!r}")
 
     rows = conn.execute(f"SELECT {cols} FROM {table_name} ORDER BY {order}").fetchall()
     h = hashlib.sha256()
     for row in rows:
-        vals = "|".join("" if v is None else str(v) for v in row)
+        vals = "|".join(_format_canonical_hash_cell(v) for v in row)
         h.update(vals.encode("utf-8"))
         h.update(b"\n")
     return len(rows), h.hexdigest()

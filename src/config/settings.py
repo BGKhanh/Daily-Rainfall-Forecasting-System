@@ -16,7 +16,8 @@ import json
 import os
 from pathlib import Path
 import tomllib
-from typing import Any, Dict, List, Literal, Optional, Sequence
+from typing import Any, Dict, List, Literal, Mapping, Optional, Sequence, Union
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -154,6 +155,116 @@ class VariableCatalog(BaseModel):
     variables: List[VariableCatalogEntry]
 
 
+class RuntimeEnvConfig(BaseModel):
+    """Layer 1 non-secret process environment settings (excluded from config_sha256)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    app_env: Literal["development", "production", "test"] = "development"
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    enable_api_docs: bool = True
+    serve_static_spa: bool = False
+    turso_replica_path: str = "data/vintage/turso_replica.db"
+    vintage_db_path: str = ""
+    serving_model_source: str = "local"
+    weather_db_backend: str = "local"
+
+    @field_validator("app_env", mode="before")
+    @classmethod
+    def _norm_app_env(cls, val: Any) -> str:
+        s = str(val or "development").strip().lower()
+        return s or "development"
+
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def _norm_log_level(cls, val: Any) -> str:
+        s = str(val or "INFO").strip().upper()
+        return s or "INFO"
+
+    @classmethod
+    def from_environ(cls, env: Optional[Mapping[str, str]] = None) -> "RuntimeEnvConfig":
+        src = os.environ if env is None else env
+        app_env = (src.get("APP_ENV") or "development").strip().lower() or "development"
+        log_level = (src.get("LOG_LEVEL") or "INFO").strip().upper() or "INFO"
+        raw_docs = (src.get("ENABLE_API_DOCS") or "").strip()
+        enable_api_docs = (
+            _parse_bool_env(raw_docs, "ENABLE_API_DOCS") if raw_docs else (app_env != "production")
+        )
+        raw_spa = (src.get("SERVE_STATIC_SPA") or "").strip()
+        serve_static_spa = _parse_bool_env(raw_spa, "SERVE_STATIC_SPA") if raw_spa else False
+        replica_path = (src.get("TURSO_REPLICA_PATH") or "").strip() or "data/vintage/turso_replica.db"
+        vintage_db_path = (src.get("VINTAGE_DB_PATH") or "").strip()
+        model_source = (src.get("SERVING_MODEL_SOURCE") or "local").strip().lower() or "local"
+        weather_backend = (src.get("WEATHER_DB_BACKEND") or "local").strip().lower() or "local"
+        return cls(
+            app_env=app_env,  # type: ignore[arg-type]
+            log_level=log_level,  # type: ignore[arg-type]
+            enable_api_docs=enable_api_docs,
+            serve_static_spa=serve_static_spa,
+            turso_replica_path=replica_path,
+            vintage_db_path=vintage_db_path,
+            serving_model_source=model_source,
+            weather_db_backend=weather_backend,
+        )
+
+
+def _parse_bool_env(raw: str, var_name: str) -> bool:
+    low = raw.strip().lower()
+    if low in ("true", "1", "yes"):
+        return True
+    if low in ("false", "0", "no"):
+        return False
+    raise ValueError(f"Invalid boolean value for {var_name}={raw!r}; expected true/false or 1/0.")
+
+
+_PLACEHOLDER_MARKERS = (
+    "your-db-your-org",
+    "<your_",
+    "changeme",
+    "replace_me",
+    "example.com",
+    "your-domain",
+)
+
+
+def _is_placeholder_or_empty(val: Optional[str]) -> bool:
+    s = (val or "").strip()
+    if not s:
+        return True
+    low = s.lower()
+    return any(marker in low for marker in _PLACEHOLDER_MARKERS)
+
+
+def _normalize_cors_origins(origins: Sequence[str]) -> List[str]:
+    out: List[str] = []
+    for raw in origins:
+        cleaned = str(raw or "").strip().rstrip("/")
+        if cleaned and cleaned not in out:
+            out.append(cleaned)
+    return out
+
+
+def _is_localhost_origin(origin: str) -> bool:
+    low = origin.lower()
+    parsed = urlparse(origin)
+    host = (parsed.hostname or "").lower()
+    return host in ("localhost", "127.0.0.1", "::1") or "localhost" in low or "127.0.0.1" in low
+
+
+def resolve_turso_replica_path(
+    explicit_path: Optional[Union[str, Path]] = None,
+    *,
+    runtime_env: Optional[RuntimeEnvConfig] = None,
+) -> Path:
+    """Resolve `TURSO_REPLICA_PATH` keeping absolute paths intact and resolving relative paths under PROJECT_ROOT."""
+    if explicit_path is not None and str(explicit_path).strip():
+        cand = Path(explicit_path)
+    else:
+        cfg = runtime_env if runtime_env is not None else RuntimeEnvConfig.from_environ()
+        cand = Path(cfg.turso_replica_path)
+    return cand if cand.is_absolute() else (PROJECT_ROOT / cand).resolve()
+
+
 class SecretsEnvView(BaseModel):
     """Non-serialized runtime env view (Layer 1 — excluded from config_sha256)."""
 
@@ -186,12 +297,61 @@ class RuntimeSettings(BaseModel):
     model_contract: ModelContractConfig
     frozen_eda_modeling: FrozenEdaModelingConfig
     variable_catalog: VariableCatalog
+    runtime_env: RuntimeEnvConfig = Field(default_factory=RuntimeEnvConfig)
     config_sha256: str = ""
     result_config_sha256: str = ""
     operational_config_sha256: str = ""
 
     def secrets(self) -> SecretsEnvView:
         return SecretsEnvView.from_environ()
+
+
+def validate_runtime_env(settings: RuntimeSettings) -> None:
+    """Fail-fast validation for production and Turso runtime env configuration."""
+    app_env = settings.runtime_env.app_env
+    store_backend = settings.operational.store_backend
+    needs_turso = store_backend in ("turso_replica", "turso_remote") or app_env == "production"
+
+    if needs_turso:
+        sec = settings.secrets()
+        db_url = sec.turso_db_url
+        if _is_placeholder_or_empty(db_url) or not db_url.startswith(("libsql://", "https://")):
+            raise ValueError(
+                "Invalid or missing TURSO_DB_URL: expected a non-placeholder libsql:// or https:// URL."
+            )
+        if store_backend == "turso_remote":
+            raw_tok = sec.turso_db_token
+            tok_name = "TURSO_DB_TOKEN / TURSO_AUTH_TOKEN"
+        else:
+            raw_tok = sec.turso_readonly_auth_token or sec.turso_db_token
+            tok_name = "TURSO_AUTH_TOKEN / TURSO_DB_TOKEN / TURSO_READONLY_AUTH_TOKEN"
+        if _is_placeholder_or_empty(raw_tok):
+            raise ValueError(
+                f"Invalid or missing Turso auth token ({tok_name}): set a non-placeholder token before startup."
+            )
+
+    if app_env == "production":
+        origins = settings.operational.cors_allowed_origins
+        if not origins:
+            raise ValueError(
+                "APP_ENV=production requires at least one non-localhost origin in CORS_ALLOWED_ORIGINS."
+            )
+        for origin in origins:
+            parsed = urlparse(origin)
+            if (
+                "*" in origin
+                or _is_placeholder_or_empty(origin)
+                or _is_localhost_origin(origin)
+                or parsed.scheme not in ("http", "https")
+                or not parsed.netloc
+                or parsed.path not in ("", "/")
+                or parsed.params
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError(
+                    f"Invalid production CORS origin {origin!r}: must be an explicit non-localhost http(s) origin."
+                )
 
 
 def _canonical_json_sha256(payload: Dict[str, Any]) -> str:
@@ -262,14 +422,29 @@ def load_settings(
     op_dict = dict(runtime_raw.get("operational") or {})
     app_dict = dict(runtime_raw.get("application") or {})
 
+    runtime_env = RuntimeEnvConfig.from_environ()
+
     env_backend = os.environ.get("STORE_BACKEND", "").strip().lower()
     if env_backend:
         op_dict["store_backend"] = env_backend
 
-    extra_cors = [o.strip() for o in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()]
-    if extra_cors:
-        base_cors = list(op_dict.get("cors_allowed_origins") or [])
-        op_dict["cors_allowed_origins"] = base_cors + [o for o in extra_cors if o not in base_cors]
+    raw_sync_interval = os.environ.get("TURSO_SYNC_INTERVAL_SEC", "").strip()
+    if raw_sync_interval:
+        try:
+            op_dict["turso_sync_interval_sec"] = int(raw_sync_interval)
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid integer for TURSO_SYNC_INTERVAL_SEC={raw_sync_interval!r}."
+            ) from exc
+
+    base_cors = _normalize_cors_origins(op_dict.get("cors_allowed_origins") or [])
+    env_cors = _normalize_cors_origins(os.environ.get("CORS_ALLOWED_ORIGINS", "").split(","))
+    combined_cors = _normalize_cors_origins(
+        (env_cors + base_cors) if runtime_env.app_env == "production" else (base_cors + env_cors)
+    )
+    if runtime_env.app_env == "production":
+        combined_cors = [o for o in combined_cors if not _is_localhost_origin(o)]
+    op_dict["cors_allowed_origins"] = combined_cors
 
     operational = OperationalConfig.model_validate(op_dict)
     application = ApplicationConfig.model_validate(app_dict)
@@ -298,6 +473,7 @@ def load_settings(
         model_contract=model_contract,
         frozen_eda_modeling=frozen_eda_modeling,
         variable_catalog=variable_catalog,
+        runtime_env=runtime_env,
         config_sha256=cfg_sha,
         result_config_sha256=res_sha,
         operational_config_sha256=op_sha,
