@@ -3,21 +3,28 @@
 - **Execution Policy**: Strict Two-Stage Hard Gate (`Step 0 -> Stage 1 Benchmark & Gate -> Conditional Step 2`).
 - **Final Stage 1 Gate Decision**: **`stop_and_report_triggered = True`** (`winning_H_star = None` across eligible targets $H^* \in \{11, 10\}$; diagnostics $H^* \in \{9, 8\}$ also failed `Clause B2` & `Clause B3`).
 - **Round 14 Closeout Decision (Option A Locked)**:
-  - Keep production serving strictly locked at **`H = 7`**, Docker tag **`1.7.0-serving`**, SQLite **`DDL V3.5`**, and MLflow `v1` aliases.
+  - Keep production serving strictly locked at **`H = 7`**, SQLite **`DDL V3.5`**, and MLflow `v1` aliases; freeze bundled Round 13/14 Docker baseline at **`1.7.0-serving`**.
+  - **Docker Tag Boundary Clarification**:
+    - **`1.7.0-serving`**: Official Round 13-Closeout & Round 14 frozen bundled-SPA serving release.
+    - **`1.7.1-serving`**: Intermediate experimental patch image pushed to Docker Hub prior to Round 15 (not an official Round 14 release milestone).
+    - **`1.8.0-serving`**: Official Round 15 release (decoupled pure-Python backend image for Cloudflare Workers + AWS EC2 + Turso Read-Only replica).
   - **Stage 2 Release is permanently closed**; **`input_window_manifests` (`DDL V3.6`)** is deferred to multi-province scaling (`39.52 MB` current DB size, `< 1%` of Turso Free 5 GB quota).
   - Zero edits made to `src/`, `artifacts/models/`, `frontend/`, `docs/`, or `data/` (`forecasts_ledger`).
 
 ---
 
-## Step 0 — Verified GitHub Actions CI (`31a042b`, `6e3e283` & Closeout `e95b6d1`)
+## Step 0 — Verified GitHub Actions CI (`31a042b`, `6e3e283`, `e95b6d1` & Closeout `fd614d8`)
 
 1. **Round 13-Closeout Head (`31a042b69ecda71ce7d1c91c6d466bd7d7580b44`)**:
    - **`Backend Serving CI`** — Run ID [`45044546308`](https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System/actions/runs/45044546308) — `completed / success` (`Tier 1 CI`, `DagsHub MLflow Registry Checksum Audit (Optional)`, `Tier 2 CI — Docker Build & RSS Smoke Check`).
    - **`Scheduled NASA POWER Ingest & Forecast Issuance`** — Run ID [`45091703773`](https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System/actions/runs/45091703773) — `completed / success`.
 2. **Round 14 Stage 1 Push (`6e3e28351af2e6b85be226c8b4dd2b20939976cb`)**:
    - **`Backend Serving CI`** — Run ID [`45114930563`](https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System/actions/runs/45114930563) — `completed / success`.
-3. **Round 14-Closeout Push (`71ec7a0` / `e95b6d1a830785df61341e9dc5258075500f5801`)**:
+3. **Round 14-Closeout Feature Audit & Diagnostics Push (`71ec7a0` / `e95b6d1a830785df61341e9dc5258075500f5801`)**:
    - **`Backend Serving CI`** — Run ID [`45119684631`](https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System/actions/runs/45119684631) — `completed / success` (`Tier 1 CI`, `DagsHub MLflow Registry Checksum Audit (Optional)`, `Tier 2 CI`).
+4. **Final Round 14 Closeout Head (`fd614d86117560891534412b09f11cb9aa80ab0f`)**:
+   - **`Backend Serving CI`** — Run ID [`45120243799`](https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System/actions/runs/45120243799) — `completed / success` (`Tier 1 CI`, `DagsHub MLflow Registry Checksum Audit (Optional)`, `Tier 2 CI`).
+   - **`Scheduled NASA POWER Ingest & Forecast Issuance`** — Run ID [`45329181377`](https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System/actions/runs/45329181377) — `completed / success`.
 
 ---
 
