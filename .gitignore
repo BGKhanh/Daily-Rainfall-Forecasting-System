@@ -127,8 +127,15 @@ celerybeat.pid
 # SageMath parsed files
 *.sage.py
 
-# Environments
+# Environments & Secrets
 .env
+.env.*
+!.env.example
+!.env.serving.example
+!.env.ingest.example
+!frontend/.env.example
+*.pem
+*.key
 .venv
 env/
 venv/
@@ -212,6 +219,7 @@ reports/storage_audit/*
 !reports/storage_audit/SUMMARY_ROUND13.md
 !reports/storage_audit/SUMMARY_ROUND13_CLOSEOUT.md
 !reports/storage_audit/SUMMARY_ROUND14.md
+!reports/storage_audit/SUMMARY_ROUND15.md
 !reports/storage_audit/immutable_ledger_migration_proof_v35.json
 !reports/storage_audit/db_storage_footprint_audit_r13_closeout.json
 !reports/ui_screenshots/
@@ -265,6 +273,9 @@ mlruns/**
 *.db-wal
 *.db-shm
 *.db-journal
+*.sqlite
+*.sqlite3
+*.sqlite-*
 data/vintage/**
 archive/
 frontend/node_modules/

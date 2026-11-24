@@ -89,12 +89,14 @@ jobs:
 
       - name: Build serving Docker image
         run: |
-          docker build -t kgb0630/ds_108:1.7.0-serving .
+          docker build -t kgb0630/ds_108:1.8.0-serving .
 
-      - name: Run container & verify /, /locations, /observations, /health, /models, /predict, /scores, and RSS <= 350 MB
+      - name: Run container & verify CORS, /locations, /observations (HCMC & HANOI), /health, /models, /predict, /scores, and RSS <= 350 MB
         run: |
           set -e
-          docker run -d --name ds108-smoke -p 8000:8000 kgb0630/ds_108:1.7.0-serving
+          docker run -d --name ds108-smoke -p 8000:8000 \
+            -e CORS_ALLOWED_ORIGINS="https://daily-rainfall-forecasting-system.22520630.workers.dev/" \
+            kgb0630/ds_108:1.8.0-serving
           trap "docker rm -f ds108-smoke || true" EXIT
 
           for i in $(seq 1 30); do
@@ -105,7 +107,7 @@ jobs:
           done
 
           cat /tmp/health.json
-          curl -sf http://localhost:8000/ > /tmp/index.html
+          curl -is -H "Origin: https://daily-rainfall-forecasting-system.22520630.workers.dev" http://localhost:8000/health > /tmp/cors_headers.txt
           curl -sf http://localhost:8000/locations > /tmp/locations.json
           curl -sf "http://localhost:8000/observations" > /tmp/obs_daily.json
           curl -sf "http://localhost:8000/observations?location_id=HANOI" > /tmp/obs_hanoi.json
@@ -123,9 +125,9 @@ jobs:
 
           python3 - <<'EOF'
           import json
-          with open("/tmp/index.html", "r", encoding="utf-8") as f:
-              html = f.read()
-          assert "<div id=\"root\"></div>" in html, "SPA index.html not served at /"
+          with open("/tmp/cors_headers.txt", "r", encoding="utf-8") as f:
+              raw_hdrs = f.read()
+          assert "access-control-allow-origin: https://daily-rainfall-forecasting-system.22520630.workers.dev" in raw_hdrs.lower(), raw_hdrs
 
           with open("/tmp/locations.json", "r", encoding="utf-8") as f:
               locs = json.load(f)
@@ -190,7 +192,7 @@ jobs:
               panchor = json.load(f)
           preds = panchor["serving_model"]["predictions_7d_mm"]
           assert len(preds) == 7 and all(p >= 0.0 for p in preds), preds
-          print("Docker smoke verified (/, /locations, /health, /models, /scores, /benchmark/leaderboard, /predict):", preds)
+          print("Docker smoke verified (CORS, /locations, /health, /models, /scores, /benchmark/leaderboard, /predict):", preds)
           EOF
 
           if docker exec ds108-smoke sh -c "command -v node >/dev/null 2>&1"; then
