@@ -1,0 +1,460 @@
+{
+  "administrative_version": "Pre-merger 63 provinces (in force until 30 Jun 2025) + Hoang Sa Island + Truong Sa Island",
+  "polygons": {
+    "VN_AN_GIANG": {
+      "location_id": "AN_GIANG",
+      "display_name": "An Giang",
+      "source": "geoBoundaries",
+      "centroid_lat": 10.6158,
+      "centroid_lon": 105.2056
+    },
+    "VN_BARIA_VUNGTAU": {
+      "location_id": "BARIA_VUNGTAU",
+      "display_name": "Ba Ria - Vung Tau",
+      "source": "geoBoundaries",
+      "centroid_lat": 10.55,
+      "centroid_lon": 107.2144
+    },
+    "VN_BAC_GIANG": {
+      "location_id": "BAC_GIANG",
+      "display_name": "Bac Giang",
+      "source": "geoBoundaries",
+      "centroid_lat": 21.401,
+      "centroid_lon": 106.522
+    },
+    "VN_BAC_KAN": {
+      "location_id": "BAC_KAN",
+      "display_name": "Bac Kan",
+      "source": "geoBoundaries",
+      "centroid_lat": 22.2487,
+      "centroid_lon": 105.8226
+    },
+    "VN_BAC_LIEU": {
+      "location_id": "BAC_LIEU",
+      "display_name": "Bac Lieu",
+      "source": "geoBoundaries",
+      "centroid_lat": 9.3621,
+      "centroid_lon": 105.511
+    },
+    "VN_BAC_NINH": {
+      "location_id": "BAC_NINH",
+      "display_name": "Bac Ninh",
+      "source": "geoBoundaries",
+      "centroid_lat": 21.14,
+      "centroid_lon": 106.1638
+    },
+    "VN_BEN_TRE": {
+      "location_id": "BEN_TRE",
+      "display_name": "Ben Tre",
+      "source": "geoBoundaries",
+      "centroid_lat": 10.1028,
+      "centroid_lon": 106.4717
+    },
+    "VN_BINH_DINH": {
+      "location_id": "BINH_DINH",
+      "display_name": "Binh Dinh",
+      "source": "geoBoundaries",
+      "centroid_lat": 14.075,
+      "centroid_lon": 109.0131
+    },
+    "VN_BINH_DUONG": {
+      "location_id": "BINH_DUONG",
+      "display_name": "Binh Duong",
+      "source": "geoBoundaries",
+      "centroid_lat": 11.2127,
+      "centroid_lon": 106.6788
+    },
+    "VN_BINH_PHUOC": {
+      "location_id": "BINH_PHUOC",
+      "display_name": "Binh Phuoc",
+      "source": "geoBoundaries",
+      "centroid_lat": 11.7215,
+      "centroid_lon": 106.8551
+    },
+    "VN_BINH_THUAN": {
+      "location_id": "BINH_THUAN",
+      "display_name": "Binh Thuan",
+      "source": "geoBoundaries",
+      "centroid_lat": 11.068,
+      "centroid_lon": 108.1553
+    },
+    "VN_CA_MAU": {
+      "location_id": "CA_MAU",
+      "display_name": "Ca Mau",
+      "source": "geoBoundaries",
+      "centroid_lat": 8.9647,
+      "centroid_lon": 105.0224
+    },
+    "VN_CANTHO": {
+      "location_id": "CANTHO",
+      "display_name": "Can Tho",
+      "source": "geoBoundaries",
+      "centroid_lat": 10.0832,
+      "centroid_lon": 105.5593
+    },
+    "VN_CAO_BANG": {
+      "location_id": "CAO_BANG",
+      "display_name": "Cao Bang",
+      "source": "geoBoundaries",
+      "centroid_lat": 22.7407,
+      "centroid_lon": 106.0507
+    },
+    "VN_DANANG": {
+      "location_id": "DANANG",
+      "display_name": "Da Nang",
+      "source": "geoBoundaries",
+      "centroid_lat": 16.0872,
+      "centroid_lon": 108.122
+    },
+    "VN_DAK_LAK": {
+      "location_id": "DAK_LAK",
+      "display_name": "Dak Lak",
+      "source": "geoBoundaries",
+      "centroid_lat": 12.7378,
+      "centroid_lon": 108.3054
+    },
+    "VN_DAK_NONG": {
+      "location_id": "DAK_NONG",
+      "display_name": "Dak Nong",
+      "source": "geoBoundaries",
+      "centroid_lat": 12.2285,
+      "centroid_lon": 107.7395
+    },
+    "VN_DIEN_BIEN": {
+      "location_id": "DIEN_BIEN",
+      "display_name": "Dien Bien",
+      "source": "geoBoundaries",
+      "centroid_lat": 21.7782,
+      "centroid_lon": 102.9125
+    },
+    "VN_DONG_NAI": {
+      "location_id": "DONG_NAI",
+      "display_name": "Dong Nai",
+      "source": "geoBoundaries",
+      "centroid_lat": 10.9948,
+      "centroid_lon": 107.2017
+    },
+    "VN_DONG_THAP": {
+      "location_id": "DONG_THAP",
+      "display_name": "Dong Thap",
+      "source": "geoBoundaries",
+      "centroid_lat": 10.5373,
+      "centroid_lon": 105.5972
+    },
+    "VN_GIA_LAI": {
+      "location_id": "GIA_LAI",
+      "display_name": "Gia Lai",
+      "source": "geoBoundaries",
+      "centroid_lat": 13.8518,
+      "centroid_lon": 108.3048
+    },
+    "VN_HA_GIANG": {
+      "location_id": "HA_GIANG",
+      "display_name": "Ha Giang",
+      "source": "geoBoundaries",
+      "centroid_lat": 22.7528,
+      "centroid_lon": 104.9995
+    },
+    "VN_HA_NAM": {
+      "location_id": "HA_NAM",
+      "display_name": "Ha Nam",
+      "source": "geoBoundaries",
+      "centroid_lat": 20.5271,
+      "centroid_lon": 106.0288
+    },
+    "VN_HANOI": {
+      "location_id": "HANOI",
+      "display_name": "Ha Noi",
+      "source": "geoBoundaries",
+      "centroid_lat": 21.0167,
+      "centroid_lon": 105.7486
+    },
+    "VN_HA_TINH": {
+      "location_id": "HA_TINH",
+      "display_name": "Ha Tinh",
+      "source": "geoBoundaries",
+      "centroid_lat": 18.2789,
+      "centroid_lon": 105.7695
+    },
+    "VN_HAI_DUONG": {
+      "location_id": "HAI_DUONG",
+      "display_name": "Hai Duong",
+      "source": "geoBoundaries",
+      "centroid_lat": 20.9752,
+      "centroid_lon": 106.4622
+    },
+    "VN_HAIPHONG": {
+      "location_id": "HAIPHONG",
+      "display_name": "Hai Phong",
+      "source": "geoBoundaries",
+      "centroid_lat": 20.7791,
+      "centroid_lon": 106.8896
+    },
+    "VN_HAU_GIANG": {
+      "location_id": "HAU_GIANG",
+      "display_name": "Hau Giang",
+      "source": "geoBoundaries",
+      "centroid_lat": 9.7831,
+      "centroid_lon": 105.6062
+    },
+    "VN_HCMC": {
+      "location_id": "HCMC",
+      "display_name": "Ho Chi Minh City",
+      "source": "geoBoundaries",
+      "centroid_lat": 10.7769,
+      "centroid_lon": 106.7009
+    },
+    "VN_HOA_BINH": {
+      "location_id": "HOA_BINH",
+      "display_name": "Hoa Binh",
+      "source": "geoBoundaries",
+      "centroid_lat": 20.7036,
+      "centroid_lon": 105.3596
+    },
+    "VN_HOANG_SA": {
+      "location_id": "HOANG_SA",
+      "display_name": "Hoang Sa Island",
+      "source": "Free-GIS-Data",
+      "centroid_lat": 16.5333,
+      "centroid_lon": 111.6
+    },
+    "VN_HUNG_YEN": {
+      "location_id": "HUNG_YEN",
+      "display_name": "Hung Yen",
+      "source": "geoBoundaries",
+      "centroid_lat": 20.8129,
+      "centroid_lon": 106.1167
+    },
+    "VN_KHANH_HOA": {
+      "location_id": "KHANH_HOA",
+      "display_name": "Khanh Hoa",
+      "source": "geoBoundaries",
+      "centroid_lat": 12.3151,
+      "centroid_lon": 109.1215
+    },
+    "VN_KIEN_GIANG": {
+      "location_id": "KIEN_GIANG",
+      "display_name": "Kien Giang",
+      "source": "geoBoundaries",
+      "centroid_lat": 10.0163,
+      "centroid_lon": 104.7244
+    },
+    "VN_KON_TUM": {
+      "location_id": "KON_TUM",
+      "display_name": "Kon Tum",
+      "source": "geoBoundaries",
+      "centroid_lat": 14.665,
+      "centroid_lon": 107.8592
+    },
+    "VN_LAI_CHAU": {
+      "location_id": "LAI_CHAU",
+      "display_name": "Lai Chau",
+      "source": "geoBoundaries",
+      "centroid_lat": 22.2806,
+      "centroid_lon": 103.2084
+    },
+    "VN_LAM_DONG": {
+      "location_id": "LAM_DONG",
+      "display_name": "Lam Dong",
+      "source": "geoBoundaries",
+      "centroid_lat": 11.7211,
+      "centroid_lon": 108.014
+    },
+    "VN_LANG_SON": {
+      "location_id": "LANG_SON",
+      "display_name": "Lang Son",
+      "source": "geoBoundaries",
+      "centroid_lat": 21.8653,
+      "centroid_lon": 106.6288
+    },
+    "VN_LAO_CAI": {
+      "location_id": "LAO_CAI",
+      "display_name": "Lao Cai",
+      "source": "geoBoundaries",
+      "centroid_lat": 22.3855,
+      "centroid_lon": 104.1246
+    },
+    "VN_LONG_AN": {
+      "location_id": "LONG_AN",
+      "display_name": "Long An",
+      "source": "geoBoundaries",
+      "centroid_lat": 10.7336,
+      "centroid_lon": 106.183
+    },
+    "VN_NAM_DINH": {
+      "location_id": "NAM_DINH",
+      "display_name": "Nam Dinh",
+      "source": "geoBoundaries",
+      "centroid_lat": 20.2896,
+      "centroid_lon": 106.2459
+    },
+    "VN_NGHE_AN": {
+      "location_id": "NGHE_AN",
+      "display_name": "Nghe An",
+      "source": "geoBoundaries",
+      "centroid_lat": 19.2611,
+      "centroid_lon": 104.954
+    },
+    "VN_NINH_BINH": {
+      "location_id": "NINH_BINH",
+      "display_name": "Ninh Binh",
+      "source": "geoBoundaries",
+      "centroid_lat": 20.2133,
+      "centroid_lon": 105.9017
+    },
+    "VN_NINH_THUAN": {
+      "location_id": "NINH_THUAN",
+      "display_name": "Ninh Thuan",
+      "source": "geoBoundaries",
+      "centroid_lat": 11.7116,
+      "centroid_lon": 108.8427
+    },
+    "VN_PHU_THO": {
+      "location_id": "PHU_THO",
+      "display_name": "Phu Tho",
+      "source": "geoBoundaries",
+      "centroid_lat": 21.3141,
+      "centroid_lon": 105.1831
+    },
+    "VN_PHU_YEN": {
+      "location_id": "PHU_YEN",
+      "display_name": "Phu Yen",
+      "source": "geoBoundaries",
+      "centroid_lat": 13.222,
+      "centroid_lon": 109.1054
+    },
+    "VN_QUANG_BINH": {
+      "location_id": "QUANG_BINH",
+      "display_name": "Quang Binh",
+      "source": "geoBoundaries",
+      "centroid_lat": 17.5553,
+      "centroid_lon": 106.2859
+    },
+    "VN_QUANG_NAM": {
+      "location_id": "QUANG_NAM",
+      "display_name": "Quang Nam",
+      "source": "geoBoundaries",
+      "centroid_lat": 15.6174,
+      "centroid_lon": 107.8875
+    },
+    "VN_QUANG_NGAI": {
+      "location_id": "QUANG_NGAI",
+      "display_name": "Quang Ngai",
+      "source": "geoBoundaries",
+      "centroid_lat": 15.0794,
+      "centroid_lon": 108.7763
+    },
+    "VN_QUANG_NINH": {
+      "location_id": "QUANG_NINH",
+      "display_name": "Quang Ninh",
+      "source": "geoBoundaries",
+      "centroid_lat": 21.2317,
+      "centroid_lon": 107.5155
+    },
+    "VN_QUANG_TRI": {
+      "location_id": "QUANG_TRI",
+      "display_name": "Quang Tri",
+      "source": "geoBoundaries",
+      "centroid_lat": 16.7056,
+      "centroid_lon": 106.9357
+    },
+    "VN_SOC_TRANG": {
+      "location_id": "SOC_TRANG",
+      "display_name": "Soc Trang",
+      "source": "geoBoundaries",
+      "centroid_lat": 9.4634,
+      "centroid_lon": 105.9194
+    },
+    "VN_SON_LA": {
+      "location_id": "SON_LA",
+      "display_name": "Son La",
+      "source": "geoBoundaries",
+      "centroid_lat": 21.161,
+      "centroid_lon": 104.0055
+    },
+    "VN_TAY_NINH": {
+      "location_id": "TAY_NINH",
+      "display_name": "Tay Ninh",
+      "source": "geoBoundaries",
+      "centroid_lat": 11.4306,
+      "centroid_lon": 106.1668
+    },
+    "VN_THAI_BINH": {
+      "location_id": "THAI_BINH",
+      "display_name": "Thai Binh",
+      "source": "geoBoundaries",
+      "centroid_lat": 20.5085,
+      "centroid_lon": 106.4006
+    },
+    "VN_THAI_NGUYEN": {
+      "location_id": "THAI_NGUYEN",
+      "display_name": "Thai Nguyen",
+      "source": "geoBoundaries",
+      "centroid_lat": 21.7246,
+      "centroid_lon": 105.8931
+    },
+    "VN_THANH_HOA": {
+      "location_id": "THANH_HOA",
+      "display_name": "Thanh Hoa",
+      "source": "geoBoundaries",
+      "centroid_lat": 20.046,
+      "centroid_lon": 105.2262
+    },
+    "VN_THUA_THIEN_HUE": {
+      "location_id": "THUA_THIEN_HUE",
+      "display_name": "Thua Thien Hue",
+      "source": "geoBoundaries",
+      "centroid_lat": 16.354,
+      "centroid_lon": 107.5955
+    },
+    "VN_TIEN_GIANG": {
+      "location_id": "TIEN_GIANG",
+      "display_name": "Tien Giang",
+      "source": "geoBoundaries",
+      "centroid_lat": 10.383,
+      "centroid_lon": 106.3162
+    },
+    "VN_TRA_VINH": {
+      "location_id": "TRA_VINH",
+      "display_name": "Tra Vinh",
+      "source": "geoBoundaries",
+      "centroid_lat": 9.882,
+      "centroid_lon": 106.2865
+    },
+    "VN_TRUONG_SA": {
+      "location_id": "TRUONG_SA",
+      "display_name": "Truong Sa Island",
+      "source": "Free-GIS-Data",
+      "centroid_lat": 8.6439,
+      "centroid_lon": 111.9197
+    },
+    "VN_TUYEN_QUANG": {
+      "location_id": "TUYEN_QUANG",
+      "display_name": "Tuyen Quang",
+      "source": "geoBoundaries",
+      "centroid_lat": 22.1578,
+      "centroid_lon": 105.276
+    },
+    "VN_VINH_LONG": {
+      "location_id": "VINH_LONG",
+      "display_name": "Vinh Long",
+      "source": "geoBoundaries",
+      "centroid_lat": 10.1395,
+      "centroid_lon": 105.9897
+    },
+    "VN_VINH_PHUC": {
+      "location_id": "VINH_PHUC",
+      "display_name": "Vinh Phuc",
+      "source": "geoBoundaries",
+      "centroid_lat": 21.3669,
+      "centroid_lon": 105.6309
+    },
+    "VN_YEN_BAI": {
+      "location_id": "YEN_BAI",
+      "display_name": "Yen Bai",
+      "source": "geoBoundaries",
+      "centroid_lat": 21.8138,
+      "centroid_lon": 104.5558
+    }
+  }
+}
