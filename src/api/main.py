@@ -19,14 +19,14 @@ from copy import deepcopy
 from datetime import date, datetime, timedelta, timezone
 import json
 import logging
-import os
 from pathlib import Path
 import re
 import sqlite3
 import sys
+import traceback
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -53,7 +53,7 @@ from src.api.schemas import (
     ScoresResponse,
 )
 from src.config.clock import HCMC_TIMEZONE_NAME, today_hcmc
-from src.config.settings import load_settings
+from src.config.settings import RuntimeSettings, load_settings, validate_runtime_env
 from src.data.provider import (
     DEFAULT_DEMO_VINTAGE_DB_PATH,
     IncompleteMeteorologyAtAnchorError,
@@ -278,13 +278,13 @@ def resolve_canonical_hcmc_location(
     return CANONICAL_LOCATION_ID
 
 
-def load_serving_models():
+def load_serving_models(settings: Optional[RuntimeSettings] = None):
     global predictor, history_provider, _cached_doy_climatology
-    from src.config.settings import load_settings, verify_model_contract_on_startup
+    from src.config.settings import verify_model_contract_on_startup
 
-    runtime_settings = load_settings()
+    runtime_settings = settings or load_settings()
     artifact_path = PROJECT_ROOT / "artifacts" / "models"
-    model_source = os.environ.get("SERVING_MODEL_SOURCE", "local")
+    model_source = runtime_settings.runtime_env.serving_model_source
     predictor = StandaloneRainfallPredictor(artifact_dir=artifact_path, mode=model_source)
     verify_model_contract_on_startup(
         feature_builders=[predictor.fb_f3, predictor.fb_f2],
@@ -297,30 +297,48 @@ def load_serving_models():
         fallback_db, _ = resolve_sqlite_db_path_and_role()
         db_path = fallback_db
     _cached_doy_climatology = _load_doy_climatology_table(db_path)
-    print(
-        f"Serving models ({predictor.mode}) and history provider ({history_provider.backend}) "
-        "loaded successfully into API memory."
+    _logger.info(
+        "Serving models (%s) and history provider (%s) loaded successfully into API memory.",
+        predictor.mode,
+        history_provider.backend,
     )
 
 
 _logger = logging.getLogger(__name__)
+router = APIRouter()
+_FRONTEND_DIST_DIR = PROJECT_ROOT / "frontend" / "dist"
+
+
+def _configure_logging(level_name: str) -> None:
+    lvl = getattr(logging, str(level_name or "INFO").upper(), logging.INFO)
+    logging.getLogger().setLevel(lvl)
+    _logger.setLevel(lvl)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    load_serving_models()
+    global _cached_doy_climatology
+    del app
+    runtime_settings = load_settings()
+    _configure_logging(runtime_settings.runtime_env.log_level)
+    validate_runtime_env(runtime_settings)
+    load_serving_models(runtime_settings)
     sb = resolve_store_backend()
     mgr = None
     if sb == "turso_replica":
         try:
-            settings = load_settings()
             mgr = get_replica_manager()
             try:
                 mgr.sync_now()
             except Exception as exc:
                 _logger.warning("Turso replica startup sync deferred: %s", redact_secrets(str(exc)))
+            if mgr.replica_path.exists():
+                synced_doy = _load_doy_climatology_table(mgr.replica_path)
+                if synced_doy is not None:
+                    _cached_doy_climatology = synced_doy
             mgr.start_background_sync(
-                interval_sec=float(settings.operational.turso_sync_interval_sec),
-                jitter_sec=float(settings.operational.turso_sync_jitter_sec),
+                interval_sec=float(runtime_settings.operational.turso_sync_interval_sec),
+                jitter_sec=float(runtime_settings.operational.turso_sync_jitter_sec),
             )
         except Exception as exc:
             _logger.warning("Turso replica manager initialization failed: %s", redact_secrets(str(exc)))
@@ -331,45 +349,13 @@ async def lifespan(app: FastAPI):
             mgr.stop_background_sync()
 
 
-app = FastAPI(
-    title="HCMC Daily Rainfall Forecasting Serving Engine",
-    description=(
-        "Operational API for 7-day multi-horizon daily rainfall forecasting locked to HCMC "
-        "with locked OpenAPI schemas, Two-DB SQLite DDL V3.3 governance, and shadow model monitoring."
-    ),
-    version="1.2.0",
-    lifespan=lifespan,
-)
-
-_default_cors_origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:4173",
-    "http://127.0.0.1:4173",
-] + [
-    o for o in _RUNTIME_SETTINGS.operational.cors_allowed_origins
-    if o not in ("http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:4173", "http://127.0.0.1:4173")
-]
-_extra_cors = [
-    o.strip() for o in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()
-]
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_default_cors_origins + _extra_cors,
-    allow_credentials=False,
-    allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type", "Accept"],
-)
-
-
-@app.exception_handler(StarletteHTTPException)
 async def unified_http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
     del request
     if isinstance(exc.detail, dict) and "code" in exc.detail:
         payload = {
             "error": {
                 "code": exc.detail["code"],
-                "message": str(exc.detail.get("message", "")),
+                "message": redact_secrets(str(exc.detail.get("message", ""))),
                 "details": exc.detail.get("details") or {},
             }
         }
@@ -383,14 +369,13 @@ async def unified_http_exception_handler(request: Request, exc: StarletteHTTPExc
     payload = {
         "error": {
             "code": fallback_code,
-            "message": str(exc.detail),
+            "message": redact_secrets(str(exc.detail)),
             "details": {"status_code": exc.status_code},
         }
     }
     return JSONResponse(status_code=exc.status_code, content=jsonable_encoder(payload))
 
 
-@app.exception_handler(RequestValidationError)
 async def unified_validation_exception_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
@@ -405,7 +390,61 @@ async def unified_validation_exception_handler(
     return JSONResponse(status_code=422, content=payload)
 
 
-@app.get(
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    del request
+    _logger.error(
+        "Unhandled serving exception: %s\n%s",
+        redact_secrets(str(exc)),
+        redact_secrets(traceback.format_exc()),
+    )
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": {
+                "code": "SERVER_DB_DATA_ERROR",
+                "message": "Internal server error.",
+                "details": {},
+            }
+        },
+    )
+
+
+def create_app(settings: Optional[RuntimeSettings] = None) -> FastAPI:
+    """Construct the hardened FastAPI application from centralized RuntimeSettings."""
+    active_settings = settings or load_settings()
+    _configure_logging(active_settings.runtime_env.log_level)
+    validate_runtime_env(active_settings)
+
+    docs_enabled = bool(active_settings.runtime_env.enable_api_docs)
+    application = FastAPI(
+        title="HCMC Daily Rainfall Forecasting Serving Engine",
+        description=(
+            "Operational API for 7-day multi-horizon daily rainfall forecasting locked to HCMC "
+            "with locked OpenAPI schemas, Two-DB SQLite DDL V3.3 governance, and shadow model monitoring."
+        ),
+        version="1.2.0",
+        lifespan=lifespan,
+        docs_url="/docs" if docs_enabled else None,
+        redoc_url="/redoc" if docs_enabled else None,
+        openapi_url="/openapi.json" if docs_enabled else None,
+    )
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(active_settings.operational.cors_allowed_origins),
+        allow_credentials=False,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Content-Type", "Accept"],
+    )
+    application.add_exception_handler(StarletteHTTPException, unified_http_exception_handler)  # type: ignore[arg-type]
+    application.add_exception_handler(RequestValidationError, unified_validation_exception_handler)  # type: ignore[arg-type]
+    application.add_exception_handler(Exception, unhandled_exception_handler)
+    application.include_router(router)
+    if active_settings.runtime_env.serve_static_spa and (_FRONTEND_DIST_DIR / "index.html").exists():
+        application.mount("/", StaticFiles(directory=str(_FRONTEND_DIST_DIR), html=True), name="frontend-spa")
+    return application
+
+
+@router.get(
     "/locations",
     response_model=LocationsResponse,
     responses={503: {"model": ErrorResponse, "description": "Service unavailable"}},
@@ -465,6 +504,7 @@ def _load_map_location_catalog() -> Dict[str, str]:
 
     catalog: Dict[str, str] = {CANONICAL_LOCATION_ID: CANONICAL_PROVINCE_NAME}
     for candidate in (
+        PROJECT_ROOT / "config" / "polygon_to_location.json",
         PROJECT_ROOT / "frontend" / "public" / "map" / "polygon_to_location.json",
         PROJECT_ROOT / "frontend" / "dist" / "map" / "polygon_to_location.json",
     ):
@@ -523,7 +563,7 @@ def _parse_iso_date_param(raw_val: str, field_name: str) -> date:
         ) from exc
 
 
-@app.get(
+@router.get(
     "/observations",
     response_model=ObservationsQueryResponse,
     responses={
@@ -728,7 +768,7 @@ def get_observations(
     }
 
 
-@app.get(
+@router.get(
     "/health",
     response_model=HealthResponse,
     responses={503: {"model": ErrorResponse, "description": "Service unavailable"}},
@@ -837,6 +877,7 @@ def get_health():
         except Exception:
             pass
 
+    runtime_env = load_settings().runtime_env if (predictor is None or history_provider is None) else None
     rt_status = get_turso_runtime_status()
     degraded_reason = rt_status.get("degraded_reason") or mgr_degraded_reason
     turso_quota_warning = bool(rt_status.get("quota_warning", False))
@@ -847,8 +888,8 @@ def get_health():
         "service": "HCMC Rainfall Forecasting Engine",
         "version": "1.2.0",
         "predictor_loaded": predictor is not None,
-        "model_source": predictor.mode if predictor is not None else os.environ.get("SERVING_MODEL_SOURCE", "local"),
-        "weather_backend": history_provider.backend if history_provider is not None else os.environ.get("WEATHER_DB_BACKEND", "local"),
+        "model_source": predictor.mode if predictor is not None else runtime_env.serving_model_source,  # type: ignore[union-attr]
+        "weather_backend": history_provider.backend if history_provider is not None else runtime_env.weather_db_backend,  # type: ignore[union-attr]
         "db_role": db_role,
         "default_complete_anchor_date": default_anchor,
         "data_snapshot_date": data_snapshot_date,
@@ -942,7 +983,7 @@ def _build_models_payload() -> Dict[str, Any]:
     return payload
 
 
-@app.get(
+@router.get(
     "/models",
     response_model=ModelsResponse,
     responses={503: {"model": ErrorResponse, "description": "Predictor not initialized"}},
@@ -953,7 +994,7 @@ def get_model_metadata():
     return _build_models_payload()
 
 
-@app.get(
+@router.get(
     "/models/info",
     response_model=ModelsResponse,
     include_in_schema=False,
@@ -992,7 +1033,7 @@ def _compute_baseline_predictions_for_anchor(
     return persistence_7d, clim_7d
 
 
-@app.post(
+@router.post(
     "/predict",
     response_model=PredictResponse,
     tags=["Forecasting"],
@@ -1253,7 +1294,7 @@ def _empty_scores_payload(eval_split_regime: str, is_prospective: Optional[int])
     }
 
 
-@app.get(
+@router.get(
     "/scores",
     response_model=ScoresResponse,
     tags=["Developer & Evaluation"],
@@ -1424,7 +1465,7 @@ def get_scores(
     }
 
 
-@app.get(
+@router.get(
     "/benchmark/leaderboard",
     response_model=LeaderboardResponse,
     responses={
@@ -1450,6 +1491,4 @@ def get_leaderboard(limit: int = Query(10, ge=1, le=72)):
     }
 
 
-_FRONTEND_DIST_DIR = PROJECT_ROOT / "frontend" / "dist"
-if (_FRONTEND_DIST_DIR / "index.html").exists():
-    app.mount("/", StaticFiles(directory=str(_FRONTEND_DIST_DIR), html=True), name="frontend-spa")
+app = create_app()

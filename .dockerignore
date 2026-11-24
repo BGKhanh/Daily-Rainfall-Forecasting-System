@@ -4,6 +4,11 @@
 .dockerignore
 .env
 .env.*
+*.pem
+*.key
+*.sqlite*
+*.db-wal
+*.db-shm
 .pytest_cache
 .ruff_cache
 .vscode
@@ -26,7 +31,8 @@ tests
 scripts
 scratch
 tasks
-scratch
-frontend/node_modules
-frontend/dist
-frontend/.vite
+research
+frontend
+deploy
+docs
+docker_reports

@@ -1,26 +1,4 @@
-# Stage 1: Build Vite + React SPA static bundle
-FROM node:24-alpine AS frontend-builder
-
-WORKDIR /frontend
-
-ARG VITE_API_BASE_URL=""
-ARG VITE_COLD_START_THRESHOLD_MS="3000"
-ARG VITE_REPO_URL="https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System"
-ARG VITE_CI_URL="https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System/actions"
-ARG VITE_MLFLOW_URL="https://dagshub.com/BGKhanh/Daily-Rainfall-Forecasting-System.mlflow"
-
-ENV VITE_API_BASE_URL=$VITE_API_BASE_URL \
-    VITE_COLD_START_THRESHOLD_MS=$VITE_COLD_START_THRESHOLD_MS \
-    VITE_REPO_URL=$VITE_REPO_URL \
-    VITE_CI_URL=$VITE_CI_URL \
-    VITE_MLFLOW_URL=$VITE_MLFLOW_URL
-
-COPY frontend/package*.json ./
-RUN npm ci
-COPY frontend/ ./
-RUN npm run build
-
-# Stage 2: Minimal Python 3.12 CPU runtime (no Node.js in final image)
+# Pure Python 3.12 CPU serving image (decoupled from Cloudflare Workers frontend SPA)
 FROM python:3.12-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -38,18 +16,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements-serving.txt .
 RUN pip install --no-cache-dir -r requirements-serving.txt
 
-# Create non-root runtime user
+# Create non-root runtime user and writable volume directory for Turso SQLite replica
 RUN groupadd --gid 10001 appuser && \
-    useradd --uid 10001 --gid 10001 --create-home --shell /usr/sbin/nologin appuser
+    useradd --uid 10001 --gid 10001 --create-home --shell /usr/sbin/nologin appuser && \
+    mkdir -p /var/lib/rainfall && \
+    chown appuser:appuser /var/lib/rainfall
 
-# Copy minimal runtime source code, configuration, model artifacts, benchmark leaderboard, and built SPA static files
+# Copy minimal runtime source code, configuration, model artifacts, and benchmark leaderboard
 COPY --chown=appuser:appuser src/ /app/src/
 COPY --chown=appuser:appuser config/ /app/config/
 COPY --chown=appuser:appuser artifacts/models/ /app/artifacts/models/
 RUN test "$(wc -c < /app/artifacts/models/demo_rainfall_vintage.db)" -gt 102400 || \
     (echo "ERROR: demo_rainfall_vintage.db appears to be an unhydrated Git LFS pointer; pull LFS or run ensure_demo_db.py before docker build." >&2 && exit 1)
 COPY --chown=appuser:appuser reports/test_benchmark/ /app/reports/test_benchmark/
-COPY --from=frontend-builder --chown=appuser:appuser /frontend/dist /app/frontend/dist
 
 USER appuser
 
@@ -58,4 +37,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:8000/health || exit 1
 
-CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
