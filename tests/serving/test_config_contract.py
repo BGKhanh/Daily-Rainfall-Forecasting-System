@@ -244,3 +244,13 @@ def test_layer5_freeze_toml_matches_metadata_key_for_key():
             assert freeze_cfg[key] == pytest.approx(val)
         else:
             assert freeze_cfg[key] == val
+
+
+def test_config_polygon_to_location_matches_frontend_map():
+    """Verify decoupled backend config/polygon_to_location.json matches frontend map copy bit-for-bit."""
+    cfg_map = PROJECT_ROOT / "config" / "polygon_to_location.json"
+    fe_map = PROJECT_ROOT / "frontend" / "public" / "map" / "polygon_to_location.json"
+    assert cfg_map.exists(), f"Missing decoupled backend catalog: {cfg_map}"
+    assert json.loads(cfg_map.read_text(encoding="utf-8")) == json.loads(
+        fe_map.read_text(encoding="utf-8")
+    )
