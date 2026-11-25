@@ -87,3 +87,22 @@
 - **Independent Subagent Reviews**: Executed Standards, Spec Conformance, and Security/Differential reviews across the full Round 15 diff before commit & push.
 - **GitHub Actions CI Status on Final Code/Docker `main` Push (`a17f47801171dd8e27294b7b691fcfc224f974a8`)**:
   - `Backend Serving CI`: Run ID [`45370495578`](https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System/actions/runs/45370495578) — **`completed / success`** across all 3 jobs (`Tier 1 CI — Ruff Lint, Serving Unit/Golden Parity & SQLite DDL V3 Trigger Tests`, `DagsHub MLflow Registry Checksum Audit (Optional)`, and `Tier 2 CI — Docker Container Build, Linux Parity & RSS Smoke Check`).
+
+---
+
+## Round 15.1 — Fix `scheduled_ingest.yml` (`finalize_db_for_read_only` trên Turso Remote)
+
+- **Root-Cause Fixes ([`src/data/vintage_store.py`](../../src/data/vintage_store.py))**:
+  - **Fix A (`finalize_db_for_read_only`)**: Early `return` (no-op) when `not isinstance(conn, sqlite3.Connection)` so `PRAGMA wal_checkpoint(TRUNCATE)` / `PRAGMA journal_mode = DELETE` are never sent to `TursoRemoteConnection` or other non-SQLite connections; local SQLite behavior (Contract D) remains intact.
+  - **Fix B (Post-commit isolation & `ingestion_runs` immutability)**: Moved post-commit finalization outside `try/except` via `_safe_finalize_after_commit(conn)` (logs warning with `_safe_redact_error_text(exc)` on `sqlite3.Error` without entering the `FAILED` branch). Extracted `_record_failed_ingestion_run(...)` for both `ingest_nasa_power_window` and `seed_historical_csv_vintage_v0` to check `SELECT 1 FROM ingestion_runs WHERE run_id = ? LIMIT 1`, redact `error_message` via `redact_secrets`, and preserve the original exception if the `FAILED` insert itself errors.
+  - **Fix C & D ([`.github/workflows/scheduled_ingest.yml`](../../.github/workflows/scheduled_ingest.yml), [`.env.ingest.example`](../../.env.ingest.example))**: Verified `automated_pipeline.py` subcommands (`probe-headers --dry-run`, `ingest-window --days 2`, `issue-forecasts --latest-only --dry-run`, `refresh-cache`) on a temporary local DB, and documented that scheduled ingest requires a Turso Read-Write `TURSO_DB_TOKEN` (never EC2's Read-Only token).
+- **TDD & Regression Verification**:
+  - Added [`tests/storage/test_ingest_remote_finalize.py`](../../tests/storage/test_ingest_remote_finalize.py) (5 tests: non-SQLite no-op on `MagicMock` & `TursoRemoteConnection`, post-commit finalize error isolation without duplicate `FAILED` row, pre-commit error `FAILED` row with `redact_secrets`, original error preservation if `FAILED` insert fails, and remote Hrana simulation blocking `PRAGMA wal_checkpoint`/`journal_mode`).
+  - `ruff check` across all CI targets: **`All checks passed!`**
+  - `pytest tests/serving/ tests/storage/ tests/test_pc_solar_imputation_contract.py -q`: **`148 passed, 24 warnings in 198.02s`**.
+- **Atomic Commits & Live Workflow / Turso Verification**:
+  - Atomic commits pushed to `main`: `2a30893` (Fix A+B), `68e4614` (TDD tests), `e056eb9` (workflow/env RW token docs).
+  - `Backend Serving CI` on `e056eb9`: Run ID [`45563601640`](https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System/actions/runs/45563601640) — **`completed / success`**.
+  - `workflow_dispatch` (`daily_14d`, `dry_run=false`): Run ID [`45564032915`](https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System/actions/runs/45564032915) — **`completed / success`** (`ingest-window 14d` -> `issue-forecasts --latest-only` -> `refresh-cache`).
+  - `workflow_dispatch` (`weekly_150d`, `dry_run=false`): Run ID [`45564362555`](https://github.com/BGKhanh/Daily-Rainfall-Forecasting-System/actions/runs/45564362555) — **`completed / success`** (`probe-headers` -> `ingest-window 150d` -> `issue-forecasts --latest-only` -> `refresh-cache`).
+  - **Turso Read-Only Verification (credentials redacted)**: `ingestion_runs` recorded 1 `SUCCESS` row per step (`nasa_manual_scan_7b8bc235a37b4d` for `14d`; `auto_probe_01fdc556d474`, `nasa_manual_scan_8f09db4f83f148`, `nasa_manual_scan_5821ca62b6504d` for `150d`), zero duplicate `FAILED` rows; `forecasts_ledger` issued exactly **`35` unique rows (`5 models x 7 horizons`)** for newest anchor `2026-11-22` (`issued_at_utc = 2026-11-25T06:54:47.175983Z`, `temporal_status_at_issue = 'today'`), with zero duplication on the subsequent `weekly_150d` run.
