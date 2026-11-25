@@ -616,8 +616,11 @@ def connect_sqlite(
     return conn
 
 
-def finalize_db_for_read_only(conn: sqlite3.Connection) -> None:
+def finalize_db_for_read_only(conn: Any) -> None:
     """Checkpoint WAL frames cleanly and switch to DELETE mode so single-file ?mode=ro reads see 100% of commits."""
+    # WAL/journal mode is managed remotely on non-SQLite connections (e.g., TursoRemoteConnection).
+    if not isinstance(conn, sqlite3.Connection):
+        return
     try:
         db_list = conn.execute("PRAGMA database_list;").fetchall()
         main_file = next((row[2] for row in db_list if row[1] == "main"), "")
@@ -629,6 +632,92 @@ def finalize_db_for_read_only(conn: sqlite3.Connection) -> None:
         return
     conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
     conn.execute("PRAGMA journal_mode = DELETE;")
+
+
+def _safe_redact_error_text(exc: Exception) -> str:
+    """Redact credentials, Turso URLs, and host paths from an exception message."""
+    try:
+        from src.data.turso_backend import redact_secrets
+
+        return redact_secrets(str(exc))
+    except Exception:
+        return type(exc).__name__
+
+
+def _safe_finalize_after_commit(conn: Any) -> None:
+    """Best-effort local SQLite finalization after COMMIT without masking a committed transaction."""
+    try:
+        finalize_db_for_read_only(conn)
+    except sqlite3.Error as exc:
+        logger.warning("Post-commit finalize_db_for_read_only failed (ignored): %s", _safe_redact_error_text(exc))
+
+
+def _record_failed_ingestion_run(
+    conn: Any,
+    *,
+    run_id: str,
+    run_type: str,
+    started_at_utc: str,
+    location_id: str,
+    scan_window_start: str,
+    scan_window_end: str,
+    rows_scanned: int,
+    git_sha: str,
+    config_sha256: str,
+    operational_config_sha256: str,
+    exc: Exception,
+) -> None:
+    """Roll back an uncommitted transaction and record one FAILED ingestion_runs row if absent."""
+    try:
+        conn.execute("ROLLBACK;")
+    except sqlite3.Error:
+        pass
+    try:
+        existing = conn.execute(
+            "SELECT 1 FROM ingestion_runs WHERE run_id = ? LIMIT 1",
+            (run_id,),
+        ).fetchone()
+        if existing is not None:
+            return
+        conn.execute("BEGIN IMMEDIATE;")
+        conn.execute(
+            """
+            INSERT INTO ingestion_runs (
+                run_id, run_type, started_at_utc, finished_at_utc, status,
+                location_id, scan_window_start, scan_window_end,
+                rows_scanned, rows_inserted_v0, rows_new_vintage,
+                rows_late_fill_only, rows_value_change, rows_unchanged,
+                rows_unpublished_skipped, git_sha, config_sha256, operational_config_sha256, error_message
+            ) VALUES (?, ?, ?, ?, 'FAILED', ?, ?, ?, ?, 0, 0, 0, 0, 0, 0, ?, ?, ?, ?)
+            """,
+            (
+                run_id,
+                run_type,
+                started_at_utc,
+                utc_now_iso(),
+                location_id,
+                scan_window_start,
+                scan_window_end,
+                int(rows_scanned),
+                git_sha,
+                config_sha256,
+                operational_config_sha256,
+                _safe_redact_error_text(exc),
+            ),
+        )
+        conn.execute("COMMIT;")
+    except Exception as audit_exc:
+        try:
+            conn.execute("ROLLBACK;")
+        except sqlite3.Error:
+            pass
+        logger.warning(
+            "Failed to record FAILED ingestion_runs row for run_id=%s (%s); preserving original exception.",
+            run_id,
+            type(audit_exc).__name__,
+        )
+        return
+    _safe_finalize_after_commit(conn)
 
 
 VALID_ISSUED_BY: Tuple[str, ...] = ("automated_pipeline", "manual_retrospective_backfill", "manual_operational")
@@ -1359,30 +1448,24 @@ def seed_historical_csv_vintage_v0(
             raise RuntimeError(f"Simulated mid-batch failure after {fail_after_rows} rows.")
         conn.executemany(insert_obs_sql, records)
         conn.execute("COMMIT;")
-        finalize_db_for_read_only(conn)
-        return run_id
     except Exception as exc:
-        try:
-            conn.execute("ROLLBACK;")
-        except sqlite3.Error:
-            pass
-        # Separate audit transaction recording clean FAILED state (0 v0 / new rows)
-        conn.execute("BEGIN IMMEDIATE;")
-        conn.execute(
-            """
-            INSERT INTO ingestion_runs (
-                run_id, run_type, started_at_utc, finished_at_utc, status,
-                location_id, scan_window_start, scan_window_end,
-                rows_scanned, rows_inserted_v0, rows_new_vintage,
-                rows_late_fill_only, rows_value_change, rows_unchanged,
-                rows_unpublished_skipped, git_sha, config_sha256, operational_config_sha256, error_message
-            ) VALUES (?, 'historical_seed', ?, ?, 'FAILED', ?, ?, ?, ?, 0, 0, 0, 0, 0, 0, ?, ?, ?, ?)
-            """,
-            (run_id, started_at, utc_now_iso(), location_id, win_start, win_end, total_rows, sha, cfg_sha, op_cfg_sha, str(exc)),
+        _record_failed_ingestion_run(
+            conn,
+            run_id=run_id,
+            run_type="historical_seed",
+            started_at_utc=started_at,
+            location_id=location_id,
+            scan_window_start=win_start,
+            scan_window_end=win_end,
+            rows_scanned=total_rows,
+            git_sha=sha,
+            config_sha256=cfg_sha,
+            operational_config_sha256=op_cfg_sha,
+            exc=exc,
         )
-        conn.execute("COMMIT;")
-        finalize_db_for_read_only(conn)
         raise
+    _safe_finalize_after_commit(conn)
+    return run_id
 
 
 def read_latest_observations(
@@ -2474,9 +2557,8 @@ def ingest_nasa_power_window(
         if obs_inserts:
             conn.executemany(insert_obs_sql, obs_inserts)
         conn.execute("COMMIT;")
-        finalize_db_for_read_only(conn)
 
-        return {
+        result_payload = {
             "run_id": run_id,
             "run_type": run_type,
             "status": "SUCCESS",
@@ -2496,26 +2578,23 @@ def ingest_nasa_power_window(
             "revision_stats_json": revision_stats,
         }
     except Exception as exc:
-        try:
-            conn.execute("ROLLBACK;")
-        except sqlite3.Error:
-            pass
-        conn.execute("BEGIN IMMEDIATE;")
-        conn.execute(
-            """
-            INSERT INTO ingestion_runs (
-                run_id, run_type, started_at_utc, finished_at_utc, status,
-                location_id, scan_window_start, scan_window_end,
-                rows_scanned, rows_inserted_v0, rows_new_vintage,
-                rows_late_fill_only, rows_value_change, rows_unchanged,
-                rows_unpublished_skipped, git_sha, config_sha256, operational_config_sha256, error_message
-            ) VALUES (?, ?, ?, ?, 'FAILED', ?, ?, ?, 0, 0, 0, 0, 0, 0, 0, ?, ?, ?, ?)
-            """,
-            (run_id, run_type, started_at, utc_now_iso(), location_id, win_start, win_end, sha, _safe_compute_config_sha256(), _safe_compute_operational_config_sha256(), str(exc)),
+        _record_failed_ingestion_run(
+            conn,
+            run_id=run_id,
+            run_type=run_type,
+            started_at_utc=started_at,
+            location_id=location_id,
+            scan_window_start=win_start,
+            scan_window_end=win_end,
+            rows_scanned=0,
+            git_sha=sha,
+            config_sha256=_safe_compute_config_sha256(),
+            operational_config_sha256=_safe_compute_operational_config_sha256(),
+            exc=exc,
         )
-        conn.execute("COMMIT;")
-        finalize_db_for_read_only(conn)
         raise
+    _safe_finalize_after_commit(conn)
+    return result_payload
 
 
 def query_observations_as_of(
