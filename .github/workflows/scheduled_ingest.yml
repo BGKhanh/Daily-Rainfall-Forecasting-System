@@ -45,6 +45,7 @@ jobs:
     env:
       STORE_BACKEND: turso_remote
       TURSO_DB_URL: ${{ secrets.TURSO_DB_URL }}
+      # Batch ingest & forecast ledger issuance MUST use a Turso Read-Write token (never EC2's Read-Only token).
       TURSO_DB_TOKEN: ${{ secrets.TURSO_DB_TOKEN }}
       REFRESH_WEBHOOK_URL: ${{ secrets.CACHE_REFRESH_WEBHOOK_URL }}
     steps:
